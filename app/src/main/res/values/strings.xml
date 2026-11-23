@@ -1,0 +1,58 @@
+<resources>
+    <string name="app_name">Bloom Atlas</string>
+    <string name="app_tagline">Inclusive Reproductive Anatomy &amp; Wellness</string>
+
+    <!-- Navigation Tabs -->
+    <string name="nav_anatomy">Anatomy</string>
+    <string name="nav_diversity">Diversity</string>
+    <string name="nav_learn">Learn</string>
+    <string name="nav_resources">Resources</string>
+
+    <!-- Content Descriptions -->
+    <string name="cd_hero_banner">Editorial botanical illustration for Bloom Atlas</string>
+    <string name="cd_wellness_art">Botanical moon phases and cycle flow illustration</string>
+    <string name="cd_community_art">Diverse hands holding flowers and books illustration</string>
+    <string name="cd_navigate_back">Navigate back</string>
+    <string name="cd_bookmark_add">Save to bookmarks</string>
+    <string name="cd_bookmark_remove">Remove from bookmarks</string>
+    <string name="cd_open_external_link">Open external link in browser</string>
+    <string name="cd_toggle_labels">Toggle diagram labels</string>
+    <string name="cd_clear_search">Clear search</string>
+
+    <!-- Anatomy Screen -->
+    <string name="anatomy_title">Interactive Atlas</string>
+    <string name="anatomy_subtitle">Tap any numbered marker on the diagram to explore anatomy, sensation, and facts.</string>
+    <string name="anatomy_show_labels">Labels</string>
+    <string name="anatomy_tap_hint">Tap a marker to inspect</string>
+    <string name="anatomy_section_function">How It Works</string>
+    <string name="anatomy_section_pleasure">Sensation &amp; Arousal</string>
+    <string name="anatomy_section_myth">Myth vs. Fact</string>
+    <string name="anatomy_section_partner">For Partners &amp; Educators</string>
+    <string name="anatomy_read_deep_dive">Read Full Guide</string>
+
+    <!-- Diversity Screen -->
+    <string name="diversity_title">Vulva Diversity Feed</string>
+    <string name="diversity_subtitle">An endless illustrated atlas celebrating the infinite natural spectrum of shapes, symmetry, contours, and tones.</string>
+    <string name="diversity_policy_notice_title">Illustrated Atlas &amp; Curated Photo Archives</string>
+    <string name="diversity_policy_notice_body">To remain accessible and PG-13 compliant across all platforms, this feed presents tasteful, anatomically informed schematic studies. To view real educational photography of diverse human vulvas, explore verified external archives below.</string>
+    <string name="diversity_open_spectrum_lab">Interactive Spectrum Lab</string>
+    <string name="diversity_loading_more">Discovering more natural variations…</string>
+
+    <!-- Learn Screen -->
+    <string name="learn_title">Knowledge Library</string>
+    <string name="learn_search_placeholder">Search anatomy, cycles, pleasure, care…</string>
+    <string name="learn_audience_label">Reading lens</string>
+    <string name="learn_tools_heading">Interactive Explorers</string>
+    <string name="learn_tool_cycle">Cycle Wheel</string>
+    <string name="learn_tool_quiz">Myth Buster</string>
+    <string name="learn_tool_glossary">A–Z Glossary</string>
+    <string name="learn_empty_search">No guides match your search yet. Try searching for clitoris, pH, discharge, consent, or menopause.</string>
+
+    <!-- Resources Screen -->
+    <string name="resources_title">Links &amp; Library</string>
+    <string name="resources_subtitle">Saved guides and curated links to trusted sexual health educators, clinical references, and visual diversity archives.</string>
+    <string name="resources_saved_heading">Saved Bookmarks</string>
+    <string name="resources_no_bookmarks">Tap the bookmark icon on any guide or diversity study to keep it handy here.</string>
+    <string name="resources_directory_heading">Trusted Web Resources</string>
+    <string name="resources_link_error">Unable to open link on this device.</string>
+</resources>

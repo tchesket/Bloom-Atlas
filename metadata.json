@@ -1,0 +1,6 @@
+{
+  "name": "Bloom Atlas",
+  "description": "An inclusive, interactive educational guide to female reproductive anatomy, vulva diversity, cycles, pleasure, and sexual health for individuals, partners, and educators.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
