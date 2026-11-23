@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,12 +33,14 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -76,6 +80,8 @@ private enum class CameraAnglePreset(
 ) {
     EXAM_FRONT("Exam View", 0f, 5f, 1.02f),
     FULL_LEGS("Wide View", 0f, 6f, 0.72f),
+    UPPER_BODY("Chest & Face", 0f, 8f, 0.34f),
+    FACE_CLOSE("Face", 0f, 4f, 0.72f),
     CLOSE_UP("Macro", 0f, 3f, 1.56f),
     LEFT_34("3/4 Left", -30f, 10f, 0.92f),
     RIGHT_34("3/4 Right", 30f, 10f, 0.92f),
@@ -87,18 +93,29 @@ private enum class CameraAnglePreset(
         }
         return when (this) {
             EXAM_FRONT -> VulvaCamera3D(yawDeg = 0f, pitchDeg = 5f, zoom = 1.02f, targetY = 0.02f, targetZ = 0.08f)
-            FULL_LEGS -> VulvaCamera3D(yawDeg = 0f, pitchDeg = 18f, zoom = 0.20f, targetY = -1.04f, targetZ = -0.06f)
+            FULL_LEGS -> VulvaCamera3D(yawDeg = 0f, pitchDeg = 13f, zoom = 0.140f, targetY = 1.05f, targetZ = -0.62f)
+            UPPER_BODY -> VulvaCamera3D(yawDeg = 0f, pitchDeg = 6f, zoom = 0.37f, targetY = 4.54f, targetZ = -0.82f)
+            FACE_CLOSE -> VulvaCamera3D(yawDeg = 0f, pitchDeg = 4f, zoom = 0.80f, targetY = 6.40f, targetZ = -0.82f)
             CLOSE_UP -> VulvaCamera3D(yawDeg = 0f, pitchDeg = 3f, zoom = 1.56f, targetY = 0.04f, targetZ = 0.08f)
-            LEFT_34 -> VulvaCamera3D(yawDeg = -46f, pitchDeg = 22f, zoom = 0.22f, targetY = -1.00f, targetZ = -0.06f)
-            RIGHT_34 -> VulvaCamera3D(yawDeg = 46f, pitchDeg = 22f, zoom = 0.22f, targetY = -1.00f, targetZ = -0.06f)
-            LOW_ANGLE -> VulvaCamera3D(yawDeg = 0f, pitchDeg = -28f, zoom = 0.35f, targetY = -0.34f, targetZ = 0.04f)
+            LEFT_34 -> VulvaCamera3D(yawDeg = -46f, pitchDeg = 17f, zoom = 0.160f, targetY = 1.05f, targetZ = -0.62f)
+            RIGHT_34 -> VulvaCamera3D(yawDeg = 46f, pitchDeg = 17f, zoom = 0.160f, targetY = 1.05f, targetZ = -0.62f)
+            LOW_ANGLE -> VulvaCamera3D(yawDeg = 0f, pitchDeg = -28f, zoom = 0.32f, targetY = -0.24f, targetZ = 0.04f)
         }
     }
 }
 
+private enum class TouchTargetZone {
+    VULVA,
+    LEFT_BREAST,
+    RIGHT_BREAST,
+    LEFT_LEG,
+    RIGHT_LEG
+}
+
 private data class Pointer3DTrack(
     var lastPos: Offset,
-    val startNorm: Offset
+    val startNorm: Offset,
+    val zone: TouchTargetZone = TouchTargetZone.VULVA
 )
 
 @Composable
@@ -141,23 +158,35 @@ fun InteractiveVulva3DCanvas(
     val primaryColor = MaterialTheme.colorScheme.primary
     val surfaceColor = MaterialTheme.colorScheme.surface
 
-    // 5 live elastic biomechanical channels
+    // 5 live elastic pelvic channels + 4 breast mobility + 2 interactive leg-spread channels
     val leftOuterSpread = remember { Animatable(0f) }
     val rightOuterSpread = remember { Animatable(0f) }
     val leftInnerOpen = remember { Animatable(0f) }
     val rightInnerOpen = remember { Animatable(0f) }
     val hoodRetraction = remember { Animatable(0f) }
+    val leftBreastX = remember { Animatable(0f) }
+    val leftBreastY = remember { Animatable(0f) }
+    val rightBreastX = remember { Animatable(0f) }
+    val rightBreastY = remember { Animatable(0f) }
+    val leftLegSpread = remember { Animatable(0f) }
+    val rightLegSpread = remember { Animatable(0f) }
 
-    // Smooth 3D camera orbit, zoom, target framing, lighting & Blossom full-body Beta state
+    // Live Blossom appearance customization: Hair color (default Chestnut Brown) & Breast size (default Medium)
+    var hairStyleIndex by remember { mutableIntStateOf(2) }
+    var breastSize by remember { mutableFloatStateOf(0.50f) }
+    val hairStyle = BlossomHairStyles[hairStyleIndex.coerceIn(0, BlossomHairStyles.lastIndex)]
+
+    // Smooth 3D camera orbit, zoom, target framing, lighting & Blossom full-body Beta state (default ON, Exam View)
     var isOrbitMode by remember { mutableStateOf(false) }
     var dramaticSideLight by remember { mutableStateOf(false) }
-    var showExperimentalLegs by remember { mutableStateOf(false) }
+    var showExperimentalLegs by remember { mutableStateOf(true) }
     var activePreset by remember { mutableStateOf<CameraAnglePreset?>(CameraAnglePreset.EXAM_FRONT) }
-    val camYaw = remember { Animatable(CameraAnglePreset.EXAM_FRONT.yawDeg) }
-    val camPitch = remember { Animatable(CameraAnglePreset.EXAM_FRONT.pitchDeg) }
-    val camZoom = remember { Animatable(CameraAnglePreset.EXAM_FRONT.zoom) }
-    val camTargetY = remember { Animatable(0.02f) }
-    val camTargetZ = remember { Animatable(0.08f) }
+    val initialCam = remember { CameraAnglePreset.EXAM_FRONT.resolveCamera(blossomBodyEnabled = true) }
+    val camYaw = remember { Animatable(initialCam.yawDeg) }
+    val camPitch = remember { Animatable(initialCam.pitchDeg) }
+    val camZoom = remember { Animatable(initialCam.zoom) }
+    val camTargetY = remember { Animatable(initialCam.targetY) }
+    val camTargetZ = remember { Animatable(initialCam.targetZ) }
 
     // Live 3D skin sensory glow under fingertip
     var touchGlowX by remember { mutableFloatStateOf(0.5f) }
@@ -178,11 +207,25 @@ fun InteractiveVulva3DCanvas(
             dampingRatio = 0.76f,
             stiffness = Spring.StiffnessLow
         )
+        val breastSpring = spring<Float>(
+            dampingRatio = 0.50f,
+            stiffness = Spring.StiffnessMediumLow
+        )
+        val legSpring = spring<Float>(
+            dampingRatio = 0.78f,
+            stiffness = Spring.StiffnessVeryLow
+        )
         coroutineScope.launch { leftOuterSpread.animateTo(0f, tissueSpring) }
         coroutineScope.launch { rightOuterSpread.animateTo(0f, tissueSpring) }
         coroutineScope.launch { leftInnerOpen.animateTo(0f, tissueSpring) }
         coroutineScope.launch { rightInnerOpen.animateTo(0f, tissueSpring) }
         coroutineScope.launch { hoodRetraction.animateTo(0f, tissueSpring) }
+        coroutineScope.launch { leftBreastX.animateTo(0f, breastSpring) }
+        coroutineScope.launch { leftBreastY.animateTo(0f, breastSpring) }
+        coroutineScope.launch { rightBreastX.animateTo(0f, breastSpring) }
+        coroutineScope.launch { rightBreastY.animateTo(0f, breastSpring) }
+        coroutineScope.launch { leftLegSpread.animateTo(0f, legSpring) }
+        coroutineScope.launch { rightLegSpread.animateTo(0f, legSpring) }
     }
 
     fun animateToPreset(preset: CameraAnglePreset, legsEnabled: Boolean = showExperimentalLegs) {
@@ -240,7 +283,14 @@ fun InteractiveVulva3DCanvas(
         rightOuter = rightOuterSpread.value,
         leftInner = leftInnerOpen.value,
         rightInner = rightInnerOpen.value,
-        hoodRetract = hoodRetraction.value
+        hoodRetract = hoodRetraction.value,
+        leftBreastX = leftBreastX.value,
+        leftBreastY = leftBreastY.value,
+        rightBreastX = rightBreastX.value,
+        rightBreastY = rightBreastY.value,
+        breastSize = breastSize,
+        leftLegSpread = leftLegSpread.value,
+        rightLegSpread = rightLegSpread.value
     )
     val currentCam = VulvaCamera3D(
         yawDeg = camYaw.value,
@@ -290,6 +340,7 @@ fun InteractiveVulva3DCanvas(
                         glView.deformationState = currentDeform
                         glView.cameraState = currentCam
                         glView.toneStyle = tone
+                        glView.hairStyle = hairStyle
                         glView.touchGlow = currentGlow
                         glView.dramaticSideLight = dramaticSideLight
                         glView.showExperimentalLegs = showExperimentalLegs
@@ -314,6 +365,7 @@ fun InteractiveVulva3DCanvas(
                                 var lastHitPartId: String? = null
                                 var lastDragFeedbackMs = 0L
                                 var lastPinchDist = -1f
+                                var lastPinchMidY = -1f
 
                                 while (true) {
                                     val event = awaitPointerEvent()
@@ -327,6 +379,7 @@ fun InteractiveVulva3DCanvas(
 
                                     if (pressed.isEmpty()) {
                                         lastPinchDist = -1f
+                                        lastPinchMidY = -1f
                                         if (!latestOrbitMode && !latestHoldOpen) {
                                             springBackTissue()
                                         }
@@ -335,23 +388,36 @@ fun InteractiveVulva3DCanvas(
 
                                     if (latestOrbitMode) {
                                         activePreset = null
-                                        val minZoom = if (latestShowFullBody) 0.16f else 0.42f
-                                        val maxYaw = if (latestShowFullBody) 78f else 54f
-                                        val minPitch = if (latestShowFullBody) -34f else -36f
-                                        val maxPitch = if (latestShowFullBody) 56f else 42f
+                                        val minZoom = if (latestShowFullBody) 0.10f else 0.42f
+                                        val maxYaw = if (latestShowFullBody) 82f else 54f
+                                        val minPitch = if (latestShowFullBody) -36f else -36f
+                                        val maxPitch = if (latestShowFullBody) 58f else 42f
                                         if (pressed.size >= 2) {
                                             pressed.forEach { it.consume() }
                                             val p0 = pressed[0].position
                                             val p1 = pressed[1].position
                                             val dist = hypot(p0.x - p1.x, p0.y - p1.y)
+                                            val midY = (p0.y + p1.y) * 0.5f
                                             if (lastPinchDist > 1f) {
                                                 val scaleRatio = dist / lastPinchDist
                                                 val nextZoom = (camZoom.value * scaleRatio).coerceIn(minZoom, 1.90f)
                                                 coroutineScope.launch { camZoom.snapTo(nextZoom) }
                                             }
+                                            if (latestShowFullBody && lastPinchMidY >= 0f) {
+                                                val panDy = (midY - lastPinchMidY) / h
+                                                val panSpan = (2.1f / camZoom.value.coerceIn(0.10f, 1.50f)).coerceIn(1.2f, 11.0f)
+                                                val nextTargetY = (camTargetY.value + panDy * panSpan).coerceIn(-3.2f, 8.2f)
+                                                val nextTargetZ = BlossomBodyBuilder.mattressSurfaceZ(nextTargetY) + 0.92f
+                                                coroutineScope.launch {
+                                                    camTargetY.snapTo(nextTargetY)
+                                                    camTargetZ.snapTo(nextTargetZ.coerceIn(-1.45f, 0.14f))
+                                                }
+                                            }
                                             lastPinchDist = dist
+                                            lastPinchMidY = midY
                                         } else {
                                             lastPinchDist = -1f
+                                            lastPinchMidY = -1f
                                             val ch = pressed[0]
                                             ch.consume()
                                             val prev = tracks[ch.id]
@@ -375,8 +441,51 @@ fun InteractiveVulva3DCanvas(
                                         var dLeftInner = 0f
                                         var dRightInner = 0f
                                         var dHood = 0f
+                                        var dLeftBreastX = 0f
+                                        var dLeftBreastY = 0f
+                                        var dRightBreastX = 0f
+                                        var dRightBreastY = 0f
+                                        var dLeftLeg = 0f
+                                        var dRightLeg = 0f
 
-                                        val zoomScale = camZoom.value.coerceIn(0.16f, 1.90f)
+                                        val zoomScale = camZoom.value.coerceIn(0.10f, 1.90f)
+                                        val liveCam = VulvaCamera3D(
+                                            yawDeg = camYaw.value,
+                                            pitchDeg = camPitch.value,
+                                            zoom = camZoom.value,
+                                            targetY = camTargetY.value,
+                                            targetZ = camTargetZ.value
+                                        )
+                                        val aspectLive = w / h
+                                        val chestZ = BlossomBodyBuilder.mattressSurfaceZ(BlossomUpperBodyBuilder.BREAST_CENTER_Y) + 1.56f
+                                        val leftBreastScreen = VulvaGlTextureView.projectPointToNormalizedScreen(
+                                            floatArrayOf(-BlossomUpperBodyBuilder.BREAST_CENTER_AX, BlossomUpperBodyBuilder.BREAST_CENTER_Y, chestZ),
+                                            liveCam,
+                                            aspectLive
+                                        )
+                                        val rightBreastScreen = VulvaGlTextureView.projectPointToNormalizedScreen(
+                                            floatArrayOf(BlossomUpperBodyBuilder.BREAST_CENTER_AX, BlossomUpperBodyBuilder.BREAST_CENTER_Y, chestZ),
+                                            liveCam,
+                                            aspectLive
+                                        )
+                                        val breastHitRadius = (0.34f * zoomScale).coerceIn(0.065f, 0.28f)
+
+                                        // Project Blossom's knees, mid-thighs & calves for natural direct side-to-side leg spreading
+                                        val lKneeW = BlossomSdfBodyBuilder.transformLegPoint(-1.80f, -1.86f, 1.74f, -1f, leftLegSpread.value)
+                                        val rKneeW = BlossomSdfBodyBuilder.transformLegPoint(1.80f, -1.86f, 1.74f, +1f, rightLegSpread.value)
+                                        val lThighW = BlossomSdfBodyBuilder.transformLegPoint(-1.46f, -0.82f, 0.78f, -1f, leftLegSpread.value, 0.78f)
+                                        val rThighW = BlossomSdfBodyBuilder.transformLegPoint(1.46f, -0.82f, 0.78f, +1f, rightLegSpread.value, 0.78f)
+                                        val lCalfW = BlossomSdfBodyBuilder.transformLegPoint(-1.74f, -3.05f, 0.40f, -1f, leftLegSpread.value)
+                                        val rCalfW = BlossomSdfBodyBuilder.transformLegPoint(1.74f, -3.05f, 0.40f, +1f, rightLegSpread.value)
+
+                                        val lKneeS = VulvaGlTextureView.projectPointToNormalizedScreen(lKneeW, liveCam, aspectLive)
+                                        val rKneeS = VulvaGlTextureView.projectPointToNormalizedScreen(rKneeW, liveCam, aspectLive)
+                                        val lThighS = VulvaGlTextureView.projectPointToNormalizedScreen(lThighW, liveCam, aspectLive)
+                                        val rThighS = VulvaGlTextureView.projectPointToNormalizedScreen(rThighW, liveCam, aspectLive)
+                                        val lCalfS = VulvaGlTextureView.projectPointToNormalizedScreen(lCalfW, liveCam, aspectLive)
+                                        val rCalfS = VulvaGlTextureView.projectPointToNormalizedScreen(rCalfW, liveCam, aspectLive)
+                                        val legHitRadius = (0.40f * zoomScale).coerceIn(0.11f, 0.28f)
+
                                         pressed.forEach { change ->
                                             change.consume()
                                             val pos = change.position
@@ -387,51 +496,40 @@ fun InteractiveVulva3DCanvas(
                                             val existing = tracks[change.id]
 
                                             if (existing == null) {
-                                                tracks[change.id] = Pointer3DTrack(pos, Offset(nx, ny))
-                                                val hit = hitTest3DVulva(
-                                                    nx = nx,
-                                                    ny = ny,
-                                                    deform = VulvaDeformationState(
-                                                        leftOuterSpread.value,
-                                                        rightOuterSpread.value,
-                                                        leftInnerOpen.value,
-                                                        rightInnerOpen.value,
-                                                        hoodRetraction.value
-                                                    ),
-                                                    parts = latestParts
+                                                val distLB = hypot(rawNx - leftBreastScreen.x, rawNy - leftBreastScreen.y)
+                                                val distRB = hypot(rawNx - rightBreastScreen.x, rawNy - rightBreastScreen.y)
+                                                val distLL = minOf(
+                                                    hypot(rawNx - lKneeS.x, rawNy - lKneeS.y),
+                                                    hypot(rawNx - lThighS.x, rawNy - lThighS.y),
+                                                    hypot(rawNx - lCalfS.x, rawNy - lCalfS.y)
                                                 )
-                                                if (hit != null) {
-                                                    lastHitPartId = hit.id
-                                                    trigger3DSensory(hit, nx, ny, isDrag = false)
-                                                }
-                                            } else {
-                                                val dxNorm = ((pos.x - existing.lastPos.x) / w) / zoomScale
-                                                val dyNorm = ((pos.y - existing.lastPos.y) / h) / zoomScale
-                                                existing.lastPos = pos
+                                                val distRL = minOf(
+                                                    hypot(rawNx - rKneeS.x, rawNy - rKneeS.y),
+                                                    hypot(rawNx - rThighS.x, rawNy - rThighS.y),
+                                                    hypot(rawNx - rCalfS.x, rawNy - rCalfS.y)
+                                                )
+                                                val allowLeftLeg = zoomScale < 0.78f || rawNx < 0.28f || rawNy > 0.72f
+                                                val allowRightLeg = zoomScale < 0.78f || rawNx > 0.72f || rawNy > 0.72f
 
-                                                val inHoodZone = existing.startNorm.x in 0.30f..0.70f &&
-                                                    existing.startNorm.y in 0.14f..0.44f
-                                                if (inHoodZone && abs(dyNorm) > abs(dxNorm) * 0.55f) {
-                                                    dHood += (-dyNorm) * 4.5f
+                                                val zone = when {
+                                                    latestShowFullBody && distLB < breastHitRadius && distLB <= distRB -> TouchTargetZone.LEFT_BREAST
+                                                    latestShowFullBody && distRB < breastHitRadius -> TouchTargetZone.RIGHT_BREAST
+                                                    latestShowFullBody && allowLeftLeg && distLL < legHitRadius && distLL <= distRL -> TouchTargetZone.LEFT_LEG
+                                                    latestShowFullBody && allowRightLeg && distRL < legHitRadius -> TouchTargetZone.RIGHT_LEG
+                                                    else -> TouchTargetZone.VULVA
                                                 }
+                                                tracks[change.id] = Pointer3DTrack(pos, Offset(nx, ny), zone)
 
-                                                val inLabiaSpan = existing.startNorm.y in 0.20f..0.86f
-                                                if (inLabiaSpan) {
-                                                    if (existing.startNorm.x < 0.50f) {
-                                                        val pull = -dxNorm
-                                                        val nearInner = existing.startNorm.x in 0.36f..0.50f
-                                                        dLeftOuter += pull * if (nearInner) 2.2f else 3.9f
-                                                        dLeftInner += pull * if (nearInner) 4.5f else 3.0f
-                                                    } else {
-                                                        val pull = dxNorm
-                                                        val nearInner = existing.startNorm.x in 0.50f..0.64f
-                                                        dRightOuter += pull * if (nearInner) 2.2f else 3.9f
-                                                        dRightInner += pull * if (nearInner) 4.5f else 3.0f
+                                                if (zone != TouchTargetZone.VULVA) {
+                                                    if (latestHapticsEnabled) {
+                                                        val tier = if (zone == TouchTargetZone.LEFT_LEG || zone == TouchTargetZone.RIGHT_LEG) {
+                                                            SensitivityTier.MODERATE
+                                                        } else {
+                                                            SensitivityTier.HIGH
+                                                        }
+                                                        hapticsEngine.triggerTap(tier)
                                                     }
-                                                }
-
-                                                val nowMs = System.currentTimeMillis()
-                                                if (hypot(dxNorm, dyNorm) > 0.004f && nowMs - lastDragFeedbackMs >= 85L) {
+                                                } else {
                                                     val hit = hitTest3DVulva(
                                                         nx = nx,
                                                         ny = ny,
@@ -444,10 +542,107 @@ fun InteractiveVulva3DCanvas(
                                                         ),
                                                         parts = latestParts
                                                     )
-                                                    if (hit != null && (hit.id != lastHitPartId || nowMs - lastDragFeedbackMs >= 135L)) {
+                                                    if (hit != null) {
                                                         lastHitPartId = hit.id
-                                                        lastDragFeedbackMs = nowMs
-                                                        trigger3DSensory(hit, nx, ny, isDrag = true)
+                                                        trigger3DSensory(hit, nx, ny, isDrag = false)
+                                                    }
+                                                }
+                                            } else {
+                                                val rawDx = (pos.x - existing.lastPos.x) / w
+                                                val rawDy = (pos.y - existing.lastPos.y) / h
+                                                val dxNorm = rawDx / zoomScale
+                                                val dyNorm = rawDy / zoomScale
+                                                existing.lastPos = pos
+
+                                                when (existing.zone) {
+                                                    TouchTargetZone.LEFT_BREAST -> {
+                                                        val breastGain = (1.65f / zoomScale.coerceAtLeast(0.22f)).coerceIn(2.6f, 7.5f)
+                                                        dLeftBreastX += rawDx * breastGain
+                                                        dLeftBreastY += -rawDy * breastGain
+                                                        val nowMs = System.currentTimeMillis()
+                                                        if (hypot(rawDx, rawDy) > 0.005f && nowMs - lastDragFeedbackMs >= 110L) {
+                                                            lastDragFeedbackMs = nowMs
+                                                            if (latestHapticsEnabled) {
+                                                                hapticsEngine.triggerDragPulse(SensitivityTier.MODERATE)
+                                                            }
+                                                        }
+                                                    }
+                                                    TouchTargetZone.RIGHT_BREAST -> {
+                                                        val breastGain = (1.65f / zoomScale.coerceAtLeast(0.22f)).coerceIn(2.6f, 7.5f)
+                                                        dRightBreastX += rawDx * breastGain
+                                                        dRightBreastY += -rawDy * breastGain
+                                                        val nowMs = System.currentTimeMillis()
+                                                        if (hypot(rawDx, rawDy) > 0.005f && nowMs - lastDragFeedbackMs >= 110L) {
+                                                            lastDragFeedbackMs = nowMs
+                                                            if (latestHapticsEnabled) {
+                                                                hapticsEngine.triggerDragPulse(SensitivityTier.MODERATE)
+                                                            }
+                                                        }
+                                                    }
+                                                    TouchTargetZone.LEFT_LEG -> {
+                                                        val legGain = (1.55f / zoomScale.coerceAtLeast(0.16f)).coerceIn(2.4f, 8.0f)
+                                                        dLeftLeg += (-rawDx) * legGain
+                                                        val nowMs = System.currentTimeMillis()
+                                                        if (abs(rawDx) > 0.005f && nowMs - lastDragFeedbackMs >= 120L) {
+                                                            lastDragFeedbackMs = nowMs
+                                                            if (latestHapticsEnabled) {
+                                                                hapticsEngine.triggerDragPulse(SensitivityTier.MODERATE)
+                                                            }
+                                                        }
+                                                    }
+                                                    TouchTargetZone.RIGHT_LEG -> {
+                                                        val legGain = (1.55f / zoomScale.coerceAtLeast(0.16f)).coerceIn(2.4f, 8.0f)
+                                                        dRightLeg += rawDx * legGain
+                                                        val nowMs = System.currentTimeMillis()
+                                                        if (abs(rawDx) > 0.005f && nowMs - lastDragFeedbackMs >= 120L) {
+                                                            lastDragFeedbackMs = nowMs
+                                                            if (latestHapticsEnabled) {
+                                                                hapticsEngine.triggerDragPulse(SensitivityTier.MODERATE)
+                                                            }
+                                                        }
+                                                    }
+                                                    TouchTargetZone.VULVA -> {
+                                                        val inHoodZone = existing.startNorm.x in 0.30f..0.70f &&
+                                                            existing.startNorm.y in 0.14f..0.44f
+                                                        if (inHoodZone && abs(dyNorm) > abs(dxNorm) * 0.55f) {
+                                                            dHood += (-dyNorm) * 4.5f
+                                                        }
+
+                                                        val inLabiaSpan = existing.startNorm.y in 0.20f..0.86f
+                                                        if (inLabiaSpan) {
+                                                            if (existing.startNorm.x < 0.50f) {
+                                                                val pull = -dxNorm
+                                                                val nearInner = existing.startNorm.x in 0.36f..0.50f
+                                                                dLeftOuter += pull * if (nearInner) 2.2f else 3.9f
+                                                                dLeftInner += pull * if (nearInner) 4.5f else 3.0f
+                                                            } else {
+                                                                val pull = dxNorm
+                                                                val nearInner = existing.startNorm.x in 0.50f..0.64f
+                                                                dRightOuter += pull * if (nearInner) 2.2f else 3.9f
+                                                                dRightInner += pull * if (nearInner) 4.5f else 3.0f
+                                                            }
+                                                        }
+
+                                                        val nowMs = System.currentTimeMillis()
+                                                        if (hypot(dxNorm, dyNorm) > 0.004f && nowMs - lastDragFeedbackMs >= 85L) {
+                                                            val hit = hitTest3DVulva(
+                                                                nx = nx,
+                                                                ny = ny,
+                                                                deform = VulvaDeformationState(
+                                                                    leftOuterSpread.value,
+                                                                    rightOuterSpread.value,
+                                                                    leftInnerOpen.value,
+                                                                    rightInnerOpen.value,
+                                                                    hoodRetraction.value
+                                                                ),
+                                                                parts = latestParts
+                                                            )
+                                                            if (hit != null && (hit.id != lastHitPartId || nowMs - lastDragFeedbackMs >= 135L)) {
+                                                                lastHitPartId = hit.id
+                                                                lastDragFeedbackMs = nowMs
+                                                                trigger3DSensory(hit, nx, ny, isDrag = true)
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
@@ -468,6 +663,28 @@ fun InteractiveVulva3DCanvas(
                                                 leftInnerOpen.snapTo(nextLI)
                                                 rightInnerOpen.snapTo(nextRI)
                                                 hoodRetraction.snapTo(nextH)
+                                            }
+                                        }
+
+                                        if (dLeftBreastX != 0f || dLeftBreastY != 0f || dRightBreastX != 0f || dRightBreastY != 0f) {
+                                            val nextLBX = (leftBreastX.value + dLeftBreastX).coerceIn(-1f, 1f)
+                                            val nextLBY = (leftBreastY.value + dLeftBreastY).coerceIn(-1f, 1f)
+                                            val nextRBX = (rightBreastX.value + dRightBreastX).coerceIn(-1f, 1f)
+                                            val nextRBY = (rightBreastY.value + dRightBreastY).coerceIn(-1f, 1f)
+                                            coroutineScope.launch {
+                                                leftBreastX.snapTo(nextLBX)
+                                                leftBreastY.snapTo(nextLBY)
+                                                rightBreastX.snapTo(nextRBX)
+                                                rightBreastY.snapTo(nextRBY)
+                                            }
+                                        }
+
+                                        if (dLeftLeg != 0f || dRightLeg != 0f) {
+                                            val nextLL = (leftLegSpread.value + dLeftLeg).coerceIn(-0.30f, 1f)
+                                            val nextRL = (rightLegSpread.value + dRightLeg).coerceIn(-0.30f, 1f)
+                                            coroutineScope.launch {
+                                                leftLegSpread.snapTo(nextLL)
+                                                rightLegSpread.snapTo(nextRL)
                                             }
                                         }
                                     }
@@ -595,7 +812,12 @@ fun InteractiveVulva3DCanvas(
                 )
             }
 
-            items(CameraAnglePreset.entries) { preset ->
+            val visiblePresets = if (showExperimentalLegs) {
+                CameraAnglePreset.entries
+            } else {
+                CameraAnglePreset.entries.filter { it != CameraAnglePreset.UPPER_BODY && it != CameraAnglePreset.FACE_CLOSE }
+            }
+            items(visiblePresets) { preset ->
                 val selected = activePreset == preset
                 val chipLabel = if (preset == CameraAnglePreset.FULL_LEGS && showExperimentalLegs) {
                     "Full Body"
@@ -646,21 +868,108 @@ fun InteractiveVulva3DCanvas(
                             modifier = Modifier.size(16.dp)
                         )
                     },
-                    label = { Text(if (showExperimentalLegs) "Blossom Body: On" else "Blossom Body (Beta)") }
+                    label = { Text(if (showExperimentalLegs) "Blossom Body (Beta): On" else "Blossom Body (Beta): Off") }
                 )
             }
         }
 
         Text(
             text = if (isOrbitMode) {
-                "${BlossomBodyBuilder.BLOSSOM_MILESTONE_TAG} · Orbit 3D: drag to rotate around her, or pinch to zoom between Full Body and Macro skin detail."
+                "${BlossomBodyBuilder.BLOSSOM_MILESTONE_TAG} · Orbit 3D: drag to rotate, or pinch & slide two fingers to zoom/pan head-to-toe."
             } else {
-                "${BlossomBodyBuilder.BLOSSOM_MILESTONE_TAG} · 3D Exam Simulator: spread labia with two fingers, lift the hood upward, or tap Orbit 3D to rotate."
+                "${BlossomBodyBuilder.BLOSSOM_MILESTONE_TAG} · Interactive 3D: move labia, lift hood, shift breasts, or gently spread legs side-to-side."
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 4.dp)
         )
+
+        if (showExperimentalLegs) {
+            // Hair Color Swatch Selector (defaults to warm Chestnut Brown)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Hair color",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    itemsIndexed(BlossomHairStyles) { index, style ->
+                        val selected = index == hairStyleIndex
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .testTag("blossom_hair_swatch_$index")
+                                .semantics {
+                                    contentDescription = "Select ${style.name} hair color"
+                                }
+                                .clickable {
+                                    hairStyleIndex = index
+                                    if (hapticsEnabled) {
+                                        hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .background(style.baseColor)
+                                    .border(
+                                        width = if (selected) 2.5.dp else 1.dp,
+                                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .clip(CircleShape)
+                                        .background(style.highlightColor)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Live Breast Size Slider (Petite -> Medium -> Full)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                val sizeLabel = when {
+                    breastSize < 0.30f -> "Petite"
+                    breastSize > 0.72f -> "Full"
+                    else -> "Medium"
+                }
+                Text(
+                    text = "Breast size · $sizeLabel",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Slider(
+                    value = breastSize,
+                    onValueChange = { breastSize = it },
+                    valueRange = 0f..1f,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("blossom_breast_size_slider")
+                        .semantics {
+                            contentDescription = "Adjust breast size, currently $sizeLabel"
+                        }
+                )
+            }
+        }
     }
 }
 

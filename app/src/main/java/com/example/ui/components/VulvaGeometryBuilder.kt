@@ -43,7 +43,14 @@ data class VulvaDeformationState(
     val rightOuter: Float = 0f,
     val leftInner: Float = 0f,
     val rightInner: Float = 0f,
-    val hoodRetract: Float = 0f
+    val hoodRetract: Float = 0f,
+    val leftBreastX: Float = 0f,
+    val leftBreastY: Float = 0f,
+    val rightBreastX: Float = 0f,
+    val rightBreastY: Float = 0f,
+    val breastSize: Float = 0.50f,
+    val leftLegSpread: Float = 0f,
+    val rightLegSpread: Float = 0f
 )
 
 class DynamicGlMesh(
@@ -90,8 +97,22 @@ class VulvaAnatomySceneMesh {
     private val pelvisRows = 132
     val pelvisMesh = DynamicGlMesh(pelvisCols * pelvisRows, (pelvisCols - 1) * (pelvisRows - 1) * 6)
 
-    // 1B. Beta Mode: Blossom's Single Unified Smooth-Min SDF Lower Body + Ultra-HD 128x144 Flush Vulva Patch
+    // 1B. Beta Mode: Blossom's Full Head-to-Toe Unified SDF Body + Toes + Fingers + 20 Nails + Live Breasts + Head/Eyes/Hair + Ultra-HD Vulva Patch
     val blossomBodyMesh: DynamicGlMesh
+    val blossomToesMesh: DynamicGlMesh
+    val blossomHandsMesh: DynamicGlMesh
+    val blossomNailsMesh: DynamicGlMesh
+    private val blossomLegSkinCache: BlossomSdfBodyBuilder.LegSkinCache
+    private var lastAppliedLeftLegSpread = Float.NaN
+    private var lastAppliedRightLegSpread = Float.NaN
+    private val blossomBreastsCache: BlossomUpperBodyBuilder.BlossomBreastsCache
+    val blossomBreastsMesh = DynamicGlMesh(
+        BlossomUpperBodyBuilder.BREAST_COLS * BlossomUpperBodyBuilder.BREAST_ROWS * 2,
+        (BlossomUpperBodyBuilder.BREAST_COLS - 1) * (BlossomUpperBodyBuilder.BREAST_ROWS - 1) * 6 * 2
+    )
+    val blossomHeadMesh: DynamicGlMesh
+    val blossomEyesMesh: DynamicGlMesh
+    val blossomHairMesh: DynamicGlMesh
     private val blossomAnteriorLut = BlossomSdfBodyBuilder.buildAnteriorSurfaceLut()
     private val blossomVulvaPatchCache = BlossomSdfBodyBuilder.buildVulvaPatchCache()
     val blossomVulvaPatchMesh = DynamicGlMesh(
@@ -117,6 +138,9 @@ class VulvaAnatomySceneMesh {
     )
 
     val blossomSkinMeshes: List<DynamicGlMesh>
+    val blossomEyeMeshes: List<DynamicGlMesh>
+    val blossomHairMeshes: List<DynamicGlMesh>
+    val blossomNailMeshes: List<DynamicGlMesh>
     val blossomDrapeMeshes: List<DynamicGlMesh>
 
     init {
@@ -124,11 +148,29 @@ class VulvaAnatomySceneMesh {
         blossomVulvaPatchMesh.setIndices(
             buildGridIndices(BlossomSdfBodyBuilder.VULVA_PATCH_COLS, BlossomSdfBodyBuilder.VULVA_PATCH_ROWS)
         )
+        blossomBreastsMesh.setIndices(BlossomUpperBodyBuilder.buildBreastsIndices())
         glansMesh.setIndices(buildGridIndices(glansCols, glansRows))
         labiaHoodArchMesh.setIndices(buildGridIndices(archCols, archRows))
 
-        // Build Blossom's single watertight Smooth-Min SDF lower body & dark draped exam cushion ONCE
+        // Build Blossom's full head-to-toe unified watertight SDF body, limbs, hands, 20 nails, breasts, head, eyes, hair & exam cushion ONCE
         blossomBodyMesh = BlossomSdfBodyBuilder.buildUnifiedBodyMesh()
+        blossomToesMesh = BlossomSdfBodyBuilder.buildBlossomToesMesh()
+        blossomHandsMesh = BlossomUpperBodyBuilder.buildBlossomHandsMesh()
+        val (nailsMesh, toeNailStartVert) = BlossomUpperBodyBuilder.buildBlossomNailsMesh()
+        blossomNailsMesh = nailsMesh
+        blossomLegSkinCache = BlossomSdfBodyBuilder.buildLegSkinCache(
+            bodyMesh = blossomBodyMesh,
+            toesMesh = blossomToesMesh,
+            nailsMesh = blossomNailsMesh,
+            toeNailStartVert = toeNailStartVert
+        )
+        blossomBreastsCache = BlossomUpperBodyBuilder.buildBreastsCache()
+        blossomHeadMesh = BlossomUpperBodyBuilder.buildBlossomHeadMesh(
+            buildIndices = ::buildGridIndices,
+            computeNormals = ::computeGridNormals
+        )
+        blossomEyesMesh = BlossomUpperBodyBuilder.buildBlossomEyesMesh()
+        blossomHairMesh = BlossomUpperBodyBuilder.buildBlossomHairMesh()
         examCushionMesh = BlossomBodyBuilder.buildExamCushionMesh(
             buildIndices = ::buildGridIndices,
             computeNormals = ::computeGridNormals
@@ -136,24 +178,55 @@ class VulvaAnatomySceneMesh {
 
         blossomSkinMeshes = listOf(
             blossomBodyMesh,
+            blossomToesMesh,
+            blossomHandsMesh,
+            blossomBreastsMesh,
+            blossomHeadMesh,
             blossomVulvaPatchMesh,
             glansMesh,
             labiaHoodArchMesh
         )
+        blossomEyeMeshes = listOf(blossomEyesMesh)
+        blossomHairMeshes = listOf(blossomHairMesh)
+        blossomNailMeshes = listOf(blossomNailsMesh)
         blossomDrapeMeshes = listOf(examCushionMesh)
 
-        update(VulvaDeformationState(), includeLithotomyBody = false)
-        updateBlossomVulvaPatch(VulvaDeformationState())
+        val resting = VulvaDeformationState()
+        update(resting, includeLithotomyBody = false)
+        updateBlossomVulvaPatch(resting)
+        updateBlossomBreasts(resting)
     }
 
     fun update(state: VulvaDeformationState, includeLithotomyBody: Boolean = false) {
         if (includeLithotomyBody) {
             updateBlossomVulvaPatch(state)
+            updateBlossomBreasts(state)
+            if (state.leftLegSpread != lastAppliedLeftLegSpread || state.rightLegSpread != lastAppliedRightLegSpread) {
+                BlossomSdfBodyBuilder.applyLegSpread(
+                    bodyMesh = blossomBodyMesh,
+                    toesMesh = blossomToesMesh,
+                    nailsMesh = blossomNailsMesh,
+                    cache = blossomLegSkinCache,
+                    leftLegSpread = state.leftLegSpread,
+                    rightLegSpread = state.rightLegSpread
+                )
+                lastAppliedLeftLegSpread = state.leftLegSpread
+                lastAppliedRightLegSpread = state.rightLegSpread
+            }
         } else {
             updateContouredPelvis(state)
         }
         updateClitoralGlans(state, includeLithotomyBody)
         updateContinuousLabiaHoodArch(state, includeLithotomyBody)
+    }
+
+    private fun updateBlossomBreasts(s: VulvaDeformationState) {
+        BlossomUpperBodyBuilder.updateBlossomBreastsMesh(
+            mesh = blossomBreastsMesh,
+            cache = blossomBreastsCache,
+            state = s,
+            computeNormals = ::computeGridNormals
+        )
     }
 
     // -------------------------------------------------------------------------
@@ -210,15 +283,15 @@ class VulvaAnatomySceneMesh {
 
         var dz = 0f
 
-        // Soft, rounded Mons Pubis mound sloping smoothly downward into the anterior commissure (zero hollow crater!)
-        val mons = 0.21f * exp(-((x / 0.48f).let { it * it } + ((y - 0.72f) / 0.34f).let { it * it }))
+        // Gentle, anatomically flush Mons Pubis pad sloping seamlessly from lower belly into anterior commissure (zero shelf!)
+        val mons = 0.048f * exp(-((x / 0.42f).let { it * it } + ((y - 0.56f) / 0.25f).let { it * it }))
         dz += mons
 
         // Soft curved inguinal groin creases harmonizing with the unified SDF thigh-pelvis transition
         val groinWeight = smoothBell(y, -0.60f, 0.62f, 0.22f)
         val leftGroinDip = exp(-((x - leftGroinX) / 0.075f).let { it * it })
         val rightGroinDip = exp(-((x - rightGroinX) / 0.075f).let { it * it })
-        dz -= (leftGroinDip + rightGroinDip) * 0.052f * groinWeight
+        dz -= (leftGroinDip + rightGroinDip) * 0.032f * groinWeight
 
         // Recessed Concave Vestibular Basin (tightly framed inside inner labia — eliminates muddy outer halo!)
         val vestLeftEdge = -(0.044f + s.leftInner * 0.155f + s.leftOuter * 0.058f)
@@ -230,7 +303,7 @@ class VulvaAnatomySceneMesh {
         val vestEllipse = normVestX * normVestX + normVestY * normVestY
         val insideVestibule = (1f - smoothStep(0.38f, 1.06f, vestEllipse)).coerceIn(0f, 1f)
 
-        // Plush, softly-beveled teardrop Outer Labia Majora cushions (full natural anatomical volume!)
+        // Soft, anatomically proportioned teardrop Outer Labia Majora cushions nestled naturally between the thighs
         val fullnessCurve = (0.24f + 0.78f * almondCurve) * smoothBell(y, -0.54f, 0.52f, 0.14f)
         val leftWidth = (0.100f + 0.044f * almondCurve) + s.leftOuter * 0.022f
         val rightWidth = (0.100f + 0.044f * almondCurve) + s.rightOuter * 0.022f
@@ -239,14 +312,14 @@ class VulvaAnatomySceneMesh {
         val rDist = abs((x - rightCrestX) / rightWidth)
         val vestibuleSuppress = 1f - insideVestibule * 0.88f
         val leftCushion = exp(-Math.pow(lDist.toDouble(), 1.92).toFloat()) *
-            (0.228f - s.leftOuter * 0.020f) * fullnessCurve * vestibuleSuppress
+            (0.108f - s.leftOuter * 0.012f) * fullnessCurve * vestibuleSuppress
         val rightCushion = exp(-Math.pow(rDist.toDouble(), 1.92).toFloat()) *
-            (0.228f - s.rightOuter * 0.020f) * fullnessCurve * vestibuleSuppress
+            (0.108f - s.rightOuter * 0.012f) * fullnessCurve * vestibuleSuppress
 
         // Soft anterior & posterior labial commissures framing the cleft smoothly at top and bottom
-        val antCommissure = 0.048f * exp(-((x / 0.16f).let { it * it } + ((y - 0.46f) / 0.12f).let { it * it })) *
+        val antCommissure = 0.022f * exp(-((x / 0.16f).let { it * it } + ((y - 0.46f) / 0.12f).let { it * it })) *
             (1f - insideVestibule * 0.75f)
-        val postCommissure = 0.036f * exp(-((x / 0.14f).let { it * it } + ((y + 0.50f) / 0.09f).let { it * it })) *
+        val postCommissure = 0.018f * exp(-((x / 0.14f).let { it * it } + ((y + 0.50f) / 0.09f).let { it * it })) *
             (1f - insideVestibule * 0.75f)
 
         // Delicate longitudinal skin folds along outer labia majora (flatten organically under spreading tension)
@@ -260,13 +333,13 @@ class VulvaAnatomySceneMesh {
 
         // Truly Concave Vestibular Basin: smooth inward bowl with zero harsh cliff edge
         val concaveBowl = (1f - vestEllipse.coerceIn(0f, 1f))
-        val cleftRecess = (0.142f + 0.038f * cavityOpen) * insideVestibule + 0.048f * concaveBowl
+        val cleftRecess = (0.098f + 0.032f * cavityOpen) * insideVestibule + 0.032f * concaveBowl
         dz -= cleftRecess
 
         // Interlabial sulcus crease gently separating inner labia arch from outer labia majora
         val sulcusL = exp(-((x - (vestLeftEdge - 0.034f)) / 0.028f).let { it * it }) * cleftSpan
         val sulcusR = exp(-((x - (vestRightEdge + 0.034f)) / 0.028f).let { it * it }) * cleftSpan
-        dz -= (sulcusL + sulcusR) * 0.038f
+        dz -= (sulcusL + sulcusR) * 0.024f
 
         // Delicate bilateral Clitoral Frenulum V-folds curving down from underside of glans toward inner labia
         val frenSpan = smoothBell(y, 0.10f, 0.23f, 0.04f)
@@ -291,22 +364,22 @@ class VulvaAnatomySceneMesh {
         val iR2 = iDx * iDx + iDy * iDy
         val iAngle = atan2(iDy, iDx)
         val coronaWave = 1f + 0.12f * sin(iAngle * 5f + 0.5f) + 0.06f * cos(iAngle * 9f - 0.4f)
-        val introDepth = (0.17f + 0.27f * cavityOpen) * exp(-(iR2 / (coronaWave * coronaWave)) * 1.75f)
+        val introDepth = (0.135f + 0.24f * cavityOpen) * exp(-(iR2 / (coronaWave * coronaWave)) * 1.75f)
         val coronaRing = exp(-((sqrt(iR2) - 1.04f) / 0.19f).let { it * it }) *
-            (0.020f + 0.012f * sin(iAngle * 6f + 0.3f)) * insideVestibule * (0.40f + 0.60f * cavityOpen)
+            (0.018f + 0.010f * sin(iAngle * 6f + 0.3f)) * insideVestibule * (0.40f + 0.60f * cavityOpen)
         val rugae = if (iR2 < 0.88f) {
-            0.009f * sin(y * 62f + x * 12f) * (1f - iR2) * (0.35f + 0.65f * cavityOpen)
+            0.008f * sin(y * 62f + x * 12f) * (1f - iR2) * (0.35f + 0.65f * cavityOpen)
         } else 0f
         dz += coronaRing - introDepth + rugae
 
         // Fossa Navicularis & Smooth Posterior Fourchette right below vaginal orifice
         val fossaDx = x / 0.065f
         val fossaDy = (y - (-0.40f)) / 0.044f
-        dz -= 0.018f * exp(-(fossaDx * fossaDx + fossaDy * fossaDy)) * insideVestibule
+        dz -= 0.015f * exp(-(fossaDx * fossaDx + fossaDy * fossaDy)) * insideVestibule
 
         // Smooth Perineal Body bridging posterior fourchette (-0.48) down to lower gluteal-cleft anus (-0.86)
-        val perineumBulge = 0.042f * exp(-((x / 0.20f).let { it * it } + ((y + 0.64f) / 0.15f).let { it * it }))
-        val rapheGroove = 0.011f * exp(-((x / 0.024f).let { it * it })) * smoothBell(y, -0.78f, -0.50f, 0.06f)
+        val perineumBulge = 0.022f * exp(-((x / 0.20f).let { it * it } + ((y + 0.64f) / 0.15f).let { it * it }))
+        val rapheGroove = 0.009f * exp(-((x / 0.024f).let { it * it })) * smoothBell(y, -0.78f, -0.50f, 0.06f)
         dz += perineumBulge - rapheGroove
 
         // Anatomically Sculpted Anus & Radial Perianal Skin Folds nestled lower between the buttocks at (0, -0.86)
@@ -423,10 +496,10 @@ class VulvaAnatomySceneMesh {
         val centerY = 0.254f
         // Anchored directly onto the exact recessed upper vestibule floor so there is ZERO gap!
         val floorZ = sampleBodySurfaceZ(0f, centerY, s, includeLithotomy)
-        val baseZ = floorZ - 0.010f
-        val rx = 0.036f + s.hoodRetract * 0.005f
-        val ry = 0.048f + s.hoodRetract * 0.006f
-        val rz = 0.062f
+        val baseZ = floorZ - 0.008f
+        val rx = 0.034f + s.hoodRetract * 0.004f
+        val ry = 0.045f + s.hoodRetract * 0.005f
+        val rz = 0.042f
 
         for (r in 0 until glansRows) {
             val v = r.toFloat() / (glansRows - 1)
@@ -564,9 +637,9 @@ class VulvaAnatomySceneMesh {
                 (0.132f - s.hoodRetract * 0.025f) * hoodMask
             val innerInsetWidth = 0.024f * labiaMidArch * labiaMask + 0.020f * hoodMask
 
-            val hoodCrestHeight = (0.078f + 0.012f * s.hoodRetract) * hoodMask
-            val labiaCrestHeight = ((0.094f + 0.028f * innerOpen) * (0.28f + 0.72f * labiaMidArch) * upperLobeFullness * sideHeightAsym +
-                labiaLobes) * labiaMask * fourchetteTaper
+            val hoodCrestHeight = (0.042f + 0.009f * s.hoodRetract) * hoodMask
+            val labiaCrestHeight = ((0.054f + 0.020f * innerOpen) * (0.28f + 0.72f * labiaMidArch) * upperLobeFullness * sideHeightAsym +
+                labiaLobes * 0.65f) * labiaMask * fourchetteTaper
             val totalHeight = (hoodCrestHeight + labiaCrestHeight).coerceAtLeast(0.001f)
 
             val crestOutwardShift = (0.026f + innerOpen * 0.058f + outerOpen * 0.024f) * labiaMidArch * labiaMask -

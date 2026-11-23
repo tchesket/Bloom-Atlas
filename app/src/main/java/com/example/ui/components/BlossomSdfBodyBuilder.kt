@@ -33,13 +33,13 @@ internal object BlossomSdfBodyBuilder {
     const val PATCH_RX = 0.64f
     const val PATCH_RY = 1.02f
 
-    private const val MIN_X = -2.62f
-    private const val MAX_X = 2.62f
+    private const val MIN_X = -2.96f
+    private const val MAX_X = 2.96f
     private const val MIN_Y = -5.92f
-    private const val MAX_Y = 3.92f
-    private const val MIN_Z = -1.46f
+    private const val MAX_Y = 6.32f
+    private const val MIN_Z = -2.45f
     private const val MAX_Z = 2.40f
-    private const val STEP = 0.078f
+    private const val STEP = 0.082f
 
     private const val LUT_SIZE = 65
     private const val LUT_MIN_X = -0.72f
@@ -103,64 +103,77 @@ internal object BlossomSdfBodyBuilder {
         val pigment: Float
     )
 
-    fun mattressSurfaceZ(y: Float): Float {
-        val yRec = max(0f, y - 0.72f)
-        return BlossomBodyBuilder.MATTRESS_TOP_Z - 0.16f * yRec - 0.014f * yRec * yRec
-    }
+    fun mattressSurfaceZ(y: Float): Float = BlossomBodyBuilder.mattressSurfaceZ(y)
 
     /**
      * Evaluates the exact signed distance (negative inside, positive outside) to Blossom's
-     * single unified reclining lower body (torso + buttocks + legs + feet).
+     * single unified reclining full body (feet, legs, buttocks, pelvis, abdomen, ribcage,
+     * feminine shoulders, reclining arms & palms, and slender neck).
      */
     fun evaluateBodySdf(x: Float, y: Float, z: Float): Float {
         val ax = abs(x)
 
         // ---------------------------------------------------------------------
-        // 1. RECLINING LOWER TORSO (LOWER RIBCAGE -> WAIST -> BELLY -> PELVIS)
+        // 1. CONTINUOUS RECLINING TORSO (PELVIS -> ABDOMEN -> WAIST -> RIBCAGE -> SHOULDERS)
         // ---------------------------------------------------------------------
-        val yc = y.coerceIn(-1.04f, 3.54f)
-        val yRec = max(0f, yc - 0.72f)
-        val upperFill = smoothStep(0.62f, 3.15f, yc)
+        val yc = y.coerceIn(-1.04f, 4.98f)
+        val matY = mattressSurfaceZ(yc)
+        val upperFill = smoothStep(0.62f, 2.95f, yc)
         // Smooth organic posterior roll across the perineum into the gluteal cleft (zero protruding pouch!)
         val perinealRollZ = -0.34f * smoothStep(-0.34f, -1.04f, yc)
-        val zSpine = -0.58f - 0.16f * yRec - 0.014f * yRec * yRec + 0.28f * upperFill + perinealRollZ
+        // Upper back & shoulder blades settle naturally back onto the reclining exam table (never raised above head!)
+        val thoraxSettle = -0.34f * smoothStep(2.55f, 4.86f, yc)
+        val zSpine = (matY + 0.56f) + 0.28f * upperFill + perinealRollZ + thoraxSettle
 
         val hipFlare = 0.36f * exp(-((yc - 0.16f) / 1.12f).let { it * it })
         val iliacFull = 0.14f * exp(-((yc - 1.08f) / 0.68f).let { it * it })
-        val waistPinch = -0.18f * exp(-((yc - 2.68f) / 0.66f).let { it * it })
-        val ribFlare = 0.16f * smoothStep(2.65f, 3.45f, yc)
+        val waistPinch = -0.22f * exp(-((yc - 2.48f) / 0.62f).let { it * it })
+        val ribCage = 0.14f * exp(-((yc - 3.80f) / 0.92f).let { it * it })
+        val shoulderSpan = 0.04f * exp(-((yc - 4.46f) / 0.44f).let { it * it })
+        // Keep upper chest smoothly filled right to the axilla (~4.52) so shoulders flow naturally with ZERO pauldron notch!
+        val shoulderTopTaper = 1f - 0.72f * smoothStep(4.50f, 4.98f, yc)
         val pelvicBaseTaper = 1f - 0.44f * smoothStep(-0.22f, -1.04f, yc)
-        val rxTorso = ((1.36f + hipFlare + iliacFull + waistPinch + ribFlare) * pelvicBaseTaper).coerceAtLeast(0.46f)
+        val rxTorso = ((1.36f + hipFlare + iliacFull + waistPinch + ribCage + shoulderSpan) *
+            pelvicBaseTaper * shoulderTopTaper).coerceAtLeast(0.36f)
 
         val bellyDepth = 0.28f * exp(-((yc - 1.54f) / 1.05f).let { it * it }) +
-            0.27f * smoothStep(1.65f, 3.32f, yc)
-        val waistDepthDip = -0.048f * exp(-((yc - 2.55f) / 0.50f).let { it * it })
+            0.25f * smoothStep(1.65f, 3.15f, yc)
+        val waistDepthDip = -0.050f * exp(-((yc - 2.42f) / 0.48f).let { it * it })
+        // Sleek natural supine feminine ribcage tapering gently into slender clavicles & neck base
+        val chestWallCurve = -0.18f * smoothStep(2.75f, 4.18f, yc) -
+            0.25f * smoothStep(4.02f, 4.98f, yc)
         val pelvicDepthTaper = 1f - 0.30f * smoothStep(-0.30f, -1.04f, yc)
-        val rzTorso = ((0.62f + bellyDepth + waistDepthDip) * pelvicDepthTaper).coerceAtLeast(0.36f)
+        val rzTorso = ((0.62f + bellyDepth + waistDepthDip + chestWallCurve) * pelvicDepthTaper).coerceAtLeast(0.32f)
 
         // Rounded capsule-capped super-elliptic torso column
         val capR = 0.16f
-        val dRadTorso = sdEllipse2D(ax, z - zSpine, (rxTorso - capR).coerceAtLeast(0.15f), (rzTorso - capR).coerceAtLeast(0.15f))
-        val dyTorso = max(y - 3.54f, -1.04f - y)
+        val dRadTorso = sdEllipse2D(ax, z - zSpine, (rxTorso - capR).coerceAtLeast(0.14f), (rzTorso - capR).coerceAtLeast(0.14f))
+        val dyTorso = max(y - 4.98f, -1.04f - y)
         var dTorso = sqrt(max(dRadTorso, 0f).let { it * it } + max(dyTorso, 0f).let { it * it }) +
             min(max(dRadTorso, dyTorso), 0f) - capR
 
-        // Subtle anatomical abdominal & dorsal relief (navel, linea alba, iliac crests, lumbar spine)
-        if (y > 0.15f && y < 3.55f && ax < 1.65f) {
-            val frontW = smoothStep(-0.10f, 0.35f, z - zSpine)
+        // Subtle anatomical abdominal, sternal, clavicle & dorsal relief
+        if (y > 0.15f && y < 5.14f && ax < 1.65f) {
+            val frontW = smoothStep(-0.08f, 0.34f, z - zSpine)
             if (frontW > 0.001f) {
                 val navelDx = x / 0.072f
-                val navelDy = (y - 2.10f) / 0.092f
+                val navelDy = (y - 2.02f) / 0.092f
                 val navelR2 = navelDx * navelDx + navelDy * navelDy
                 val navelDimple = 0.056f * exp(-navelR2 * 2.1f)
-                val navelHood = -0.017f * exp(-((x / 0.10f).let { it * it } + ((y - 2.20f) / 0.052f).let { it * it }))
-                val lineaAlba = 0.015f * exp(-((x / 0.075f).let { it * it })) * smoothBell(y, 1.32f, 3.18f, 0.25f)
-                val iliacCrest = -0.042f * exp(-(((ax - 1.12f) / 0.38f).let { it * it } + ((y - 1.12f) / 0.48f).let { it * it }))
-                dTorso += (navelDimple + navelHood + lineaAlba + iliacCrest) * frontW
+                val navelHood = -0.017f * exp(-((x / 0.10f).let { it * it } + ((y - 2.12f) / 0.052f).let { it * it }))
+                val lineaAlba = 0.015f * exp(-((x / 0.075f).let { it * it })) * smoothBell(y, 1.30f, 3.05f, 0.25f)
+                val iliacCrest = -0.042f * exp(-(((ax - 1.12f) / 0.38f).let { it * it } + ((y - 1.10f) / 0.48f).let { it * it }))
+                // Delicate sternum midline, graceful S-curved feminine collarbones, soft supraclavicular hollow & suprasternal notch
+                val sternalHollow = 0.014f * exp(-((x / 0.14f).let { it * it })) * smoothBell(y, 3.36f, 4.60f, 0.24f)
+                val clavY = 4.74f - 0.05f * smoothStep(0.28f, 1.08f, ax) + 0.022f * sin(ax * 2.8f)
+                val clavicleRidge = -0.016f * exp(-((y - clavY) / 0.060f).let { it * it }) * smoothBell(ax, 0.16f, 1.08f, 0.15f)
+                val supraClavHollow = 0.018f * exp(-((y - (clavY + 0.13f)) / 0.090f).let { it * it }) * smoothBell(ax, 0.26f, 0.96f, 0.16f)
+                val sternalNotch = 0.022f * exp(-((x / 0.11f).let { it * it } + ((y - 4.82f) / 0.09f).let { it * it }))
+                dTorso += (navelDimple + navelHood + lineaAlba + iliacCrest + sternalHollow + clavicleRidge + supraClavHollow + sternalNotch) * frontW
             }
             val backW = smoothStep(0.10f, 0.48f, zSpine - z)
             if (backW > 0.001f) {
-                val spineGroove = 0.028f * exp(-((x / 0.14f).let { it * it })) * smoothStep(0.25f, 3.00f, y)
+                val spineGroove = 0.028f * exp(-((x / 0.14f).let { it * it })) * smoothStep(0.25f, 4.65f, y)
                 dTorso += spineGroove * backW
             }
         }
@@ -248,49 +261,191 @@ internal object BlossomSdfBodyBuilder {
         dLeg = smin(dLeg, dPatella, 0.12f)
 
         // ---------------------------------------------------------------------
-        // 4. FULL-SCALE SOFT-CONTOURED SCULPTED FEET (SEAMLESSLY FUSED AT ANKLES)
+        // 4. ANATOMICAL SCULPTED FEET (ANKLE MALLEOLI -> HEEL -> ARCH -> OBLIQUE METATARSAL BALL)
+        //    Pairs seamlessly with the 10 individually sculpted 3D toes in buildBlossomToesMesh()!
         // ---------------------------------------------------------------------
-        val dFootCore = sdCapsule(
-            ax, y, z,
-            1.68f, -4.08f, -0.94f,
-            1.92f, -5.44f, -0.99f,
-            0.22f, 0.18f
+        val dAnkleBones = sdEllipsoid(
+            px = ax - 1.68f,
+            py = y - (-4.24f),
+            pz = z - (-0.88f),
+            rx = 0.255f,
+            ry = 0.145f,
+            rz = 0.145f
+        )
+        val dHeel = sdEllipsoid(
+            px = ax - 1.68f,
+            py = y - (-4.05f),
+            pz = z - (-0.96f),
+            rx = 0.205f,
+            ry = 0.215f,
+            rz = 0.185f
         )
         val dInstep = sdCapsule(
             ax, y, z,
-            1.68f, -4.22f, -0.92f,
-            1.79f, -4.76f, -0.87f,
-            0.22f, 0.18f
+            1.68f, -4.20f, -0.90f,
+            1.80f, -4.82f, -0.97f,
+            0.205f, 0.175f
         )
-        val dForefoot = sdEllipsoid(
-            px = ax - 1.94f,
-            py = y - (-5.42f),
-            pz = z - (-0.98f),
-            rx = 0.30f,
-            ry = 0.34f,
-            rz = 0.165f
+        // Natural medial & lateral metatarsal rays fanning organically to the oblique toe line (zero lollipop bulb!)
+        val dMedialRay = sdCapsule(
+            ax, y, z,
+            1.73f, -4.64f, -0.99f,
+            1.70f, -5.22f, -1.035f,
+            0.165f, 0.135f
         )
-        // Subtle medial foot arch indentation underneath
+        val dLateralRay = sdCapsule(
+            ax, y, z,
+            1.83f, -4.60f, -0.99f,
+            2.10f, -5.04f, -1.045f,
+            0.155f, 0.115f
+        )
+        // Flat transverse metatarsal pad bridging big-toe base to pinky-toe base
+        val dMetatarsalPad = sdCapsule(
+            ax, y, z,
+            1.70f, -5.20f, -1.035f,
+            2.10f, -5.03f, -1.045f,
+            0.128f, 0.108f
+        )
+        // Subtle medial longitudinal foot arch underneath
         val dArchCut = sdEllipsoid(
-            px = ax - 1.62f,
-            py = y - (-4.78f),
-            pz = z - (-1.18f),
+            px = ax - 1.58f,
+            py = y - (-4.68f),
+            pz = z - (-1.20f),
             rx = 0.18f,
             ry = 0.34f,
             rz = 0.11f
         )
-        var dFoot = smin(smin(dFootCore, dInstep, 0.10f), dForefoot, 0.14f)
+        var dFoot = smin(dHeel, dInstep, 0.11f)
+        dFoot = smin(dFoot, dAnkleBones, 0.08f)
+        dFoot = smin(dFoot, smin(dMedialRay, dLateralRay, 0.14f), 0.12f)
+        dFoot = smin(dFoot, dMetatarsalPad, 0.10f)
         dFoot = smax(dFoot, -dArchCut, 0.06f)
 
         // Seamless ankle-to-foot fusion
         val dFullLimb = smin(dLeg, dFoot, 0.13f)
 
         // ---------------------------------------------------------------------
-        // 5. UNIFIED SEAMLESS BODY FUSION + EXAM MATTRESS SOFT CONTACT
+        // 5. GRACEFUL FEMININE SHOULDERS, FULLER ANATOMICAL ARMS, OVAL WRISTS, SCULPTED PALMS & NECK
+        //    Natural bicep/forearm fullness proportional to thighs & torso, smooth wrist-to-palm arch, ZERO hip webbing!
+        // ---------------------------------------------------------------------
+        val zShoulder = mattressSurfaceZ(4.54f) + 0.45f
+        val zElbow = mattressSurfaceZ(2.70f) + 0.38f
+        val zWrist = mattressSurfaceZ(0.82f) + 0.195f
+        val zPalm = mattressSurfaceZ(0.36f) + 0.185f
+
+        val zNeckBase = mattressSurfaceZ(4.86f) + 0.56f
+        val zNeckTop = mattressSurfaceZ(5.78f) + 0.80f
+
+        // Smooth diagonal feminine trapezius curving softly from lower neck into rounded shoulder (zero horizontal step!)
+        val dTrapezius = sdCapsule(
+            ax, y, z,
+            0.30f, 5.10f, zNeckBase - 0.10f,
+            1.25f, 4.54f, zShoulder - 0.04f,
+            0.25f, 0.28f
+        )
+        // Low-profile soft feminine deltoid seamlessly tucked beside upper chest (NO armor pauldron bulge!)
+        val dDeltoid = sdEllipsoid(
+            px = ax - 1.29f,
+            py = y - 4.50f,
+            pz = z - zShoulder,
+            rx = 0.28f,
+            ry = 0.38f,
+            rz = 0.31f
+        )
+        // Anatomically proportionate upper arm with soft organic bicep/tricep fullness (never spindly!)
+        val uax0 = 1.31f; val uay0 = 4.40f; val uaz0 = zShoulder
+        val uax1 = 1.86f; val uay1 = 2.70f; val uaz1 = zElbow
+        val uadx = uax1 - uax0; val uady = uay1 - uay0; val uadz = uaz1 - uaz0
+        val uaLen2 = uadx * uadx + uady * uady + uadz * uadz
+        val hUpperArm = (((ax - uax0) * uadx + (y - uay0) * uady + (z - uaz0) * uadz) / uaLen2).coerceIn(0f, 1f)
+        val uapx = ax - (uax0 + uadx * hUpperArm)
+        val uapy = y - (uay0 + uady * hUpperArm)
+        val uapz = z - (uaz0 + uadz * hUpperArm)
+        val uaDist = sqrt(uapx * uapx + uapy * uapy + uapz * uapz)
+        val bicepFullness = exp(-((hUpperArm - 0.46f) / 0.27f).let { it * it })
+        val rUpperArm = 0.365f - 0.022f * hUpperArm + 0.044f * bicepFullness
+        val dUpperArm = uaDist - rUpperArm
+
+        // Natural muscular brachioradialis forearm tapering smoothly into an oval feminine wrist (zero stick pinch or wrist lump!)
+        val fax0 = uax1; val fay0 = uay1; val faz0 = uaz1
+        val fax1 = 2.24f; val fay1 = 0.82f; val faz1 = zWrist
+        val fadx = fax1 - fax0; val fady = fay1 - fay0; val fadz = faz1 - faz0
+        val faLen2 = fadx * fadx + fady * fady + fadz * fadz
+        val hForearm = (((ax - fax0) * fadx + (y - fay0) * fady + (z - faz0) * fadz) / faLen2).coerceIn(0f, 1f)
+        val fapx = ax - (fax0 + fadx * hForearm)
+        val fapy = y - (fay0 + fady * hForearm)
+        val fapz = z - (faz0 + fadz * hForearm)
+        val faDist = sqrt(fapx * fapx + fapy * fapy + fapz * fapz)
+        val forearmBelly = exp(-((hForearm - 0.24f) / 0.22f).let { it * it })
+        val rForearmBase = 0.342f - 0.134f * smoothStep(0.16f, 1.0f, hForearm) + 0.036f * forearmBelly
+        val distalOvalW = smoothStep(0.42f, 1.0f, hForearm)
+        val rForearm = if (distalOvalW > 0.001f && faDist > 1e-4f) {
+            val zComp = abs(fapz / faDist)
+            rForearmBase * (1f - 0.19f * distalOvalW * zComp * zComp)
+        } else {
+            rForearmBase
+        }
+        val dForearm = faDist - rForearm
+
+        // Smooth oval carpal bridge matching both wrist horizontal width (0.208 -> 0.265) and dorsal height (-0.793 -> -0.791)
+        val dWristBridge = sdEllipsoid(
+            px = ax - 2.27f,
+            py = y - 0.66f,
+            pz = z - (zWrist * 0.5f + zPalm * 0.5f),
+            rx = 0.215f,
+            ry = 0.24f,
+            rz = 0.165f
+        )
+        // Proportionate fuller 3D dorsal-arched palm resting cleanly beside upper thigh (zero flat pancake drop!)
+        val dPalmCore = sdEllipsoid(
+            px = ax - 2.32f,
+            py = y - 0.36f,
+            pz = z - zPalm,
+            rx = 0.265f,
+            ry = 0.39f,
+            rz = 0.164f
+        )
+        // Soft medial thenar thumb eminence cleanly clear of hip profile
+        val dThenarPad = sdCapsule(
+            ax, y, z,
+            2.19f, 0.62f, zPalm + 0.010f,
+            2.08f, 0.30f, zPalm + 0.015f,
+            0.118f, 0.102f
+        )
+        val dPalm = smin(smin(dPalmCore, dWristBridge, 0.09f), dThenarPad, 0.07f)
+        val dArmChain = smin(
+            smin(dDeltoid, dUpperArm, 0.24f),
+            smin(dForearm, dPalm, 0.09f),
+            0.16f
+        )
+        val dShoulderArm = smin(dTrapezius, dArmChain, 0.24f)
+
+        // Classical-length graceful feminine cervical neck rising cleanly behind the chin into the skull base
+        var dNeck = sdCapsule(
+            ax, y, z,
+            0f, 4.84f, zNeckBase,
+            0f, 5.78f, zNeckTop,
+            0.36f, 0.34f
+        )
+        // Delicate subtle sternocleidomastoid (SCM) V-contour framing the anterior throat gently
+        if (y in 4.78f..5.68f && ax < 0.52f) {
+            val neckT = ((y - 4.84f) / 0.94f).coerceIn(0f, 1f)
+            val scmTargetX = 0.11f + 0.21f * neckT
+            val scmRidge = -0.012f * exp(-((ax - scmTargetX) / 0.065f).let { it * it }) *
+                smoothBell(y, 4.88f, 5.56f, 0.10f) * smoothStep(-0.08f, 0.22f, z - (zNeckBase + (zNeckTop - zNeckBase) * neckT))
+            dNeck += scmRidge
+        }
+
+        // ---------------------------------------------------------------------
+        // 6. UNIFIED SEAMLESS FULL-BODY FUSION + EXAM MATTRESS SOFT CONTACT
         // ---------------------------------------------------------------------
         var dBody = smin(dPelvis, dFullLimb, 0.42f)
+        // Smooth shoulder/axilla fusion above y=3.15 ONLY; hard separation below waist so forearms/hands NEVER web into hips!
+        val kArmTorso = 0.26f * smoothStep(3.15f, 4.15f, y) + 0.002f
+        dBody = smin(dBody, dShoulderArm, kArmTorso)
+        dBody = smin(dBody, dNeck, 0.16f)
 
-        // Softly flatten posterior torso, buttocks, and foot soles onto the reclined exam mattress
+        // Softly flatten posterior torso, buttocks, arms, palms & foot soles onto the reclined exam mattress
         val matPlane = (mattressSurfaceZ(y) + 0.005f) - z
         dBody = smax(dBody, matPlane, 0.12f)
 
@@ -347,14 +502,19 @@ internal object BlossomSdfBodyBuilder {
         val popMask = exp(-(popDx * popDx + popDy * popDy + popDz * popDz)) * smoothStep(0.05f, 0.65f, -nz)
         val popAo = 1f - 0.26f * popMask
 
-        // Graceful studio vignette fade at top waist cut (+3.25..+3.72)
-        val waistFadeAo = 1f - 0.56f * smoothStep(3.12f, 3.68f, y)
+        // Subtle upper-body anatomical AO (axillary folds, supraclavicular hollows, suprasternal notch, under-chin shadow & elbow crease)
+        val axillaAo = 1f - 0.20f * exp(-(((ax - 1.18f) / 0.24f).let { it * it } + ((y - 4.28f) / 0.32f).let { it * it }))
+        val notchAo = 1f - 0.15f * exp(-((x / 0.14f).let { it * it } + ((y - 4.82f) / 0.11f).let { it * it })) * frontW
+        val supraClavAo = 1f - 0.10f * exp(-(((ax - 0.62f) / 0.34f).let { it * it } + ((y - 4.86f) / 0.10f).let { it * it })) * frontW
+        val underChinAo = 1f - 0.26f * exp(-((x / 0.38f).let { it * it } + ((y - 5.44f) / 0.22f).let { it * it })) * frontW
+        val elbowAo = 1f - 0.14f * exp(-(((ax - 1.80f) / 0.26f).let { it * it } + ((y - 2.70f) / 0.24f).let { it * it })) * frontW
 
-        val ao = (cushionAo * navelAo * cleftAo * ingAo * popAo * waistFadeAo).coerceIn(0.14f, 1f)
+        val ao = (cushionAo * navelAo * cleftAo * ingAo * popAo * axillaAo * notchAo * supraClavAo * underChinAo * elbowAo).coerceIn(0.14f, 1f)
 
         val kneeWarm = exp(-(((ax - 1.80f) / 0.42f).let { it * it } + ((y + 1.86f) / 0.42f).let { it * it } + ((z - 1.78f) / 0.42f).let { it * it })) * 0.09f
+        val shoulderWarm = exp(-(((ax - 1.56f) / 0.40f).let { it * it } + ((y - 4.78f) / 0.42f).let { it * it })) * 0.05f
         val toeWarm = smoothStep(-5.15f, -5.65f, y) * 0.09f
-        val pigment = (ingDip * 0.08f + exp(-navelR2 * 2.0f) * 0.16f * frontW + kneeWarm + toeWarm).coerceIn(0f, 1f)
+        val pigment = (ingDip * 0.08f + exp(-navelR2 * 2.0f) * 0.16f * frontW + kneeWarm + shoulderWarm + toeWarm).coerceIn(0f, 1f)
 
         return Pair(ao, pigment)
     }
@@ -723,6 +883,169 @@ internal object BlossomSdfBodyBuilder {
         return mesh
     }
 
+    internal data class BlossomToeSpec(
+        val rootAx: Float,
+        val rootY: Float,
+        val rootZ: Float,
+        val length: Float,
+        val rLat: Float,
+        val rZ: Float,
+        val yawOut: Float,
+        val archLift: Float
+    )
+
+    // Anatomically proportioned Egyptian diagonal toe cascade (medial Hallux -> lateral Pinky) with crisp interdigital gaps
+    internal val BLOSSOM_TOE_SPECS: List<BlossomToeSpec> = listOf(
+        BlossomToeSpec(rootAx = 1.665f, rootY = -5.21f, rootZ = -1.032f, length = 0.45f, rLat = 0.074f, rZ = 0.066f, yawOut = 0.12f, archLift = 0.014f),
+        BlossomToeSpec(rootAx = 1.816f, rootY = -5.18f, rootZ = -1.040f, length = 0.43f, rLat = 0.050f, rZ = 0.052f, yawOut = 0.14f, archLift = 0.022f),
+        BlossomToeSpec(rootAx = 1.934f, rootY = -5.13f, rootZ = -1.044f, length = 0.37f, rLat = 0.047f, rZ = 0.049f, yawOut = 0.15f, archLift = 0.022f),
+        BlossomToeSpec(rootAx = 2.042f, rootY = -5.07f, rootZ = -1.048f, length = 0.31f, rLat = 0.043f, rZ = 0.045f, yawOut = 0.13f, archLift = 0.020f),
+        BlossomToeSpec(rootAx = 2.138f, rootY = -5.00f, rootZ = -1.052f, length = 0.24f, rLat = 0.039f, rZ = 0.041f, yawOut = 0.07f, archLift = 0.016f)
+    )
+
+    /**
+     * Builds all 10 individually sculpted anatomical 3D toes (5 per foot: Hallux through 5th toe)
+     * in a single lightweight [DynamicGlMesh], seamlessly rooted along the oblique metatarsal line
+     * with root normals matched to the unified SDF forefoot and subtle dorsal nail contour.
+     */
+    fun buildBlossomToesMesh(): DynamicGlMesh {
+        val toeSpecs = BLOSSOM_TOE_SPECS
+
+        val cols = 16
+        val rows = 14
+        val vertsPerToe = cols * rows
+        val trisPerToe = (cols - 1) * (rows - 1) * 6
+        val totalToes = toeSpecs.size * 2
+
+        val mesh = DynamicGlMesh(vertsPerToe * totalToes, trisPerToe * totalToes)
+        val indices = ShortArray(trisPerToe * totalToes)
+        val data = mesh.vertexData
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val floorZ = BlossomBodyBuilder.MATTRESS_TOP_Z + 0.012f
+
+        var toeIndex = 0
+        var idxOut = 0
+        val sides = floatArrayOf(-1f, +1f)
+
+        for (side in sides) {
+            for (spec in toeSpecs) {
+                val baseVert = toeIndex * vertsPerToe
+
+                // Emit strictly outward CCW grid indices for both left (+1) and right (-1) feet
+                for (r in 0 until rows - 1) {
+                    for (c in 0 until cols - 1) {
+                        val i0 = (baseVert + r * cols + c).toShort()
+                        val i1 = (baseVert + r * cols + c + 1).toShort()
+                        val i2 = (baseVert + (r + 1) * cols + c).toShort()
+                        val i3 = (baseVert + (r + 1) * cols + c + 1).toShort()
+                        if (side > 0f) {
+                            indices[idxOut++] = i0; indices[idxOut++] = i1; indices[idxOut++] = i2
+                            indices[idxOut++] = i1; indices[idxOut++] = i3; indices[idxOut++] = i2
+                        } else {
+                            indices[idxOut++] = i0; indices[idxOut++] = i2; indices[idxOut++] = i1
+                            indices[idxOut++] = i1; indices[idxOut++] = i2; indices[idxOut++] = i3
+                        }
+                    }
+                }
+
+                // Forward & lateral unit vectors in world space for this toe
+                val fwdX = side * sin(spec.yawOut)
+                val fwdY = -cos(spec.yawOut)
+                val latX = side * cos(spec.yawOut)
+                val latY = sin(spec.yawOut)
+
+                for (r in 0 until rows) {
+                    val s = r.toFloat() / (rows - 1)
+
+                    // Smooth closed rounded toe tip (s = 0.80..1.0) + natural slightly bulbous distal toe pad (s ~ 0.72)
+                    val tipT = smoothStep(0.80f, 1.0f, s)
+                    val tipAngle = tipT * (PI.toFloat() * 0.5f)
+                    val tipScale = cos(tipAngle).coerceAtLeast(0.025f)
+                    val rootFlare = 1f + 0.14f * (1f - smoothStep(0.0f, 0.22f, s))
+                    val phalanxNeck = 1f - 0.09f * exp(-((s - 0.38f) / 0.18f).let { it * it })
+                    val distalPad = 1f + 0.09f * exp(-((s - 0.74f) / 0.16f).let { it * it })
+                    val radScale = rootFlare * phalanxNeck * distalPad * tipScale
+
+                    val along = -0.095f + s * (spec.length + 0.095f)
+                    // Gentle natural toe arch rising at mid-knuckle then settling pad down onto exam mattress
+                    val curlZ = spec.archLift * sin(s * PI.toFloat()) - 0.024f * smoothStep(0.42f, 0.92f, s)
+                    // Slight medial curve on outer toes for lifelike relaxation
+                    val medialCurve = -0.014f * smoothStep(0.30f, 1.0f, s) * (if (spec.rLat < 0.048f) 1f else 0.22f)
+
+                    val cx = side * spec.rootAx + fwdX * along + latX * medialCurve
+                    val cy = spec.rootY + fwdY * along + latY * medialCurve
+                    val cz = spec.rootZ + curlZ
+
+                    for (c in 0 until cols) {
+                        val u = c.toFloat() / (cols - 1)
+                        val phi = u * (2f * PI.toFloat())
+                        val cosP = cos(phi)
+                        val sinP = sin(phi)
+
+                        // Subtle dorsal nail plate flattening on distal upper face (s in 0.58..0.88)
+                        val nailMask = smoothBell(s, 0.60f, 0.88f, 0.07f) * smoothStep(0.45f, 0.92f, sinP) *
+                            (1f - smoothStep(0.55f, 0.88f, abs(cosP)))
+                        val nailIndent = -0.0045f * nailMask
+
+                        val localLat = spec.rLat * radScale * cosP
+                        var localZ = spec.rZ * radScale * sinP + nailIndent
+                        // Soft plantar toe pad flattening against the exam cushion
+                        if (sinP < 0f) {
+                            localZ *= 0.84f
+                        }
+
+                        val px = cx + latX * localLat
+                        val py = cy + latY * localLat
+                        val pz = (cz + localZ).coerceAtLeast(floorZ)
+
+                        // Exact analytic outward dome normal (smoothly rotates to pure forward at tip apex — zero pinch!)
+                        val radialW = cos(tipAngle)
+                        val fwdW = sin(tipAngle)
+                        var nx = latX * (cosP * radialW / spec.rLat) + fwdX * (fwdW / spec.rLat)
+                        var ny = latY * (cosP * radialW / spec.rLat) + fwdY * (fwdW / spec.rLat)
+                        var nz = sinP * radialW / spec.rZ
+                        val nLen = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-5f)
+                        nx /= nLen; ny /= nLen; nz /= nLen
+
+                        val rootBlend = 1f - smoothStep(0.0f, 0.28f, s)
+                        if (rootBlend > 0.001f) {
+                            val sdfNorm = evaluateBodyNormal(px, py, pz, eps = 0.016f)
+                            val mx = nx * (1f - rootBlend) + sdfNorm[0] * rootBlend
+                            val my = ny * (1f - rootBlend) + sdfNorm[1] * rootBlend
+                            val mz = nz * (1f - rootBlend) + sdfNorm[2] * rootBlend
+                            val mLen = sqrt(mx * mx + my * my + mz * mz).coerceAtLeast(1e-5f)
+                            nx = mx / mLen; ny = my / mLen; nz = mz / mLen
+                        }
+
+                        // Soft interdigital crevice shadow + mattress contact shadow + subtle glossy nail sheen
+                        val interdigitalAo = 1f - abs(cosP) * 0.24f * (1f - smoothStep(0.10f, 0.62f, s))
+                        val soleAo = 1f - smoothStep(0.10f, 0.80f, -sinP) * 0.34f
+                        val ao = (interdigitalAo * soleAo).coerceIn(0.36f, 1f)
+                        val wetness = (0.055f + nailMask * 0.22f).coerceIn(0f, 0.45f)
+                        val pigment = (0.08f + smoothStep(0.60f, 0.96f, s) * 0.08f + nailMask * 0.14f).coerceIn(0f, 1f)
+
+                        val vIdx = (baseVert + r * cols + c) * stride
+                        data[vIdx] = px
+                        data[vIdx + 1] = py
+                        data[vIdx + 2] = pz
+                        data[vIdx + 3] = nx
+                        data[vIdx + 4] = ny
+                        data[vIdx + 5] = nz
+                        data[vIdx + 6] = nailMask * 0.16f // gentle natural rosy nail tint
+                        data[vIdx + 7] = wetness
+                        data[vIdx + 8] = ao
+                        data[vIdx + 9] = pigment
+                    }
+                }
+                toeIndex++
+            }
+        }
+
+        mesh.setIndices(indices)
+        mesh.commitVertices()
+        return mesh
+    }
+
     /**
      * Precomputes the ultra-high-resolution (128x144) clustered elliptical anterior pelvic patch
      * projected with <0.0001mm precision onto Blossom's exact unified SDF body surface.
@@ -841,6 +1164,241 @@ internal object BlossomSdfBodyBuilder {
         }
 
         mesh.commitVertices()
+    }
+
+    // -------------------------------------------------------------------------
+    // 60 FPS HIP-SOCKET ARTICULATED LEG-SPREAD SKINNING (BODY + TOES + TOENAILS)
+    // -------------------------------------------------------------------------
+    const val HIP_PIVOT_AX = 1.12f
+    const val HIP_PIVOT_Y = 0.26f
+    const val HIP_PIVOT_Z = -0.22f
+    const val MAX_LEG_SPREAD_RAD = 0.25f
+
+    class LegSkinCache(
+        val bodyVertIndices: IntArray,
+        val bodyBasePosNorm: FloatArray,
+        val bodyWeights: FloatArray,
+        val bodySides: FloatArray,
+        val toesBasePosNorm: FloatArray,
+        val toesSides: FloatArray,
+        val toeNailStartVert: Int,
+        val toeNailsBasePosNorm: FloatArray,
+        val toeNailsSides: FloatArray
+    )
+
+    fun buildLegSkinCache(
+        bodyMesh: DynamicGlMesh,
+        toesMesh: DynamicGlMesh,
+        nailsMesh: DynamicGlMesh,
+        toeNailStartVert: Int
+    ): LegSkinCache {
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val bData = bodyMesh.vertexData
+
+        val idxBuf = IntArray(bodyMesh.vertexCount)
+        val weightBuf = FloatArray(bodyMesh.vertexCount)
+        val sideBuf = FloatArray(bodyMesh.vertexCount)
+        var count = 0
+
+        // Femur bone vector in +X half-space (Hip -> Knee)
+        val fdx = 1.80f - HIP_PIVOT_AX
+        val fdy = -1.86f - HIP_PIVOT_Y
+        val fdz = 1.74f - HIP_PIVOT_Z
+        val fLen2 = fdx * fdx + fdy * fdy + fdz * fdz
+
+        for (i in 0 until bodyMesh.vertexCount) {
+            val base = i * stride
+            val x = bData[base]
+            val y = bData[base + 1]
+            val z = bData[base + 2]
+            if (y > 0.44f) continue
+
+            val ax = abs(x)
+            // Keep forearm, wrist & palm strictly stationary even beside hips!
+            if (y > -0.72f && ax > 1.82f && z < -0.35f) continue
+
+            // Keep Ultra-HD vulva patch perimeter 100% locked (zero seam drift!)
+            val ovalR = sqrt((x / PATCH_RX).let { it * it } + ((y - PATCH_CENTER_Y) / PATCH_RY).let { it * it })
+            if (ovalR <= 1.04f) continue
+
+            val hFem = ((ax - HIP_PIVOT_AX) * fdx + (y - HIP_PIVOT_Y) * fdy + (z - HIP_PIVOT_Z) * fdz) / fLen2
+            val patchGuard = smoothStep(1.04f, 1.38f, ovalR)
+            val groinYGuard = smoothStep(0.38f, -0.58f, y)
+            val femRamp = smoothStep(0.06f, 0.42f, hFem)
+            val lowerLimbFull = smoothStep(-1.05f, -1.65f, y)
+            val w = max(femRamp * groinYGuard, lowerLimbFull) * patchGuard
+            if (w > 0.001f) {
+                idxBuf[count] = i
+                weightBuf[count] = w.coerceIn(0f, 1f)
+                sideBuf[count] = if (x >= 0f) 1f else -1f
+                count++
+            }
+        }
+
+        val bodyIndices = idxBuf.copyOf(count)
+        val bodyWeights = weightBuf.copyOf(count)
+        val bodySides = sideBuf.copyOf(count)
+        val bodyBase = FloatArray(count * 6)
+        for (k in 0 until count) {
+            val src = bodyIndices[k] * stride
+            val dst = k * 6
+            bodyBase[dst] = bData[src]; bodyBase[dst + 1] = bData[src + 1]; bodyBase[dst + 2] = bData[src + 2]
+            bodyBase[dst + 3] = bData[src + 3]; bodyBase[dst + 4] = bData[src + 4]; bodyBase[dst + 5] = bData[src + 5]
+        }
+
+        val tData = toesMesh.vertexData
+        val toesBase = FloatArray(toesMesh.vertexCount * 6)
+        val toesSides = FloatArray(toesMesh.vertexCount)
+        for (i in 0 until toesMesh.vertexCount) {
+            val src = i * stride
+            val dst = i * 6
+            toesBase[dst] = tData[src]; toesBase[dst + 1] = tData[src + 1]; toesBase[dst + 2] = tData[src + 2]
+            toesBase[dst + 3] = tData[src + 3]; toesBase[dst + 4] = tData[src + 4]; toesBase[dst + 5] = tData[src + 5]
+            toesSides[i] = if (tData[src] >= 0f) 1f else -1f
+        }
+
+        val nData = nailsMesh.vertexData
+        val toeNailCount = (nailsMesh.vertexCount - toeNailStartVert).coerceAtLeast(0)
+        val toeNailsBase = FloatArray(toeNailCount * 6)
+        val toeNailsSides = FloatArray(toeNailCount)
+        for (k in 0 until toeNailCount) {
+            val src = (toeNailStartVert + k) * stride
+            val dst = k * 6
+            toeNailsBase[dst] = nData[src]; toeNailsBase[dst + 1] = nData[src + 1]; toeNailsBase[dst + 2] = nData[src + 2]
+            toeNailsBase[dst + 3] = nData[src + 3]; toeNailsBase[dst + 4] = nData[src + 4]; toeNailsBase[dst + 5] = nData[src + 5]
+            toeNailsSides[k] = if (nData[src] >= 0f) 1f else -1f
+        }
+
+        return LegSkinCache(
+            bodyVertIndices = bodyIndices,
+            bodyBasePosNorm = bodyBase,
+            bodyWeights = bodyWeights,
+            bodySides = bodySides,
+            toesBasePosNorm = toesBase,
+            toesSides = toesSides,
+            toeNailStartVert = toeNailStartVert,
+            toeNailsBasePosNorm = toeNailsBase,
+            toeNailsSides = toeNailsSides
+        )
+    }
+
+    /**
+     * Evaluates the exact world-space position of any leg point after interactive hip-socket abduction.
+     */
+    fun transformLegPoint(x: Float, y: Float, z: Float, side: Float, spread: Float, weight: Float = 1f): FloatArray {
+        val clampedSpread = spread.coerceIn(-0.35f, 1.0f)
+        val angle = side * clampedSpread * MAX_LEG_SPREAD_RAD * weight
+        val cosA = cos(angle)
+        val sinA = sin(angle)
+        val pivotX = side * HIP_PIVOT_AX
+        val rx = x - pivotX
+        val ry = y - HIP_PIVOT_Y
+        val nx = pivotX + rx * cosA - ry * sinA
+        val ny = HIP_PIVOT_Y + rx * sinA + ry * cosA
+        val kneeDrop = -0.14f * clampedSpread * weight * smoothStep(-0.55f, 1.50f, z)
+        return floatArrayOf(nx, ny, z + kneeDrop)
+    }
+
+    fun applyLegSpread(
+        bodyMesh: DynamicGlMesh,
+        toesMesh: DynamicGlMesh,
+        nailsMesh: DynamicGlMesh,
+        cache: LegSkinCache,
+        leftLegSpread: Float,
+        rightLegSpread: Float
+    ) {
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val leftS = leftLegSpread.coerceIn(-0.35f, 1.0f)
+        val rightS = rightLegSpread.coerceIn(-0.35f, 1.0f)
+
+        val bData = bodyMesh.vertexData
+        val bIdx = cache.bodyVertIndices
+        val bBase = cache.bodyBasePosNorm
+        val bWeights = cache.bodyWeights
+        val bSides = cache.bodySides
+        for (k in bIdx.indices) {
+            val side = bSides[k]
+            val spread = if (side < 0f) leftS else rightS
+            val w = bWeights[k]
+            val angle = side * spread * MAX_LEG_SPREAD_RAD * w
+            val cosA = cos(angle)
+            val sinA = sin(angle)
+            val pivotX = side * HIP_PIVOT_AX
+
+            val src = k * 6
+            val x = bBase[src]; val y = bBase[src + 1]; val z = bBase[src + 2]
+            val nx = bBase[src + 3]; val ny = bBase[src + 4]; val nz = bBase[src + 5]
+
+            val rx = x - pivotX
+            val ry = y - HIP_PIVOT_Y
+            val kneeDrop = -0.14f * spread * w * smoothStep(-0.55f, 1.50f, z)
+
+            val dst = bIdx[k] * stride
+            bData[dst] = pivotX + rx * cosA - ry * sinA
+            bData[dst + 1] = HIP_PIVOT_Y + rx * sinA + ry * cosA
+            bData[dst + 2] = z + kneeDrop
+            bData[dst + 3] = nx * cosA - ny * sinA
+            bData[dst + 4] = nx * sinA + ny * cosA
+            bData[dst + 5] = nz
+        }
+        bodyMesh.commitVertices()
+
+        val tData = toesMesh.vertexData
+        val tBase = cache.toesBasePosNorm
+        val tSides = cache.toesSides
+        for (i in 0 until toesMesh.vertexCount) {
+            val side = tSides[i]
+            val spread = if (side < 0f) leftS else rightS
+            val angle = side * spread * MAX_LEG_SPREAD_RAD
+            val cosA = cos(angle)
+            val sinA = sin(angle)
+            val pivotX = side * HIP_PIVOT_AX
+
+            val src = i * 6
+            val x = tBase[src]; val y = tBase[src + 1]; val z = tBase[src + 2]
+            val nx = tBase[src + 3]; val ny = tBase[src + 4]; val nz = tBase[src + 5]
+
+            val rx = x - pivotX
+            val ry = y - HIP_PIVOT_Y
+
+            val dst = i * stride
+            tData[dst] = pivotX + rx * cosA - ry * sinA
+            tData[dst + 1] = HIP_PIVOT_Y + rx * sinA + ry * cosA
+            tData[dst + 2] = z
+            tData[dst + 3] = nx * cosA - ny * sinA
+            tData[dst + 4] = nx * sinA + ny * cosA
+            tData[dst + 5] = nz
+        }
+        toesMesh.commitVertices()
+
+        val nData = nailsMesh.vertexData
+        val nBase = cache.toeNailsBasePosNorm
+        val nSides = cache.toeNailsSides
+        val nStart = cache.toeNailStartVert
+        for (k in nSides.indices) {
+            val side = nSides[k]
+            val spread = if (side < 0f) leftS else rightS
+            val angle = side * spread * MAX_LEG_SPREAD_RAD
+            val cosA = cos(angle)
+            val sinA = sin(angle)
+            val pivotX = side * HIP_PIVOT_AX
+
+            val src = k * 6
+            val x = nBase[src]; val y = nBase[src + 1]; val z = nBase[src + 2]
+            val nx = nBase[src + 3]; val ny = nBase[src + 4]; val nz = nBase[src + 5]
+
+            val rx = x - pivotX
+            val ry = y - HIP_PIVOT_Y
+
+            val dst = (nStart + k) * stride
+            nData[dst] = pivotX + rx * cosA - ry * sinA
+            nData[dst + 1] = HIP_PIVOT_Y + rx * sinA + ry * cosA
+            nData[dst + 2] = z
+            nData[dst + 3] = nx * cosA - ny * sinA
+            nData[dst + 4] = nx * sinA + ny * cosA
+            nData[dst + 5] = nz
+        }
+        nailsMesh.commitVertices()
     }
 
     // -------------------------------------------------------------------------
