@@ -14,7 +14,7 @@ import kotlin.math.sin
  */
 internal object BlossomBodyBuilder {
 
-    const val BLOSSOM_MILESTONE_TAG = "Blossom v4.6"
+    const val BLOSSOM_MILESTONE_TAG = "Blossom v5.8"
 
     const val CUSHION_COLS = 64
     const val CUSHION_ROWS = 96

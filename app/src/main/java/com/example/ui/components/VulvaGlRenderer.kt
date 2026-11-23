@@ -102,6 +102,9 @@ class VulvaGlTextureView(
     var hairStyle: BlossomHairStyle = BlossomHairStyles[2]
 
     @Volatile
+    var pubicHairAmount: Float = 0.45f
+
+    @Volatile
     var touchGlow: VulvaTouchGlow = VulvaTouchGlow()
 
     @Volatile
@@ -144,6 +147,8 @@ class VulvaGlTextureView(
     private var uHairBaseLoc = -1
     private var uHairHighlightLoc = -1
     private var uHairSheenLoc = -1
+    private var uPubicHairLoc = -1
+    private var uAllowPubicHairLoc = -1
 
     private var surfaceWidth = 1
     private var surfaceHeight = 1
@@ -292,6 +297,8 @@ class VulvaGlTextureView(
         uHairBaseLoc = GLES20.glGetUniformLocation(programId, "uHairBase")
         uHairHighlightLoc = GLES20.glGetUniformLocation(programId, "uHairHighlight")
         uHairSheenLoc = GLES20.glGetUniformLocation(programId, "uHairSheen")
+        uPubicHairLoc = GLES20.glGetUniformLocation(programId, "uPubicHair")
+        uAllowPubicHairLoc = GLES20.glGetUniformLocation(programId, "uAllowPubicHair")
 
         sceneMesh = VulvaAnatomySceneMesh()
         lastAppliedDeformation = VulvaDeformationState()
@@ -339,6 +346,7 @@ class VulvaGlTextureView(
         GLES20.glUniform3f(uHairBaseLoc, hair.baseColor.red, hair.baseColor.green, hair.baseColor.blue)
         GLES20.glUniform3f(uHairHighlightLoc, hair.highlightColor.red, hair.highlightColor.green, hair.highlightColor.blue)
         GLES20.glUniform3f(uHairSheenLoc, hair.sheenColor.red, hair.sheenColor.green, hair.sheenColor.blue)
+        GLES20.glUniform1f(uPubicHairLoc, pubicHairAmount.coerceIn(0f, 1f))
 
         val touchWorldX = (glow.normX - 0.5f) * 1.60f
         val touchWorldY = (0.5f - glow.normY) * 1.90f
@@ -358,6 +366,10 @@ class VulvaGlTextureView(
         fun drawMeshList(meshes: List<DynamicGlMesh>, materialType: Float) {
             GLES20.glUniform1f(uMaterialTypeLoc, materialType)
             meshes.forEach { glMesh ->
+                val allowPubic = (materialType < 0.5f) &&
+                    (glMesh === mesh.blossomBodyMesh || glMesh === mesh.blossomVulvaPatchMesh || glMesh === mesh.pelvisMesh)
+                GLES20.glUniform1f(uAllowPubicHairLoc, if (allowPubic) 1.0f else 0.0f)
+
                 val vb = glMesh.vertexBuffer
                 vb.position(0)
                 GLES20.glVertexAttribPointer(aPosLoc, 3, GLES20.GL_FLOAT, false, DynamicGlMesh.STRIDE_BYTES, vb)
@@ -547,6 +559,8 @@ class VulvaGlTextureView(
             uniform vec3 uHairBase;
             uniform vec3 uHairHighlight;
             uniform vec3 uHairSheen;
+            uniform float uPubicHair;
+            uniform float uAllowPubicHair;
 
             float hash31(vec3 p) {
                 p = fract(p * vec3(0.1031, 0.11369, 0.13787));
@@ -653,24 +667,28 @@ class VulvaGlTextureView(
                     float hairAo = clamp(vMat.z, 0.35, 1.0);
                     float lockBias = vMat.w;
 
-                    float fineStrands = vnoise3(vWorldPos * vec3(42.0, 26.0, 42.0)) * 0.65 +
-                                        vnoise3(vWorldPos * vec3(95.0, 52.0, 95.0)) * 0.35;
-                    vec3 hairAlbedo = mix(uHairBase, uHairHighlight, clamp(strandRib * 0.42 + fineStrands * 0.36 + lockBias * 0.54, 0.0, 1.0));
+                    // Fine silky longitudinal micro-strands so hair reads soft & natural instead of sculpted clay
+                    float fineStrands = vnoise3(vWorldPos * vec3(56.0, 18.0, 56.0)) * 0.58 +
+                                        vnoise3(vWorldPos * vec3(128.0, 34.0, 128.0)) * 0.42;
+                    float silkyBand = 0.5 + 0.5 * sin(strandFlow * 16.0 + fineStrands * 4.5);
+                    vec3 hairAlbedo = mix(uHairBase, uHairHighlight, clamp(strandRib * 0.28 + fineStrands * 0.44 + lockBias * 0.42, 0.0, 1.0));
+                    // Subtle darker root warmth & lighter sun-kissed mid-shaft depth
+                    hairAlbedo *= mix(0.84, 1.06, smoothstep(0.0, 0.35, strandFlow) * (0.78 + 0.22 * silkyBand));
 
-                    float dKeyH = clamp((dot(N, Lkey) + 0.26) / 1.26, 0.0, 1.0);
-                    float dFillH = clamp((dot(N, Lfill) + 0.28) / 1.28, 0.0, 1.0);
+                    float dKeyH = clamp((dot(N, Lkey) + 0.28) / 1.28, 0.0, 1.0);
+                    float dFillH = clamp((dot(N, Lfill) + 0.30) / 1.30, 0.0, 1.0);
                     vec3 HkeyH = normalize(Lkey + V);
                     vec3 HfillH = normalize(Lfill + V);
 
                     // Soft dual-lobe studio hair sheen (primary silk + secondary warm strand highlight)
-                    float primarySheen = pow(max(dot(N, HkeyH), 0.0), 28.0) * (0.22 + 0.16 * fineStrands);
-                    float secondarySheen = pow(max(dot(N, HfillH), 0.0), 14.0) * 0.12;
-                    float rimSheen = pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 2.6) * 0.18 * clamp(dot(N, Lrim) * 0.5 + 0.5, 0.2, 1.0);
+                    float primarySheen = pow(max(dot(N, HkeyH), 0.0), 34.0) * (0.20 + 0.22 * fineStrands);
+                    float secondarySheen = pow(max(dot(N, HfillH), 0.0), 16.0) * 0.11;
+                    float rimSheen = pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 2.5) * 0.19 * clamp(dot(N, Lrim) * 0.5 + 0.5, 0.2, 1.0);
 
-                    vec3 hairLit = hairAlbedo * (0.26 + dKeyH * 0.74 + dFillH * 0.24) * hairAo +
+                    vec3 hairLit = hairAlbedo * (0.27 + dKeyH * 0.72 + dFillH * 0.25) * hairAo +
                                    uHairSheen * primarySheen * hairAo +
-                                   uHairHighlight * secondarySheen * 1.15 * hairAo +
-                                   uHairSheen * 0.58 * rimSheen * hairAo;
+                                   uHairHighlight * secondarySheen * 1.12 * hairAo +
+                                   uHairSheen * 0.55 * rimSheen * hairAo;
                     vec3 hairMapped = hairLit / (hairLit + vec3(0.72));
                     hairMapped = pow(clamp(hairMapped * 1.26, 0.0, 1.0), vec3(1.01));
                     gl_FragColor = vec4(hairMapped, 1.0);
@@ -700,12 +718,12 @@ class VulvaGlTextureView(
                     irisCol = mix(irisCol, brightCerulean * 1.16, fiber * 0.34 + fineFiber * 0.16);
                     irisCol = mix(irisCol, innerGold, (1.0 - smoothstep(0.13, 0.22, irisR)) * 0.28);
 
-                    // Natural dark navy limbal ring at outer iris border (r ~ 0.34..0.38)
-                    float limbalRing = exp(-pow((irisR - 0.36) / 0.028, 2.0));
-                    irisCol = mix(irisCol, vec3(0.04, 0.09, 0.17), limbalRing * 0.78);
+                    // Natural dark navy limbal ring at outer iris border (r ~ 0.37..0.41)
+                    float limbalRing = exp(-pow((irisR - 0.39) / 0.028, 2.0));
+                    irisCol = mix(irisCol, vec3(0.04, 0.09, 0.17), limbalRing * 0.80);
 
-                    float inIris = 1.0 - smoothstep(0.355, 0.390, irisR);
-                    float inPupil = 1.0 - smoothstep(0.135, 0.168, irisR);
+                    float inIris = 1.0 - smoothstep(0.382, 0.418, irisR);
+                    float inPupil = 1.0 - smoothstep(0.145, 0.178, irisR);
 
                     vec3 eyeAlbedo = mix(scleraCol, irisCol, inIris);
                     eyeAlbedo = mix(eyeAlbedo, vec3(0.015, 0.016, 0.022), inPupil);
@@ -713,12 +731,12 @@ class VulvaGlTextureView(
                     float dKeyE = clamp((dot(N, Lkey) + 0.28) / 1.28, 0.0, 1.0);
                     float dFillE = clamp((dot(N, Lfill) + 0.24) / 1.24, 0.0, 1.0);
                     // Subtle lower-iris internal light scatter makes blue eyes sparkle naturally
-                    float irisGlow = inIris * (1.0 - inPupil) * smoothstep(0.25, 0.85, 1.0 - vMat.w) * 0.22;
+                    float irisGlow = inIris * (1.0 - inPupil) * smoothstep(0.22, 0.85, 1.0 - vMat.w) * 0.28;
 
                     vec3 HkeyE = normalize(Lkey + V);
                     vec3 HfillE = normalize(Lfill + V);
-                    float corneaGlint1 = pow(max(dot(N, HkeyE), 0.0), 140.0) * 1.15;
-                    float corneaGlint2 = pow(max(dot(N, HfillE), 0.0), 90.0) * 0.35;
+                    float corneaGlint1 = pow(max(dot(N, HkeyE), 0.0), 145.0) * 1.28;
+                    float corneaGlint2 = pow(max(dot(N, HfillE), 0.0), 92.0) * 0.40;
 
                     vec3 eyeLit = eyeAlbedo * (0.28 + dKeyE * 0.66 + dFillE * 0.22 + irisGlow) * lidAo +
                                   vec3(1.0, 0.99, 0.98) * (corneaGlint1 + corneaGlint2);
@@ -772,47 +790,77 @@ class VulvaGlTextureView(
                 float hX = skinDetailHeight(vWorldPos + vec3(eps, 0.0, 0.0), mucosa, pigment, uStretch);
                 float hY = skinDetailHeight(vWorldPos + vec3(0.0, eps, 0.0), mucosa, pigment, uStretch);
 
-                float bumpGain = mix(0.140, 0.058, mucosa) + pigment * 0.056;
+                // Finer, velvety portrait skin micro-normal on face & chest (prevents coarse orange-peel pores!)
+                float faceVelvet = smoothstep(5.25, 5.85, vWorldPos.y);
+                float bumpGain = (mix(0.140, 0.058, mucosa) + pigment * 0.052) * (1.0 - faceVelvet * 0.56);
                 vec3 microGrad = vec3(hC - hX, hC - hY, 0.0) * (bumpGain / eps * 0.0056);
                 N = normalize(N + microGrad);
 
-                // Subtle cavity micro-occlusion inside pores & delicate labial folds
-                float microAo = mix(0.88, 1.05, hC);
+                // Subtle cavity micro-occlusion inside pores & delicate labial folds (softer on facial skin)
+                float microAo = mix(mix(0.88, 0.95, faceVelvet), 1.04, hC);
 
                 // Harmonized organic skin & mucosa albedo — keeps body, areolae, face, outer labia & inner lips living & cohesive
                 vec3 skinMottle = mix(uSkinBase * 0.94, uSkinBase * 1.05, nMacro * 0.62 + nMid * 0.38);
                 vec3 warmBlush = mix(skinMottle, skinMottle * vec3(1.05, 0.94, 0.92), 0.25 + nMid * 0.25);
-                // Velvety-matte dry pigmented skin (areolae, nipples, brows) receives authentic warm dusty-rose/cocoa depth
-                float dryPigmentMask = smoothstep(0.28, 0.72, pigment) * (1.0 - smoothstep(0.08, 0.18, wetness));
+                // Velvety-matte dry pigmented skin (areolae, nipples) receives authentic warm dusty-rose/cocoa depth
+                float isHeadRegion = smoothstep(5.40, 5.62, vWorldPos.y);
+                float dryPigmentMask = smoothstep(0.28, 0.72, pigment) * (1.0 - smoothstep(0.08, 0.18, wetness)) * (1.0 - isHeadRegion);
                 float areolaFineGrain = vnoise3(vWorldPos * 140.0) * 0.55 + vnoise3(vWorldPos * 260.0) * 0.45;
                 vec3 areolaTone = mix(uSkinShadow * vec3(0.92, 0.76, 0.74), uMucosaBase * vec3(0.84, 0.68, 0.66), 0.54);
                 areolaTone *= mix(0.92, 1.06, areolaFineGrain);
-                vec3 pigmentedSkin = mix(warmBlush, mix(uSkinShadow * 0.94, uMucosaBase * 0.92, 0.42), pigment * 0.38);
+                vec3 pigmentedSkin = mix(warmBlush, mix(uSkinShadow * 0.94, uMucosaBase * 0.92, 0.42), pigment * 0.38 * (1.0 - isHeadRegion * 0.65));
                 pigmentedSkin = mix(pigmentedSkin, areolaTone, dryPigmentMask * 0.52);
 
-                // Soft velvety vascular harmonization between surrounding skin and labial mucosa
+                // Soft velvety vascular harmonization between surrounding skin and labial / facial lip mucosa
                 vec3 harmonizedMucosa = mix(uSkinBase * vec3(1.03, 0.88, 0.88), uMucosaBase, 0.64);
-                vec3 mucosaVar = mix(harmonizedMucosa * 0.92, harmonizedMucosa * 1.10, nMid * 0.55 + 0.28);
-                vec3 mucosaRich = mix(mucosaVar, uMucosaDeep, (1.0 - ao) * 0.50);
-                vec3 mucosaRimmed = mix(mucosaRich, mix(uMucosaDeep * 0.94, uSkinShadow * 0.92, 0.46), pigment * 0.22);
-                vec3 albedo = mix(pigmentedSkin, mucosaRimmed, mucosa * (1.0 - dryPigmentMask * 0.45));
+                // Soft, natural skin-harmonized muted rose facial lip tone (never artificial dark/injected!)
+                vec3 facialLipTone = mix(uSkinBase * vec3(1.02, 0.81, 0.81), uMucosaBase * vec3(1.04, 0.88, 0.90), 0.52);
+                vec3 baseMucosaTone = mix(harmonizedMucosa, facialLipTone, isHeadRegion);
+                vec3 mucosaVar = mix(baseMucosaTone * 0.94, baseMucosaTone * 1.07, nMid * 0.50 + 0.30);
+                vec3 mucosaRich = mix(mucosaVar, uMucosaDeep, (1.0 - ao) * (0.50 - 0.24 * isHeadRegion));
+                vec3 mucosaRimmed = mix(mucosaRich, mix(uMucosaDeep * 0.94, uSkinShadow * 0.92, 0.46), pigment * 0.22 * (1.0 - isHeadRegion));
+                // Keep facial skin (low mucosa) 100% matched to neck/chest brightness and neutral hue!
+                float faceLipActive = smoothstep(0.06, 0.22, mucosa);
+                vec3 faceHarmonizedSkin = mix(pigmentedSkin, warmBlush * vec3(1.01, 1.01, 1.00), isHeadRegion * (1.0 - faceLipActive) * 0.45);
+                vec3 albedo = mix(faceHarmonizedSkin, mucosaRimmed, mucosa * (1.0 - dryPigmentMask * 0.45));
 
-                // Soft, naturally feathered curved mons pubis hair arch (strictly on anterior pelvic surface!)
+                // Hair-color-matched sculpted eyebrows (pigment ~0.18..0.56) & crisp dark eyelashes (pigment > 0.68) — zero stray dots!
+                float browMaskFace = isHeadRegion * smoothstep(0.16, 0.52, pigment) * (1.0 - smoothstep(0.08, 0.18, mucosa));
+                float lashMaskFace = isHeadRegion * smoothstep(0.68, 0.90, pigment) * (1.0 - smoothstep(0.08, 0.18, mucosa));
+                float browMicroHair = smoothstep(0.28, 0.78, vnoise3(vWorldPos * vec3(135.0, 210.0, 120.0)));
+                vec3 browTone = mix(uHairBase * 0.92, uSkinShadow * 0.44, 0.24) * mix(0.86, 1.08, browMicroHair);
+                vec3 lashTone = mix(uHairBase * 0.38, vec3(0.06, 0.045, 0.045), 0.56);
+                albedo = mix(albedo, browTone, browMaskFace * 0.72);
+                albedo = mix(albedo, lashTone, lashMaskFace * 0.86);
+
+                // Customizable pubic hair (0.0 = Cleanly Shaven, 0.45 = Natural default, 1.0 = Very Bushy)
                 float ax = abs(vWorldPos.x);
-                float anteriorMask = smoothstep(-0.18, 0.04, vWorldPos.z) * (1.0 - smoothstep(0.55, 0.85, ax));
-                float edgeNoise = (nMid - 0.5) * 0.12;
-                float monsTopArch = 0.84 - ax * ax * 0.62 + edgeNoise;
-                float monsTopFade = 1.0 - smoothstep(monsTopArch - 0.18, monsTopArch + 0.06, vWorldPos.y);
-                float monsBotArch = 0.50 + 0.08 * smoothstep(0.0, 0.22, ax) + edgeNoise * 0.4;
+                float hairAmt = clamp(uPubicHair, 0.0, 1.0);
+                float hairGrow = clamp(hairAmt / 0.45, 0.0, 1.0);
+                float hairBush = clamp((hairAmt - 0.45) / 0.55, 0.0, 1.0);
+
+                // Strictly isolate pubic hair to pelvic skin meshes & pelvic surface Z (ZERO bleeding onto posed hands/fingers!)
+                float pelvicZBand = smoothstep(-0.18, 0.04, vWorldPos.z) * (1.0 - smoothstep(0.42, 0.54, vWorldPos.z));
+                float anteriorMask = uAllowPubicHair * pelvicZBand * (1.0 - smoothstep(0.55 + 0.16 * hairBush, 0.85 + 0.18 * hairBush, ax));
+                float edgeNoise = (nMid - 0.5) * (0.12 + 0.06 * hairBush);
+                float monsTopArch = (0.84 + 0.22 * hairBush) - ax * ax * (0.62 - 0.18 * hairBush) + edgeNoise;
+                float monsTopFade = 1.0 - smoothstep(monsTopArch - 0.18, monsTopArch + 0.06 + 0.05 * hairBush, vWorldPos.y);
+                float monsBotArch = (0.50 - 0.14 * hairBush) + 0.08 * smoothstep(0.0, 0.22, ax) + edgeNoise * 0.4;
                 float monsBotFade = smoothstep(monsBotArch - 0.05, monsBotArch + 0.11, vWorldPos.y);
-                float monsWidthLimit = 0.25 + 0.26 * smoothstep(0.46, 0.74, vWorldPos.y) + edgeNoise * 0.6;
-                float monsSideFade = 1.0 - smoothstep(monsWidthLimit * 0.45, monsWidthLimit, ax);
+                float monsWidthLimit = (0.25 + 0.15 * hairBush) + (0.26 + 0.12 * hairBush) * smoothstep(0.46 - 0.12 * hairBush, 0.74, vWorldPos.y) + edgeNoise * 0.6;
+                float monsSideFade = 1.0 - smoothstep(monsWidthLimit * (0.45 - 0.10 * hairBush), monsWidthLimit, ax);
                 float monsHairPatch = monsTopFade * monsBotFade * monsSideFade * (1.0 - mucosa) * anteriorMask;
 
-                float upperLabiaHair = smoothstep(0.19, 0.28, ax) * (1.0 - smoothstep(0.32, 0.43, ax)) *
-                                       smoothstep(0.08, 0.46, vWorldPos.y) * (1.0 - smoothstep(0.48, 0.68, vWorldPos.y)) *
-                                       (1.0 - mucosa) * anteriorMask * 0.26;
-                float totalHairMask = clamp(monsHairPatch + upperLabiaHair, 0.0, 1.0);
+                // Full outer-labial & lower-groin hair extension when slider moves above Natural toward Very Bushy
+                float labiaInnerCut = 0.19 - 0.06 * hairBush;
+                float labiaOuterMax = 0.43 + 0.14 * hairBush;
+                float labiaLowY = 0.08 - 0.34 * hairBush;
+                float upperLabiaHair = smoothstep(labiaInnerCut, labiaInnerCut + 0.09, ax) *
+                                       (1.0 - smoothstep(labiaOuterMax - 0.11, labiaOuterMax, ax)) *
+                                       smoothstep(labiaLowY, 0.46 - 0.16 * hairBush, vWorldPos.y) *
+                                       (1.0 - smoothstep(0.48 + 0.14 * hairBush, 0.68 + 0.14 * hairBush, vWorldPos.y)) *
+                                       (1.0 - mucosa * (1.0 - 0.25 * hairBush)) * anteriorMask * (0.26 + 0.68 * hairBush);
+                float totalHairMask = clamp(monsHairPatch + upperLabiaHair, 0.0, 1.0) * smoothstep(0.015, 0.14, hairAmt);
 
                 float curl1 = vnoise3(vWorldPos * 18.0) * 2.6;
                 float curl2 = vnoise3(vWorldPos * 42.0) * 1.2;
@@ -821,12 +869,23 @@ class VulvaGlTextureView(
                     vWorldPos.y * 32.0 + ax * 20.0 - curl1 * 0.60,
                     vWorldPos.z * 28.0
                 );
-                float hairSoftShadow = smoothstep(0.28, 0.78, vnoise3(hairCoord * 0.52));
-                float hairFineStrands = smoothstep(0.52, 0.88, vnoise3(hairCoord * 1.45));
-                float hairCoverage = clamp(totalHairMask * (hairSoftShadow * 0.36 + hairFineStrands * 0.48), 0.0, 0.62);
+                float hairSoftShadow = smoothstep(0.28 - 0.14 * hairBush, 0.78 - 0.18 * hairBush, vnoise3(hairCoord * 0.52));
+                float hairFineStrands = smoothstep(0.52 - 0.20 * hairBush, 0.88 - 0.14 * hairBush, vnoise3(hairCoord * 1.45));
+                float hairDenseLayer = smoothstep(0.32, 0.72, vnoise3(hairCoord * 0.92 + vec3(3.1, -1.7, 2.4))) * hairBush * 0.42;
+                float rawCoverage = totalHairMask * (hairSoftShadow * (0.36 + 0.24 * hairBush) + hairFineStrands * (0.48 + 0.22 * hairBush) + hairDenseLayer);
+                float hairCoverage = clamp(rawCoverage * hairGrow, 0.0, 0.62 + 0.34 * hairBush);
+
+                // Subtle 3D coarse curly-hair relief when bushy so full pubic hair catches realistic studio depth
+                if (hairCoverage > 0.04 && hairBush > 0.02) {
+                    float hcX = vnoise3((hairCoord + vec3(0.45, 0.0, 0.0)) * 1.15) - vnoise3((hairCoord - vec3(0.45, 0.0, 0.0)) * 1.15);
+                    float hcY = vnoise3((hairCoord + vec3(0.0, 0.45, 0.0)) * 1.15) - vnoise3((hairCoord - vec3(0.0, 0.45, 0.0)) * 1.15);
+                    N = normalize(N + vec3(hcX, hcY, 0.0) * (hairCoverage * hairBush * 0.26));
+                }
 
                 vec3 hairColor = mix(uSkinShadow * 0.34, uHairBase * 0.85, 0.60);
-                albedo = mix(albedo, hairColor, hairCoverage * 0.66);
+                // Subtle warm strand variation inside fuller bush so it never looks like a flat dark decal
+                vec3 bushyHairColor = mix(hairColor * 0.84, mix(uHairBase, uHairHighlight, 0.28), hairFineStrands * 0.45 * hairBush);
+                albedo = mix(albedo, bushyHairColor, hairCoverage * (0.66 + 0.27 * hairBush));
 
                 float NdotL1 = dot(N, Lkey);
                 float NdotL2 = dot(N, Lfill);
@@ -884,13 +943,16 @@ class VulvaGlTextureView(
                 vec3 aoExponents = mix(vec3(0.76, 1.00, 1.18), vec3(0.68, 0.90, 1.06), jointSss * 0.65);
                 vec3 coloredAo = pow(vec3(fullAo), aoExponents);
 
-                vec3 ambient = albedo * (0.19 + 0.08 * (N.y * 0.5 + 0.5));
+                // Balanced portrait illumination so Blossom's face matches her neck & chest brightness naturally
+                float headFillLift = isHeadRegion * (1.0 - browMaskFace * 0.7 - lashMaskFace * 0.85) * 0.055;
+                vec3 ambient = albedo * (0.19 + headFillLift + 0.08 * (N.y * 0.5 + 0.5));
                 vec3 keyColor = vec3(1.03, 0.96, 0.92);
                 vec3 fillColor = vec3(0.98, 0.93, 0.90);
+                float faceSssTrim = 1.0 - isHeadRegion * (1.0 - mucosa) * 0.30;
 
                 vec3 lit = ambient * coloredAo +
-                           albedo * (diffKeyRGB * 0.78 * keyColor + diffFillRGB * 0.22 * fillColor) * (vec3(0.28) + 0.72 * coloredAo) +
-                           sssTint * (terminator * 0.34 + grazingTrans * 0.20 + thinTransmit * (0.22 + 0.20 * uLightMode)) * coloredAo +
+                           albedo * (diffKeyRGB * 0.78 * keyColor + diffFillRGB * (0.22 + isHeadRegion * 0.08) * fillColor) * (vec3(0.28) + 0.72 * coloredAo) +
+                           sssTint * (terminator * 0.34 * faceSssTrim + grazingTrans * 0.20 + thinTransmit * (0.22 + 0.20 * uLightMode)) * coloredAo +
                            vec3(1.0, 0.96, 0.94) * (broadSpec + wetSharpSpec) * (0.28 + 0.72 * fullAo) +
                            mix(uSkinBase, sssTint, 0.46) * rimLight;
 

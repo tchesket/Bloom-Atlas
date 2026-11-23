@@ -50,7 +50,9 @@ data class VulvaDeformationState(
     val rightBreastY: Float = 0f,
     val breastSize: Float = 0.50f,
     val leftLegSpread: Float = 0f,
-    val rightLegSpread: Float = 0f
+    val rightLegSpread: Float = 0f,
+    val selfSpreadPose: Float = 0f,
+    val headTurn: Float = 0f
 )
 
 class DynamicGlMesh(
@@ -97,14 +99,21 @@ class VulvaAnatomySceneMesh {
     private val pelvisRows = 132
     val pelvisMesh = DynamicGlMesh(pelvisCols * pelvisRows, (pelvisCols - 1) * (pelvisRows - 1) * 6)
 
-    // 1B. Beta Mode: Blossom's Full Head-to-Toe Unified SDF Body + Toes + Fingers + 20 Nails + Live Breasts + Head/Eyes/Hair + Ultra-HD Vulva Patch
+    // 1B. Beta Mode: Blossom's Full Head-to-Toe Unified SDF Body + Toes + Sculpted Palms + Fingers + 20 Nails + Live Breasts + Head/Eyes/Hair + Ultra-HD Vulva Patch
     val blossomBodyMesh: DynamicGlMesh
     val blossomToesMesh: DynamicGlMesh
+    val blossomPalmsMesh: DynamicGlMesh
     val blossomHandsMesh: DynamicGlMesh
     val blossomNailsMesh: DynamicGlMesh
-    private val blossomLegSkinCache: BlossomSdfBodyBuilder.LegSkinCache
+    internal val blossomLegSkinCache: BlossomSdfBodyBuilder.LegSkinCache
+    internal val blossomArmSkinCache: BlossomArmIkRig.ArmSkinCache
+    internal val blossomHeadRigCache: BlossomUpperBodyBuilder.HeadRigCache
     private var lastAppliedLeftLegSpread = Float.NaN
     private var lastAppliedRightLegSpread = Float.NaN
+    private var lastAppliedSelfSpreadPose = Float.NaN
+    private var lastAppliedArmLeftOuter = Float.NaN
+    private var lastAppliedArmRightOuter = Float.NaN
+    private var lastAppliedHeadTurn = Float.NaN
     private val blossomBreastsCache: BlossomUpperBodyBuilder.BlossomBreastsCache
     val blossomBreastsMesh = DynamicGlMesh(
         BlossomUpperBodyBuilder.BREAST_COLS * BlossomUpperBodyBuilder.BREAST_ROWS * 2,
@@ -152,9 +161,10 @@ class VulvaAnatomySceneMesh {
         glansMesh.setIndices(buildGridIndices(glansCols, glansRows))
         labiaHoodArchMesh.setIndices(buildGridIndices(archCols, archRows))
 
-        // Build Blossom's full head-to-toe unified watertight SDF body, limbs, hands, 20 nails, breasts, head, eyes, hair & exam cushion ONCE
+        // Build Blossom's full head-to-toe unified watertight SDF body, limbs, sculpted palms, fingers, 20 nails, breasts, head, eyes, hair & exam cushion ONCE
         blossomBodyMesh = BlossomSdfBodyBuilder.buildUnifiedBodyMesh()
         blossomToesMesh = BlossomSdfBodyBuilder.buildBlossomToesMesh()
+        blossomPalmsMesh = BlossomUpperBodyBuilder.buildBlossomPalmsMesh()
         blossomHandsMesh = BlossomUpperBodyBuilder.buildBlossomHandsMesh()
         val (nailsMesh, toeNailStartVert) = BlossomUpperBodyBuilder.buildBlossomNailsMesh()
         blossomNailsMesh = nailsMesh
@@ -164,6 +174,7 @@ class VulvaAnatomySceneMesh {
             nailsMesh = blossomNailsMesh,
             toeNailStartVert = toeNailStartVert
         )
+        blossomArmSkinCache = BlossomArmIkRig.buildArmSkinCache(blossomBodyMesh)
         blossomBreastsCache = BlossomUpperBodyBuilder.buildBreastsCache()
         blossomHeadMesh = BlossomUpperBodyBuilder.buildBlossomHeadMesh(
             buildIndices = ::buildGridIndices,
@@ -171,6 +182,12 @@ class VulvaAnatomySceneMesh {
         )
         blossomEyesMesh = BlossomUpperBodyBuilder.buildBlossomEyesMesh()
         blossomHairMesh = BlossomUpperBodyBuilder.buildBlossomHairMesh()
+        blossomHeadRigCache = BlossomUpperBodyBuilder.buildHeadRigCache(
+            bodyMesh = blossomBodyMesh,
+            headMesh = blossomHeadMesh,
+            eyesMesh = blossomEyesMesh,
+            hairMesh = blossomHairMesh
+        )
         examCushionMesh = BlossomBodyBuilder.buildExamCushionMesh(
             buildIndices = ::buildGridIndices,
             computeNormals = ::computeGridNormals
@@ -179,6 +196,7 @@ class VulvaAnatomySceneMesh {
         blossomSkinMeshes = listOf(
             blossomBodyMesh,
             blossomToesMesh,
+            blossomPalmsMesh,
             blossomHandsMesh,
             blossomBreastsMesh,
             blossomHeadMesh,
@@ -212,6 +230,35 @@ class VulvaAnatomySceneMesh {
                 )
                 lastAppliedLeftLegSpread = state.leftLegSpread
                 lastAppliedRightLegSpread = state.rightLegSpread
+            }
+            val armPoseNeedsUpdate = state.selfSpreadPose != lastAppliedSelfSpreadPose ||
+                (state.selfSpreadPose > 0.001f &&
+                    (state.leftOuter != lastAppliedArmLeftOuter || state.rightOuter != lastAppliedArmRightOuter))
+            if (armPoseNeedsUpdate) {
+                BlossomArmIkRig.applyArmAndHandPose(
+                    bodyMesh = blossomBodyMesh,
+                    palmsMesh = blossomPalmsMesh,
+                    handsMesh = blossomHandsMesh,
+                    nailsMesh = blossomNailsMesh,
+                    cache = blossomArmSkinCache,
+                    poseProgress = state.selfSpreadPose,
+                    leftOuterSpread = state.leftOuter,
+                    rightOuterSpread = state.rightOuter
+                )
+                lastAppliedSelfSpreadPose = state.selfSpreadPose
+                lastAppliedArmLeftOuter = state.leftOuter
+                lastAppliedArmRightOuter = state.rightOuter
+            }
+            if (state.headTurn != lastAppliedHeadTurn) {
+                BlossomUpperBodyBuilder.applyHeadTurn(
+                    bodyMesh = blossomBodyMesh,
+                    headMesh = blossomHeadMesh,
+                    eyesMesh = blossomEyesMesh,
+                    hairMesh = blossomHairMesh,
+                    cache = blossomHeadRigCache,
+                    headTurn = state.headTurn
+                )
+                lastAppliedHeadTurn = state.headTurn
             }
         } else {
             updateContouredPelvis(state)

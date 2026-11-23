@@ -128,12 +128,13 @@ internal object BlossomSdfBodyBuilder {
         val hipFlare = 0.36f * exp(-((yc - 0.16f) / 1.12f).let { it * it })
         val iliacFull = 0.14f * exp(-((yc - 1.08f) / 0.68f).let { it * it })
         val waistPinch = -0.22f * exp(-((yc - 2.48f) / 0.62f).let { it * it })
-        val ribCage = 0.14f * exp(-((yc - 3.80f) / 0.92f).let { it * it })
+        val ribCage = 0.05f * exp(-((yc - 3.92f) / 0.78f).let { it * it })
+        val thoraxSlim = -0.14f * smoothStep(2.55f, 3.65f, yc)
         val shoulderSpan = 0.04f * exp(-((yc - 4.46f) / 0.44f).let { it * it })
         // Keep upper chest smoothly filled right to the axilla (~4.52) so shoulders flow naturally with ZERO pauldron notch!
         val shoulderTopTaper = 1f - 0.72f * smoothStep(4.50f, 4.98f, yc)
         val pelvicBaseTaper = 1f - 0.44f * smoothStep(-0.22f, -1.04f, yc)
-        val rxTorso = ((1.36f + hipFlare + iliacFull + waistPinch + ribCage + shoulderSpan) *
+        val rxTorso = ((1.36f + hipFlare + iliacFull + waistPinch + ribCage + thoraxSlim + shoulderSpan) *
             pelvicBaseTaper * shoulderTopTaper).coerceAtLeast(0.36f)
 
         val bellyDepth = 0.28f * exp(-((yc - 1.54f) / 1.05f).let { it * it }) +
@@ -261,75 +262,94 @@ internal object BlossomSdfBodyBuilder {
         dLeg = smin(dLeg, dPatella, 0.12f)
 
         // ---------------------------------------------------------------------
-        // 4. ANATOMICAL SCULPTED FEET (ANKLE MALLEOLI -> HEEL -> ARCH -> OBLIQUE METATARSAL BALL)
+        // 4. ANATOMICAL SCULPTED FEET (ASYMMETRIC MALLEOLI -> SLEEK INSTEP -> ARCH -> OBLIQUE METATARSAL BALL)
         //    Pairs seamlessly with the 10 individually sculpted 3D toes in buildBlossomToesMesh()!
         // ---------------------------------------------------------------------
-        val dAnkleBones = sdEllipsoid(
-            px = ax - 1.68f,
-            py = y - (-4.24f),
-            pz = z - (-0.88f),
-            rx = 0.255f,
-            ry = 0.145f,
-            rz = 0.145f
+        // Subtle, anatomically tucked feminine malleoli (medial slightly higher & anterior; lateral slightly lower & posterior)
+        val dMedialMalleolus = sdEllipsoid(
+            px = ax - 1.575f,
+            py = y - (-4.17f),
+            pz = z - (-0.86f),
+            rx = 0.104f,
+            ry = 0.118f,
+            rz = 0.106f
+        )
+        val dLateralMalleolus = sdEllipsoid(
+            px = ax - 1.785f,
+            py = y - (-4.27f),
+            pz = z - (-0.90f),
+            rx = 0.100f,
+            ry = 0.116f,
+            rz = 0.104f
         )
         val dHeel = sdEllipsoid(
             px = ax - 1.68f,
-            py = y - (-4.05f),
-            pz = z - (-0.96f),
-            rx = 0.205f,
-            ry = 0.215f,
-            rz = 0.185f
+            py = y - (-4.06f),
+            pz = z - (-0.97f),
+            rx = 0.190f,
+            ry = 0.210f,
+            rz = 0.174f
         )
+        // Graceful convex feminine dorsal instep tapering smoothly from ankle crease through midfoot (zero dorsal hollow!)
         val dInstep = sdCapsule(
             ax, y, z,
-            1.68f, -4.20f, -0.90f,
-            1.80f, -4.82f, -0.97f,
-            0.205f, 0.175f
+            1.68f, -4.22f, -0.89f,
+            1.81f, -4.88f, -0.972f,
+            0.194f, 0.178f
         )
-        // Natural medial & lateral metatarsal rays fanning organically to the oblique toe line (zero lollipop bulb!)
+        // Central dorsal metatarsal bridge filling rays 2-4 cleanly so the top of the foot is smoothly convex with zero dimple
+        val dCenterMetatarsal = sdCapsule(
+            ax, y, z,
+            1.76f, -4.56f, -0.955f,
+            1.90f, -5.14f, -1.022f,
+            0.168f, 0.132f
+        )
+        // Natural medial & lateral metatarsal rays fanning organically to a graceful oblique toe line
         val dMedialRay = sdCapsule(
             ax, y, z,
-            1.73f, -4.64f, -0.99f,
-            1.70f, -5.22f, -1.035f,
-            0.165f, 0.135f
+            1.71f, -4.64f, -0.985f,
+            1.70f, -5.22f, -1.032f,
+            0.156f, 0.126f
         )
         val dLateralRay = sdCapsule(
             ax, y, z,
-            1.83f, -4.60f, -0.99f,
-            2.10f, -5.04f, -1.045f,
-            0.155f, 0.115f
+            1.84f, -4.60f, -0.990f,
+            2.08f, -5.04f, -1.045f,
+            0.146f, 0.108f
         )
-        // Flat transverse metatarsal pad bridging big-toe base to pinky-toe base
+        // Transverse metatarsal ball bridging hallux base cleanly to 5th-toe base
         val dMetatarsalPad = sdCapsule(
             ax, y, z,
-            1.70f, -5.20f, -1.035f,
-            2.10f, -5.03f, -1.045f,
-            0.128f, 0.108f
+            1.70f, -5.21f, -1.032f,
+            2.08f, -5.03f, -1.045f,
+            0.124f, 0.104f
         )
-        // Subtle medial longitudinal foot arch underneath
+        // Graceful medial longitudinal foot arch underneath + subtle dorsal extensor contour
         val dArchCut = sdEllipsoid(
-            px = ax - 1.58f,
+            px = ax - 1.56f,
             py = y - (-4.68f),
             pz = z - (-1.20f),
-            rx = 0.18f,
-            ry = 0.34f,
-            rz = 0.11f
+            rx = 0.185f,
+            ry = 0.35f,
+            rz = 0.112f
         )
         var dFoot = smin(dHeel, dInstep, 0.11f)
-        dFoot = smin(dFoot, dAnkleBones, 0.08f)
-        dFoot = smin(dFoot, smin(dMedialRay, dLateralRay, 0.14f), 0.12f)
-        dFoot = smin(dFoot, dMetatarsalPad, 0.10f)
-        dFoot = smax(dFoot, -dArchCut, 0.06f)
+        dFoot = smin(dFoot, dMedialMalleolus, 0.115f)
+        dFoot = smin(dFoot, dLateralMalleolus, 0.115f)
+        val dForefootRays = smin(smin(dMedialRay, dCenterMetatarsal, 0.14f), dLateralRay, 0.14f)
+        dFoot = smin(dFoot, dForefootRays, 0.13f)
+        dFoot = smin(dFoot, dMetatarsalPad, 0.115f)
+        dFoot = smax(dFoot, -dArchCut, 0.065f)
 
         // Seamless ankle-to-foot fusion
-        val dFullLimb = smin(dLeg, dFoot, 0.13f)
+        val dFullLimb = smin(dLeg, dFoot, 0.125f)
 
         // ---------------------------------------------------------------------
         // 5. GRACEFUL FEMININE SHOULDERS, FULLER ANATOMICAL ARMS, OVAL WRISTS, SCULPTED PALMS & NECK
         //    Natural bicep/forearm fullness proportional to thighs & torso, smooth wrist-to-palm arch, ZERO hip webbing!
         // ---------------------------------------------------------------------
         val zShoulder = mattressSurfaceZ(4.54f) + 0.45f
-        val zElbow = mattressSurfaceZ(2.70f) + 0.38f
+        val zElbow = mattressSurfaceZ(2.50f) + 0.36f
         val zWrist = mattressSurfaceZ(0.82f) + 0.195f
         val zPalm = mattressSurfaceZ(0.36f) + 0.185f
 
@@ -348,13 +368,13 @@ internal object BlossomSdfBodyBuilder {
             px = ax - 1.29f,
             py = y - 4.50f,
             pz = z - zShoulder,
-            rx = 0.28f,
-            ry = 0.38f,
-            rz = 0.31f
+            rx = 0.26f,
+            ry = 0.36f,
+            rz = 0.29f
         )
-        // Anatomically proportionate upper arm with soft organic bicep/tricep fullness (never spindly!)
-        val uax0 = 1.31f; val uay0 = 4.40f; val uaz0 = zShoulder
-        val uax1 = 1.86f; val uay1 = 2.70f; val uaz1 = zElbow
+        // Anatomically proportionate upper arm with natural open armpit-to-ribcage gap below axilla (ZERO ribcage webbing!)
+        val uax0 = 1.33f; val uay0 = 4.40f; val uaz0 = zShoulder
+        val uax1 = 2.14f; val uay1 = 2.50f; val uaz1 = zElbow
         val uadx = uax1 - uax0; val uady = uay1 - uay0; val uadz = uaz1 - uaz0
         val uaLen2 = uadx * uadx + uady * uady + uadz * uadz
         val hUpperArm = (((ax - uax0) * uadx + (y - uay0) * uady + (z - uaz0) * uadz) / uaLen2).coerceIn(0f, 1f)
@@ -363,7 +383,7 @@ internal object BlossomSdfBodyBuilder {
         val uapz = z - (uaz0 + uadz * hUpperArm)
         val uaDist = sqrt(uapx * uapx + uapy * uapy + uapz * uapz)
         val bicepFullness = exp(-((hUpperArm - 0.46f) / 0.27f).let { it * it })
-        val rUpperArm = 0.365f - 0.022f * hUpperArm + 0.044f * bicepFullness
+        val rUpperArm = 0.340f - 0.018f * hUpperArm + 0.038f * bicepFullness
         val dUpperArm = uaDist - rUpperArm
 
         // Natural muscular brachioradialis forearm tapering smoothly into an oval feminine wrist (zero stick pinch or wrist lump!)
@@ -377,45 +397,37 @@ internal object BlossomSdfBodyBuilder {
         val fapz = z - (faz0 + fadz * hForearm)
         val faDist = sqrt(fapx * fapx + fapy * fapy + fapz * fapz)
         val forearmBelly = exp(-((hForearm - 0.24f) / 0.22f).let { it * it })
-        val rForearmBase = 0.342f - 0.134f * smoothStep(0.16f, 1.0f, hForearm) + 0.036f * forearmBelly
+        val rForearmBase = 0.342f - 0.148f * smoothStep(0.16f, 1.0f, hForearm) + 0.036f * forearmBelly
         val distalOvalW = smoothStep(0.42f, 1.0f, hForearm)
         val rForearm = if (distalOvalW > 0.001f && faDist > 1e-4f) {
             val zComp = abs(fapz / faDist)
-            rForearmBase * (1f - 0.19f * distalOvalW * zComp * zComp)
+            rForearmBase * (1f - 0.29f * distalOvalW * zComp * zComp)
         } else {
             rForearmBase
         }
         val dForearm = faDist - rForearm
 
-        // Smooth oval carpal bridge matching both wrist horizontal width (0.208 -> 0.265) and dorsal height (-0.793 -> -0.791)
+        // Sleek tapered wrist & compact interior carpal core (high-res sculpted parametric palm mesh wraps flush outside with zero voxel blobbiness!)
         val dWristBridge = sdEllipsoid(
-            px = ax - 2.27f,
+            px = ax - 2.26f,
             py = y - 0.66f,
             pz = z - (zWrist * 0.5f + zPalm * 0.5f),
-            rx = 0.215f,
-            ry = 0.24f,
-            rz = 0.165f
+            rx = 0.150f,
+            ry = 0.185f,
+            rz = 0.112f
         )
-        // Proportionate fuller 3D dorsal-arched palm resting cleanly beside upper thigh (zero flat pancake drop!)
         val dPalmCore = sdEllipsoid(
-            px = ax - 2.32f,
-            py = y - 0.36f,
+            px = ax - 2.30f,
+            py = y - 0.42f,
             pz = z - zPalm,
-            rx = 0.265f,
-            ry = 0.39f,
-            rz = 0.164f
+            rx = 0.132f,
+            ry = 0.230f,
+            rz = 0.090f
         )
-        // Soft medial thenar thumb eminence cleanly clear of hip profile
-        val dThenarPad = sdCapsule(
-            ax, y, z,
-            2.19f, 0.62f, zPalm + 0.010f,
-            2.08f, 0.30f, zPalm + 0.015f,
-            0.118f, 0.102f
-        )
-        val dPalm = smin(smin(dPalmCore, dWristBridge, 0.09f), dThenarPad, 0.07f)
+        val dPalm = smin(dPalmCore, dWristBridge, 0.080f)
         val dArmChain = smin(
             smin(dDeltoid, dUpperArm, 0.24f),
-            smin(dForearm, dPalm, 0.09f),
+            smin(dForearm, dPalm, 0.085f),
             0.16f
         )
         val dShoulderArm = smin(dTrapezius, dArmChain, 0.24f)
@@ -440,8 +452,8 @@ internal object BlossomSdfBodyBuilder {
         // 6. UNIFIED SEAMLESS FULL-BODY FUSION + EXAM MATTRESS SOFT CONTACT
         // ---------------------------------------------------------------------
         var dBody = smin(dPelvis, dFullLimb, 0.42f)
-        // Smooth shoulder/axilla fusion above y=3.15 ONLY; hard separation below waist so forearms/hands NEVER web into hips!
-        val kArmTorso = 0.26f * smoothStep(3.15f, 4.15f, y) + 0.002f
+        // Smooth shoulder/axilla fusion at true anatomical armpit (y=3.84..4.40 ONLY); crisp open separation along lateral ribcage & waist!
+        val kArmTorso = 0.22f * smoothStep(3.84f, 4.40f, y) + 0.002f
         dBody = smin(dBody, dShoulderArm, kArmTorso)
         dBody = smin(dBody, dNeck, 0.16f)
 
@@ -450,6 +462,138 @@ internal object BlossomSdfBodyBuilder {
         dBody = smax(dBody, matPlane, 0.12f)
 
         return dBody
+    }
+
+    /**
+     * Evaluates a smooth, C1-continuous `[0, 1]` arm-skinning ownership weight comparing Blossom's
+     * exact arm-chain SDF (`deltoid + upperArm + forearm + palm`) against her torso/ribcage/trapezius SDF.
+     *
+     * Eliminates hard geometric cutoffs across the medial-posterior upper arm so ZERO upper-arm
+     * vertices are left pinned to the exam table when lifting the arms, while keeping the torso,
+     * breasts, neck, and legs 100% anchored.
+     */
+    fun evaluateArmVsTorsoWeight(x: Float, y: Float, z: Float): Float {
+        val ax = abs(x)
+        if (ax < 0.96f || y < -0.58f || y > 5.04f) return 0f
+        // Strictly disjoint from LegSkinCache (legs sit inside y <= 0.44 and (ax <= 1.86 or z >= -0.35))
+        if (y <= 0.44f && (ax <= 1.86f || z >= -0.35f)) return 0f
+
+        // Exact Torso + Trapezius SDF (matching evaluateBodySdf)
+        val yc = y.coerceIn(-1.04f, 4.98f)
+        val matY = mattressSurfaceZ(yc)
+        val upperFill = smoothStep(0.62f, 2.95f, yc)
+        val perinealRollZ = -0.34f * smoothStep(-0.34f, -1.04f, yc)
+        val thoraxSettle = -0.34f * smoothStep(2.55f, 4.86f, yc)
+        val zSpine = (matY + 0.56f) + 0.28f * upperFill + perinealRollZ + thoraxSettle
+
+        val hipFlare = 0.36f * exp(-((yc - 0.16f) / 1.12f).let { it * it })
+        val iliacFull = 0.14f * exp(-((yc - 1.08f) / 0.68f).let { it * it })
+        val waistPinch = -0.22f * exp(-((yc - 2.48f) / 0.62f).let { it * it })
+        val ribCage = 0.05f * exp(-((yc - 3.92f) / 0.78f).let { it * it })
+        val thoraxSlim = -0.14f * smoothStep(2.55f, 3.65f, yc)
+        val shoulderSpan = 0.04f * exp(-((yc - 4.46f) / 0.44f).let { it * it })
+        val shoulderTopTaper = 1f - 0.72f * smoothStep(4.50f, 4.98f, yc)
+        val pelvicBaseTaper = 1f - 0.44f * smoothStep(-0.22f, -1.04f, yc)
+        val rxTorso = ((1.36f + hipFlare + iliacFull + waistPinch + ribCage + thoraxSlim + shoulderSpan) *
+            pelvicBaseTaper * shoulderTopTaper).coerceAtLeast(0.36f)
+
+        val bellyDepth = 0.28f * exp(-((yc - 1.54f) / 1.05f).let { it * it }) +
+            0.25f * smoothStep(1.65f, 3.15f, yc)
+        val waistDepthDip = -0.050f * exp(-((yc - 2.42f) / 0.48f).let { it * it })
+        val chestWallCurve = -0.18f * smoothStep(2.75f, 4.18f, yc) -
+            0.25f * smoothStep(4.02f, 4.98f, yc)
+        val pelvicDepthTaper = 1f - 0.30f * smoothStep(-0.30f, -1.04f, yc)
+        val rzTorso = ((0.62f + bellyDepth + waistDepthDip + chestWallCurve) * pelvicDepthTaper).coerceAtLeast(0.32f)
+
+        val capR = 0.16f
+        val dRadTorso = sdEllipse2D(ax, z - zSpine, (rxTorso - capR).coerceAtLeast(0.14f), (rzTorso - capR).coerceAtLeast(0.14f))
+        val dyTorso = max(y - 4.98f, -1.04f - y)
+        val dTorso = sqrt(max(dRadTorso, 0f).let { it * it } + max(dyTorso, 0f).let { it * it }) +
+            min(max(dRadTorso, dyTorso), 0f) - capR
+
+        val zShoulder = mattressSurfaceZ(4.54f) + 0.45f
+        val zElbow = mattressSurfaceZ(2.50f) + 0.36f
+        val zWrist = mattressSurfaceZ(0.82f) + 0.195f
+        val zPalm = mattressSurfaceZ(0.36f) + 0.185f
+        val zNeckBase = mattressSurfaceZ(4.86f) + 0.56f
+
+        val dTrapezius = sdCapsule(
+            ax, y, z,
+            0.30f, 5.10f, zNeckBase - 0.10f,
+            1.25f, 4.54f, zShoulder - 0.04f,
+            0.25f, 0.28f
+        )
+        val dDeltoid = sdEllipsoid(
+            px = ax - 1.29f,
+            py = y - 4.50f,
+            pz = z - zShoulder,
+            rx = 0.26f,
+            ry = 0.36f,
+            rz = 0.29f
+        )
+
+        val uax0 = 1.33f; val uay0 = 4.40f; val uaz0 = zShoulder
+        val uax1 = 2.14f; val uay1 = 2.50f; val uaz1 = zElbow
+        val uadx = uax1 - uax0; val uady = uay1 - uay0; val uadz = uaz1 - uaz0
+        val uaLen2 = uadx * uadx + uady * uady + uadz * uadz
+        val hUpperArm = (((ax - uax0) * uadx + (y - uay0) * uady + (z - uaz0) * uadz) / uaLen2).coerceIn(0f, 1f)
+        val uapx = ax - (uax0 + uadx * hUpperArm)
+        val uapy = y - (uay0 + uady * hUpperArm)
+        val uapz = z - (uaz0 + uadz * hUpperArm)
+        val uaDist = sqrt(uapx * uapx + uapy * uapy + uapz * uapz)
+        val bicepFullness = exp(-((hUpperArm - 0.46f) / 0.27f).let { it * it })
+        val rUpperArm = 0.340f - 0.018f * hUpperArm + 0.038f * bicepFullness
+        val dUpperArm = uaDist - rUpperArm
+
+        val fax0 = uax1; val fay0 = uay1; val faz0 = uaz1
+        val fax1 = 2.24f; val fay1 = 0.82f; val faz1 = zWrist
+        val fadx = fax1 - fax0; val fady = fay1 - fay0; val fadz = faz1 - faz0
+        val faLen2 = fadx * fadx + fady * fady + fadz * fadz
+        val hForearm = (((ax - fax0) * fadx + (y - fay0) * fady + (z - faz0) * fadz) / faLen2).coerceIn(0f, 1f)
+        val fapx = ax - (fax0 + fadx * hForearm)
+        val fapy = y - (fay0 + fady * hForearm)
+        val fapz = z - (faz0 + fadz * hForearm)
+        val faDist = sqrt(fapx * fapx + fapy * fapy + fapz * fapz)
+        val forearmBelly = exp(-((hForearm - 0.24f) / 0.22f).let { it * it })
+        val rForearmBase = 0.342f - 0.148f * smoothStep(0.16f, 1.0f, hForearm) + 0.036f * forearmBelly
+        val distalOvalW = smoothStep(0.42f, 1.0f, hForearm)
+        val rForearm = if (distalOvalW > 0.001f && faDist > 1e-4f) {
+            val zComp = abs(fapz / faDist)
+            rForearmBase * (1f - 0.29f * distalOvalW * zComp * zComp)
+        } else {
+            rForearmBase
+        }
+        val dForearm = faDist - rForearm
+
+        val dWristBridge = sdEllipsoid(
+            px = ax - 2.26f,
+            py = y - 0.66f,
+            pz = z - (zWrist * 0.5f + zPalm * 0.5f),
+            rx = 0.150f,
+            ry = 0.185f,
+            rz = 0.112f
+        )
+        val dPalmCore = sdEllipsoid(
+            px = ax - 2.30f,
+            py = y - 0.42f,
+            pz = z - zPalm,
+            rx = 0.132f,
+            ry = 0.230f,
+            rz = 0.090f
+        )
+        val dPalm = smin(dPalmCore, dWristBridge, 0.080f)
+        val dArmChain = smin(
+            smin(dDeltoid, dUpperArm, 0.24f),
+            smin(dForearm, dPalm, 0.085f),
+            0.16f
+        )
+
+        val dTorsoAnchor = min(dTorso, dTrapezius)
+        // Smooth SDF ownership transition across true axilla/shoulder crease (ZERO discontinuous cliff & ZERO ribcage-arm stretch!)
+        val sdfWeight = smoothStep(+0.26f, -0.26f, dArmChain - dTorsoAnchor)
+        val trapGuard = 1f - smoothStep(4.62f, 5.00f, y) * (1f - smoothStep(1.26f, 1.56f, ax))
+        val farFade = 1f - smoothStep(0.28f, 0.56f, dArmChain)
+        return (sdfWeight * trapGuard * farFade).coerceIn(0f, 1f)
     }
 
     /**
@@ -894,19 +1038,19 @@ internal object BlossomSdfBodyBuilder {
         val archLift: Float
     )
 
-    // Anatomically proportioned Egyptian diagonal toe cascade (medial Hallux -> lateral Pinky) with crisp interdigital gaps
+    // Gracefully clustered feminine Egyptian toe cascade (natural hallux -> gently curled lesser toes, ZERO splayed pegs!)
     internal val BLOSSOM_TOE_SPECS: List<BlossomToeSpec> = listOf(
-        BlossomToeSpec(rootAx = 1.665f, rootY = -5.21f, rootZ = -1.032f, length = 0.45f, rLat = 0.074f, rZ = 0.066f, yawOut = 0.12f, archLift = 0.014f),
-        BlossomToeSpec(rootAx = 1.816f, rootY = -5.18f, rootZ = -1.040f, length = 0.43f, rLat = 0.050f, rZ = 0.052f, yawOut = 0.14f, archLift = 0.022f),
-        BlossomToeSpec(rootAx = 1.934f, rootY = -5.13f, rootZ = -1.044f, length = 0.37f, rLat = 0.047f, rZ = 0.049f, yawOut = 0.15f, archLift = 0.022f),
-        BlossomToeSpec(rootAx = 2.042f, rootY = -5.07f, rootZ = -1.048f, length = 0.31f, rLat = 0.043f, rZ = 0.045f, yawOut = 0.13f, archLift = 0.020f),
-        BlossomToeSpec(rootAx = 2.138f, rootY = -5.00f, rootZ = -1.052f, length = 0.24f, rLat = 0.039f, rZ = 0.041f, yawOut = 0.07f, archLift = 0.016f)
+        BlossomToeSpec(rootAx = 1.676f, rootY = -5.22f, rootZ = -1.034f, length = 0.405f, rLat = 0.077f, rZ = 0.063f, yawOut = 0.085f, archLift = 0.012f),
+        BlossomToeSpec(rootAx = 1.812f, rootY = -5.19f, rootZ = -1.040f, length = 0.375f, rLat = 0.049f, rZ = 0.049f, yawOut = 0.105f, archLift = 0.024f),
+        BlossomToeSpec(rootAx = 1.918f, rootY = -5.14f, rootZ = -1.044f, length = 0.320f, rLat = 0.046f, rZ = 0.046f, yawOut = 0.115f, archLift = 0.025f),
+        BlossomToeSpec(rootAx = 2.018f, rootY = -5.08f, rootZ = -1.048f, length = 0.268f, rLat = 0.043f, rZ = 0.043f, yawOut = 0.095f, archLift = 0.022f),
+        BlossomToeSpec(rootAx = 2.114f, rootY = -5.01f, rootZ = -1.052f, length = 0.215f, rLat = 0.040f, rZ = 0.039f, yawOut = 0.045f, archLift = 0.017f)
     )
 
     /**
      * Builds all 10 individually sculpted anatomical 3D toes (5 per foot: Hallux through 5th toe)
      * in a single lightweight [DynamicGlMesh], seamlessly rooted along the oblique metatarsal line
-     * with root normals matched to the unified SDF forefoot and subtle dorsal nail contour.
+     * with realistic interphalangeal knuckles, plump toe pads, and recessed dorsal nailbeds.
      */
     fun buildBlossomToesMesh(): DynamicGlMesh {
         val toeSpecs = BLOSSOM_TOE_SPECS
@@ -928,8 +1072,9 @@ internal object BlossomSdfBodyBuilder {
         val sides = floatArrayOf(-1f, +1f)
 
         for (side in sides) {
-            for (spec in toeSpecs) {
+            for ((specIdx, spec) in toeSpecs.withIndex()) {
                 val baseVert = toeIndex * vertsPerToe
+                val isHallux = specIdx == 0
 
                 // Emit strictly outward CCW grid indices for both left (+1) and right (-1) feet
                 for (r in 0 until rows - 1) {
@@ -957,20 +1102,28 @@ internal object BlossomSdfBodyBuilder {
                 for (r in 0 until rows) {
                     val s = r.toFloat() / (rows - 1)
 
-                    // Smooth closed rounded toe tip (s = 0.80..1.0) + natural slightly bulbous distal toe pad (s ~ 0.72)
-                    val tipT = smoothStep(0.80f, 1.0f, s)
+                    // Plump, softly rounded human toe tip dome (starts at s=0.84 -> never pointy!) + sculpted IP knuckle & toe pad
+                    val tipT = smoothStep(0.84f, 1.0f, s)
                     val tipAngle = tipT * (PI.toFloat() * 0.5f)
-                    val tipScale = cos(tipAngle).coerceAtLeast(0.025f)
-                    val rootFlare = 1f + 0.14f * (1f - smoothStep(0.0f, 0.22f, s))
-                    val phalanxNeck = 1f - 0.09f * exp(-((s - 0.38f) / 0.18f).let { it * it })
-                    val distalPad = 1f + 0.09f * exp(-((s - 0.74f) / 0.16f).let { it * it })
-                    val radScale = rootFlare * phalanxNeck * distalPad * tipScale
+                    val tipScale = cos(tipAngle).coerceAtLeast(0.03f)
+                    val rootFlare = 1f + (if (isHallux) 0.16f else 0.12f) * (1f - smoothStep(0.0f, 0.22f, s))
+                    val phalanxNeck = 1f - 0.085f * exp(-((s - 0.34f) / 0.15f).let { it * it })
+                    val ipKnuckle = 1f + (if (isHallux) 0.055f else 0.072f) * exp(-((s - 0.50f) / 0.09f).let { it * it })
+                    val distalPad = 1f + (if (isHallux) 0.085f else 0.115f) * exp(-((s - 0.76f) / 0.14f).let { it * it })
+                    val radScale = rootFlare * phalanxNeck * ipKnuckle * distalPad * tipScale
 
                     val along = -0.095f + s * (spec.length + 0.095f)
-                    // Gentle natural toe arch rising at mid-knuckle then settling pad down onto exam mattress
-                    val curlZ = spec.archLift * sin(s * PI.toFloat()) - 0.024f * smoothStep(0.42f, 0.92f, s)
-                    // Slight medial curve on outer toes for lifelike relaxation
-                    val medialCurve = -0.014f * smoothStep(0.30f, 1.0f, s) * (if (spec.rLat < 0.048f) 1f else 0.22f)
+                    // Natural gentle plantar toe arch: lesser toes curve slightly downward at the IP joint onto plump soft toe pads
+                    val curlZ = spec.archLift * sin(s * PI.toFloat()) -
+                        (if (isHallux) 0.018f else 0.030f) * smoothStep(0.42f, 0.94f, s)
+                    // Subtle natural medial nestling of lesser toes (4th & 5th tuck gently toward hallux)
+                    val medialCurve = -0.022f * smoothStep(0.28f, 1.0f, s) * when (specIdx) {
+                        0 -> 0.10f
+                        1 -> 0.32f
+                        2 -> 0.58f
+                        3 -> 0.85f
+                        else -> 1.15f
+                    }
 
                     val cx = side * spec.rootAx + fwdX * along + latX * medialCurve
                     val cy = spec.rootY + fwdY * along + latY * medialCurve
@@ -982,16 +1135,18 @@ internal object BlossomSdfBodyBuilder {
                         val cosP = cos(phi)
                         val sinP = sin(phi)
 
-                        // Subtle dorsal nail plate flattening on distal upper face (s in 0.58..0.88)
-                        val nailMask = smoothBell(s, 0.60f, 0.88f, 0.07f) * smoothStep(0.45f, 0.92f, sinP) *
+                        // Subtle dorsal nail plate indentation on distal upper face (s in 0.62..0.90)
+                        val nailMask = smoothBell(s, 0.62f, 0.90f, 0.05f) * smoothStep(0.45f, 0.92f, sinP) *
                             (1f - smoothStep(0.55f, 0.88f, abs(cosP)))
-                        val nailIndent = -0.0045f * nailMask
+                        val nailIndent = -0.0040f * nailMask
+                        val knuckleBump = (if (isHallux) 0.0028f else 0.0038f) *
+                            exp(-((s - 0.50f) / 0.075f).let { it * it }) * smoothStep(0.20f, 0.90f, sinP)
 
                         val localLat = spec.rLat * radScale * cosP
-                        var localZ = spec.rZ * radScale * sinP + nailIndent
-                        // Soft plantar toe pad flattening against the exam cushion
+                        var localZ = spec.rZ * radScale * sinP + nailIndent + knuckleBump
+                        // Soft plantar toe pad resting gently against the exam cushion
                         if (sinP < 0f) {
-                            localZ *= 0.84f
+                            localZ *= (0.82f + 0.10f * smoothStep(0.60f, 0.90f, s))
                         }
 
                         val px = cx + latX * localLat

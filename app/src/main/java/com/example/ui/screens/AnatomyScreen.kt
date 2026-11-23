@@ -281,22 +281,20 @@ fun AnatomyScreen(
                                 )
                             }
 
-                            if (uiState.holdVulvaOpen) {
-                                item {
-                                    FilterChip(
-                                        selected = false,
-                                        onClick = onResetVulvaTissue,
-                                        modifier = Modifier.testTag("reset_vulva_tissue"),
-                                        label = { Text("Reset") },
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = Icons.Filled.RestartAlt,
-                                                contentDescription = "Release back to resting state",
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    )
-                                }
+                            item {
+                                FilterChip(
+                                    selected = false,
+                                    onClick = onResetVulvaTissue,
+                                    modifier = Modifier.testTag("reset_vulva_tissue"),
+                                    label = { Text("Reset") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Filled.RestartAlt,
+                                            contentDescription = "Reset Blossom's pose and tissue to resting state",
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                )
                             }
                         }
                     } else {

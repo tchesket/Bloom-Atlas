@@ -129,8 +129,8 @@ class BlossomGeometryUnitTest {
             if (y < handsMinY) handsMinY = y
             if (ax > handsMaxAbsX) handsMaxAbsX = ax
         }
-        assertTrue("Hands mesh should contain 10 sculpted fingers (2240 verts), got ${hands.vertexCount}", hands.vertexCount == 2240)
-        assertTrue("Middle fingertips should reach naturally beside upper thighs (handsMinY < -0.55), got $handsMinY", handsMinY < -0.55f)
+        assertTrue("Hands mesh should contain 10 sculpted articulated fingers (2880 verts), got ${hands.vertexCount}", hands.vertexCount == 2880)
+        assertTrue("Middle fingertips should reach naturally beside upper thighs (handsMinY < -0.48), got $handsMinY", handsMinY < -0.48f)
         assertTrue("Relaxed hands should rest cleanly beside hips without clipping (handsMaxAbsX > 2.30), got $handsMaxAbsX", handsMaxAbsX > 2.30f)
 
         // Verify clean air-gap between hip and wrist/palm (ZERO hip-merge!), smooth wrist-to-palm arch, & realistic arm fullness
@@ -227,6 +227,7 @@ class BlossomGeometryUnitTest {
         assertOutwardWindingMatchesNormals("blossomBreastsMesh", scene.blossomBreastsMesh)
         assertOutwardWindingMatchesNormals("blossomHeadMesh", scene.blossomHeadMesh)
         assertOutwardWindingMatchesNormals("blossomEyesMesh", scene.blossomEyesMesh)
+        assertOutwardWindingMatchesNormals("blossomPalmsMesh", scene.blossomPalmsMesh)
         assertOutwardWindingMatchesNormals("blossomHandsMesh", scene.blossomHandsMesh)
         assertOutwardWindingMatchesNormals("blossomToesMesh", scene.blossomToesMesh)
         assertOutwardWindingMatchesNormals("blossomNailsMesh", scene.blossomNailsMesh)
@@ -253,6 +254,28 @@ class BlossomGeometryUnitTest {
         )
         scene.update(VulvaDeformationState(breastSize = 1.0f), includeLithotomyBody = true)
         val fullApexZ = scene.blossomBreastsMesh.vertexData[leftApexIdx + 2]
+        // Verify large breasts swell naturally toward midline sternum (cleavage) without crossing x=0
+        val sternumBaseZ = BlossomSdfBodyBuilder.sampleBodySurfacePoint(0f, BlossomUpperBodyBuilder.BREAST_CENTER_Y).z
+        val bVertsPerSide = bCols * bRows
+        var fullLeftMaxX = Float.NEGATIVE_INFINITY
+        var fullCleavageElevatedCount = 0
+        for (i in 0 until bVertsPerSide) {
+            val px = scene.blossomBreastsMesh.vertexData[i * stride]
+            val py = scene.blossomBreastsMesh.vertexData[i * stride + 1]
+            val pz = scene.blossomBreastsMesh.vertexData[i * stride + 2]
+            if (px > fullLeftMaxX) fullLeftMaxX = px
+            if (abs(px) < 0.16f && py in 3.30f..4.40f && pz > sternumBaseZ + 0.14f) {
+                fullCleavageElevatedCount++
+            }
+        }
+        assertTrue(
+            "Left full breast must press softly toward sternum midline without crossing x=0 (fullLeftMaxX in -0.06..-0.002), got $fullLeftMaxX",
+            fullLeftMaxX in -0.06f..-0.002f
+        )
+        assertTrue(
+            "Large breasts must produce visible fuller medial cleavage volume near midline (> 40 elevated verts above sternumBaseZ=$sternumBaseZ), got $fullCleavageElevatedCount",
+            fullCleavageElevatedCount > 40
+        )
         scene.update(VulvaDeformationState(breastSize = 0.0f), includeLithotomyBody = true)
         val petiteApexZ = scene.blossomBreastsMesh.vertexData[leftApexIdx + 2]
         assertTrue(
@@ -280,7 +303,45 @@ class BlossomGeometryUnitTest {
             "Spreading legs must move knees cleanly wider apart (spreadKneeMaxX=$spreadKneeMaxX > restKneeMaxX=$restKneeMaxX + 0.35)",
             spreadKneeMaxX > restKneeMaxX + 0.35f
         )
-        scene.update(VulvaDeformationState(), includeLithotomyBody = true)
+
+        // 1H. Verify interactive side-to-side headTurn rotates face & eyes smoothly and restores exact rest identity
+        val restHeadCopy = scene.blossomHeadMesh.vertexData.copyOf()
+        val restEyesCopy = scene.blossomEyesMesh.vertexData.copyOf()
+        val restHairCopy = scene.blossomHairMesh.vertexData.copyOf()
+        scene.update(VulvaDeformationState(headTurn = 1.0f), includeLithotomyBody = true)
+        var turnedNoseX = 0f
+        var maxNoseZ = Float.NEGATIVE_INFINITY
+        for (i in 0 until scene.blossomHeadMesh.vertexCount) {
+            val z = scene.blossomHeadMesh.vertexData[i * stride + 2]
+            if (z > maxNoseZ) {
+                maxNoseZ = z
+                turnedNoseX = scene.blossomHeadMesh.vertexData[i * stride]
+            }
+        }
+        assertTrue("Turning head right (headTurn=+1) must shift anterior face toward +X (> 0.20), got $turnedNoseX", turnedNoseX > 0.20f)
+        assertOutwardWindingMatchesNormals("blossomHeadMesh(turned)", scene.blossomHeadMesh)
+        assertOutwardWindingMatchesNormals("blossomEyesMesh(turned)", scene.blossomEyesMesh)
+        assertOutwardWindingMatchesNormals("blossomHairMesh(turned)", scene.blossomHairMesh)
+
+        scene.update(VulvaDeformationState(headTurn = 0f), includeLithotomyBody = true)
+        var maxHeadDiff = 0f
+        for (i in restHeadCopy.indices) {
+            val d = abs(scene.blossomHeadMesh.vertexData[i] - restHeadCopy[i])
+            if (d > maxHeadDiff) maxHeadDiff = d
+        }
+        var maxEyesDiff = 0f
+        for (i in restEyesCopy.indices) {
+            val d = abs(scene.blossomEyesMesh.vertexData[i] - restEyesCopy[i])
+            if (d > maxEyesDiff) maxEyesDiff = d
+        }
+        var maxHairDiff = 0f
+        for (i in restHairCopy.indices) {
+            val d = abs(scene.blossomHairMesh.vertexData[i] - restHairCopy[i])
+            if (d > maxHairDiff) maxHairDiff = d
+        }
+        assertTrue("Head rest identity must hold (< 1e-4), got $maxHeadDiff", maxHeadDiff < 1e-4f)
+        assertTrue("Eyes rest identity must hold (< 1e-4), got $maxEyesDiff", maxEyesDiff < 1e-4f)
+        assertTrue("Hair rest identity must hold (< 1e-4), got $maxHairDiff", maxHairDiff < 1e-4f)
 
         // 2. Verify Ultra-HD Vulva Patch outer perimeter sits flush (< 0.025) on the exact unified SDF=0 body surface
         val patch = scene.blossomVulvaPatchMesh
