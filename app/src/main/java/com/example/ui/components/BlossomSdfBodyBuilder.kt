@@ -2,12 +2,14 @@ package com.example.ui.components
 
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.math.tanh
 
 /**
  * Unified Smooth-Min Signed Distance Field (SDF) + Surface Nets 3D lower-body generator for Blossom.
@@ -118,33 +120,22 @@ internal object BlossomSdfBodyBuilder {
         // ---------------------------------------------------------------------
         val yc = y.coerceIn(-1.04f, 4.98f)
         val matY = mattressSurfaceZ(yc)
-        val upperFill = smoothStep(0.62f, 2.95f, yc)
+        val upperFill = smoothStep(0.62f, 3.20f, yc)
         // Smooth organic posterior roll across the perineum into the gluteal cleft (zero protruding pouch!)
         val perinealRollZ = -0.34f * smoothStep(-0.34f, -1.04f, yc)
-        // Upper back & shoulder blades settle naturally back onto the reclining exam table (never raised above head!)
-        val thoraxSettle = -0.34f * smoothStep(2.55f, 4.86f, yc)
-        val zSpine = (matY + 0.56f) + 0.28f * upperFill + perinealRollZ + thoraxSettle
+        // Gentle upper-thoracic settling onto exam table while preserving true bony ribcage elevation
+        val thoraxSettle = -0.14f * smoothStep(3.35f, 4.92f, yc)
+        val zSpine = (matY + 0.56f) + 0.14f * upperFill + perinealRollZ + thoraxSettle
 
-        val hipFlare = 0.36f * exp(-((yc - 0.16f) / 1.12f).let { it * it })
-        val iliacFull = 0.14f * exp(-((yc - 1.08f) / 0.68f).let { it * it })
-        val waistPinch = -0.22f * exp(-((yc - 2.48f) / 0.62f).let { it * it })
-        val ribCage = 0.05f * exp(-((yc - 3.92f) / 0.78f).let { it * it })
-        val thoraxSlim = -0.14f * smoothStep(2.55f, 3.65f, yc)
-        val shoulderSpan = 0.04f * exp(-((yc - 4.46f) / 0.44f).let { it * it })
-        // Keep upper chest smoothly filled right to the axilla (~4.52) so shoulders flow naturally with ZERO pauldron notch!
-        val shoulderTopTaper = 1f - 0.72f * smoothStep(4.50f, 4.98f, yc)
-        val pelvicBaseTaper = 1f - 0.44f * smoothStep(-0.22f, -1.04f, yc)
-        val rxTorso = ((1.36f + hipFlare + iliacFull + waistPinch + ribCage + thoraxSlim + shoulderSpan) *
-            pelvicBaseTaper * shoulderTopTaper).coerceAtLeast(0.36f)
+        val rxTorso = torsoRxAt(yc)
 
-        val bellyDepth = 0.28f * exp(-((yc - 1.54f) / 1.05f).let { it * it }) +
-            0.25f * smoothStep(1.65f, 3.15f, yc)
-        val waistDepthDip = -0.050f * exp(-((yc - 2.42f) / 0.48f).let { it * it })
-        // Sleek natural supine feminine ribcage tapering gently into slender clavicles & neck base
-        val chestWallCurve = -0.18f * smoothStep(2.75f, 4.18f, yc) -
-            0.25f * smoothStep(4.02f, 4.98f, yc)
+        // Realistic supine AP depth: soft lower abdomen settling into slender waist, rising cleanly into bony ribcage!
+        val lowerBellyFull = 0.18f * exp(-((yc - 1.38f) / 0.86f).let { it * it })
+        val waistDepthDip = -0.045f * exp(-((yc - 2.48f) / 0.56f).let { it * it })
+        val thoraxArchDepth = 0.175f * exp(-((yc - 3.68f) / 0.88f).let { it * it })
+        val upperChestTaper = -0.22f * smoothStep(4.08f, 4.98f, yc)
         val pelvicDepthTaper = 1f - 0.30f * smoothStep(-0.30f, -1.04f, yc)
-        val rzTorso = ((0.62f + bellyDepth + waistDepthDip + chestWallCurve) * pelvicDepthTaper).coerceAtLeast(0.32f)
+        val rzTorso = ((0.62f + lowerBellyFull + waistDepthDip + thoraxArchDepth + upperChestTaper) * pelvicDepthTaper).coerceAtLeast(0.32f)
 
         // Rounded capsule-capped super-elliptic torso column
         val capR = 0.16f
@@ -153,28 +144,36 @@ internal object BlossomSdfBodyBuilder {
         var dTorso = sqrt(max(dRadTorso, 0f).let { it * it } + max(dyTorso, 0f).let { it * it }) +
             min(max(dRadTorso, dyTorso), 0f) - capR
 
-        // Subtle anatomical abdominal, sternal, clavicle & dorsal relief
+        // Asymmetric anterior supine soft-tissue contours (costal arch, soft hypogastrium, oblique/iliac flow, calibrated clavicles)
         if (y > 0.15f && y < 5.14f && ax < 1.65f) {
             val frontW = smoothStep(-0.08f, 0.34f, z - zSpine)
             if (frontW > 0.001f) {
-                val navelDx = x / 0.072f
-                val navelDy = (y - 2.02f) / 0.092f
+                val navelDx = x / 0.075f
+                val navelDy = (y - 2.02f) / 0.095f
                 val navelR2 = navelDx * navelDx + navelDy * navelDy
-                val navelDimple = 0.056f * exp(-navelR2 * 2.1f)
-                val navelHood = -0.017f * exp(-((x / 0.10f).let { it * it } + ((y - 2.12f) / 0.052f).let { it * it }))
-                val lineaAlba = 0.015f * exp(-((x / 0.075f).let { it * it })) * smoothBell(y, 1.30f, 3.05f, 0.25f)
-                val iliacCrest = -0.042f * exp(-(((ax - 1.12f) / 0.38f).let { it * it } + ((y - 1.10f) / 0.48f).let { it * it }))
-                // Delicate sternum midline, graceful S-curved feminine collarbones, soft supraclavicular hollow & suprasternal notch
-                val sternalHollow = 0.014f * exp(-((x / 0.14f).let { it * it })) * smoothBell(y, 3.36f, 4.60f, 0.24f)
-                val clavY = 4.74f - 0.05f * smoothStep(0.28f, 1.08f, ax) + 0.022f * sin(ax * 2.8f)
-                val clavicleRidge = -0.016f * exp(-((y - clavY) / 0.060f).let { it * it }) * smoothBell(ax, 0.16f, 1.08f, 0.15f)
-                val supraClavHollow = 0.018f * exp(-((y - (clavY + 0.13f)) / 0.090f).let { it * it }) * smoothBell(ax, 0.26f, 0.96f, 0.16f)
-                val sternalNotch = 0.022f * exp(-((x / 0.11f).let { it * it } + ((y - 4.82f) / 0.09f).let { it * it }))
-                dTorso += (navelDimple + navelHood + lineaAlba + iliacCrest + sternalHollow + clavicleRidge + supraClavHollow + sternalNotch) * frontW
+                val navelDimple = 0.056f * exp(-navelR2 * 2.0f)
+                val navelHood = -0.018f * exp(-((x / 0.105f).let { it * it } + ((y - 2.13f) / 0.056f).let { it * it }))
+                val lineaAlba = 0.018f * exp(-((x / 0.085f).let { it * it })) * smoothBell(y, 1.35f, 3.05f, 0.26f)
+                // Soft lower-abdominal (hypogastric) feminine fullness + subtle semilunar oblique border + smooth iliac flow
+                val hypogastricSoft = -0.022f * exp(-((ax / 0.56f).let { it * it } + ((y - 1.32f) / 0.42f).let { it * it }))
+                val semilunarSoft = 0.016f * exp(-(((ax - 0.36f) / 0.16f).let { it * it })) * smoothBell(y, 1.55f, 2.75f, 0.25f)
+                val iliacCrest = -0.044f * exp(-(((ax - 1.12f) / 0.38f).let { it * it } + ((y - 1.06f) / 0.48f).let { it * it }))
+                // Anatomical costal arch (inverted-V lower rib border from xiphoid down to 10th rib) + subtle epigastric settling
+                val costalY = 3.24f - 0.52f * smoothStep(0.08f, 0.96f, ax)
+                val costalArch = -0.026f * exp(-((y - costalY) / 0.16f).let { it * it }) * smoothBell(ax, 0.14f, 1.04f, 0.18f)
+                val epigastricDip = 0.022f * exp(-((x / 0.24f).let { it * it } + ((y - 2.94f) / 0.24f).let { it * it }))
+                // Calibrated sternum midline, graceful S-curved feminine collarbones, supraclavicular hollow & suprasternal notch (resolved cleanly at STEP=0.082)
+                val sternalHollow = 0.020f * exp(-((x / 0.15f).let { it * it })) * smoothBell(y, 3.38f, 4.62f, 0.24f)
+                val clavY = 4.74f - 0.055f * smoothStep(0.26f, 1.16f, ax) + 0.022f * sin(ax * 2.6f)
+                val clavicleRidge = -0.028f * exp(-((y - clavY) / 0.085f).let { it * it }) * smoothBell(ax, 0.16f, 1.18f, 0.16f)
+                val supraClavHollow = 0.032f * exp(-((y - (clavY + 0.15f)) / 0.110f).let { it * it }) * smoothBell(ax, 0.24f, 1.04f, 0.18f)
+                val sternalNotch = 0.036f * exp(-((x / 0.14f).let { it * it } + ((y - 4.82f) / 0.11f).let { it * it }))
+                dTorso += (navelDimple + navelHood + lineaAlba + hypogastricSoft + semilunarSoft + iliacCrest +
+                    costalArch + epigastricDip + sternalHollow + clavicleRidge + supraClavHollow + sternalNotch) * frontW
             }
             val backW = smoothStep(0.10f, 0.48f, zSpine - z)
             if (backW > 0.001f) {
-                val spineGroove = 0.028f * exp(-((x / 0.14f).let { it * it })) * smoothStep(0.25f, 4.65f, y)
+                val spineGroove = 0.030f * exp(-((x / 0.15f).let { it * it })) * smoothStep(0.25f, 4.65f, y)
                 dTorso += spineGroove * backW
             }
         }
@@ -230,7 +229,7 @@ internal object BlossomSdfBodyBuilder {
             0.54f, 0.46f
         )
 
-        // 3C. Crisp anatomical knee (patella dome; solid watertight natural popliteal bend with ZERO cutout hole!)
+        // 3C. Crisp anatomical knee (patella dome + subtle descending patellar tendon taper & parapatellar softening)
         val dPatella = sdEllipsoid(
             px = ax - 1.80f,
             py = y - (-1.90f),
@@ -238,6 +237,12 @@ internal object BlossomSdfBodyBuilder {
             rx = 0.24f,
             ry = 0.26f,
             rz = 0.22f
+        )
+        val dPatellarTendon = sdCapsule(
+            ax, y, z,
+            1.80f, -1.98f, 1.84f,
+            1.79f, -2.38f, 1.52f,
+            0.155f, 0.135f
         )
 
         // 3D. Tibia + sleek bone-aligned gastrocnemius calf contour tapering smoothly to slender ankle (zero pointy bump!)
@@ -260,27 +265,41 @@ internal object BlossomSdfBodyBuilder {
         val dUpperLeg = smin(dFemur, dGluteBridge, 0.24f)
         var dLeg = smin(dUpperLeg, dTibia, 0.16f)
         dLeg = smin(dLeg, dPatella, 0.12f)
+        dLeg = smin(dLeg, dPatellarTendon, 0.13f)
+        // Subtle parapatellar soft depressions flanking the kneecap (sized >= 1.5x STEP so Surface Nets stays silky smooth)
+        if (y in -2.35f..-1.55f && z > 1.55f) {
+            val paraMed = exp(-(((ax - 1.56f) / 0.14f).let { it * it } + ((y + 1.94f) / 0.18f).let { it * it }))
+            val paraLat = exp(-(((ax - 2.04f) / 0.14f).let { it * it } + ((y + 1.94f) / 0.18f).let { it * it }))
+            dLeg += 0.017f * (paraMed + paraLat) * smoothStep(1.58f, 1.88f, z)
+        }
 
         // ---------------------------------------------------------------------
-        // 4. ANATOMICAL SCULPTED FEET (ASYMMETRIC MALLEOLI -> SLEEK INSTEP -> ARCH -> OBLIQUE METATARSAL BALL)
+        // 4. ANATOMICAL SCULPTED FEET (MALLEOLI + ACHILLES -> SLEEK INSTEP -> ARCH -> OBLIQUE METATARSAL BALL)
         //    Pairs seamlessly with the 10 individually sculpted 3D toes in buildBlossomToesMesh()!
         // ---------------------------------------------------------------------
-        // Subtle, anatomically tucked feminine malleoli (medial slightly higher & anterior; lateral slightly lower & posterior)
+        // Delicate, anatomically distinct feminine malleoli (medial slightly higher & anterior; lateral slightly lower & posterior)
         val dMedialMalleolus = sdEllipsoid(
-            px = ax - 1.575f,
-            py = y - (-4.17f),
-            pz = z - (-0.86f),
-            rx = 0.104f,
-            ry = 0.118f,
-            rz = 0.106f
+            px = ax - 1.565f,
+            py = y - (-4.16f),
+            pz = z - (-0.855f),
+            rx = 0.118f,
+            ry = 0.134f,
+            rz = 0.118f
         )
         val dLateralMalleolus = sdEllipsoid(
-            px = ax - 1.785f,
-            py = y - (-4.27f),
-            pz = z - (-0.90f),
-            rx = 0.100f,
-            ry = 0.116f,
-            rz = 0.104f
+            px = ax - 1.795f,
+            py = y - (-4.26f),
+            pz = z - (-0.895f),
+            rx = 0.114f,
+            ry = 0.130f,
+            rz = 0.114f
+        )
+        // Subtle posterior Achilles tendon column anchoring calf cleanly into the heel
+        val dAchilles = sdCapsule(
+            ax, y, z,
+            1.68f, -3.55f, -0.44f,
+            1.68f, -4.10f, -0.96f,
+            0.125f, 0.115f
         )
         val dHeel = sdEllipsoid(
             px = ax - 1.68f,
@@ -324,57 +343,70 @@ internal object BlossomSdfBodyBuilder {
             2.08f, -5.03f, -1.045f,
             0.124f, 0.104f
         )
-        // Graceful medial longitudinal foot arch underneath + subtle dorsal extensor contour
+        // Graceful medial longitudinal foot arch underneath (preserves grounded lateral plantar border!)
         val dArchCut = sdEllipsoid(
-            px = ax - 1.56f,
+            px = ax - 1.555f,
             py = y - (-4.68f),
             pz = z - (-1.20f),
-            rx = 0.185f,
-            ry = 0.35f,
-            rz = 0.112f
+            rx = 0.195f,
+            ry = 0.36f,
+            rz = 0.122f
         )
         var dFoot = smin(dHeel, dInstep, 0.11f)
-        dFoot = smin(dFoot, dMedialMalleolus, 0.115f)
-        dFoot = smin(dFoot, dLateralMalleolus, 0.115f)
+        dFoot = smin(dFoot, dAchilles, 0.11f)
+        dFoot = smin(dFoot, dMedialMalleolus, 0.095f)
+        dFoot = smin(dFoot, dLateralMalleolus, 0.095f)
         val dForefootRays = smin(smin(dMedialRay, dCenterMetatarsal, 0.14f), dLateralRay, 0.14f)
         dFoot = smin(dFoot, dForefootRays, 0.13f)
         dFoot = smin(dFoot, dMetatarsalPad, 0.115f)
-        dFoot = smax(dFoot, -dArchCut, 0.065f)
+        dFoot = smax(dFoot, -dArchCut, 0.060f)
 
-        // Seamless ankle-to-foot fusion
-        val dFullLimb = smin(dLeg, dFoot, 0.125f)
+        // Seamless ankle-to-foot fusion + gentle retromalleolar hollows flanking the Achilles tendon
+        var dFullLimb = smin(dLeg, dFoot, 0.125f)
+        if (y in -4.32f..-3.65f && z < -0.58f) {
+            val retroMed = exp(-(((ax - 1.535f) / 0.115f).let { it * it } + ((y + 3.96f) / 0.19f).let { it * it } + ((z + 0.84f) / 0.16f).let { it * it }))
+            val retroLat = exp(-(((ax - 1.825f) / 0.115f).let { it * it } + ((y + 3.98f) / 0.19f).let { it * it } + ((z + 0.86f) / 0.16f).let { it * it }))
+            dFullLimb += 0.019f * (retroMed + retroLat)
+        }
 
         // ---------------------------------------------------------------------
         // 5. GRACEFUL FEMININE SHOULDERS, FULLER ANATOMICAL ARMS, OVAL WRISTS, SCULPTED PALMS & NECK
         //    Natural bicep/forearm fullness proportional to thighs & torso, smooth wrist-to-palm arch, ZERO hip webbing!
         // ---------------------------------------------------------------------
-        val zShoulder = mattressSurfaceZ(4.54f) + 0.45f
-        val zElbow = mattressSurfaceZ(2.50f) + 0.36f
-        val zWrist = mattressSurfaceZ(0.82f) + 0.195f
-        val zPalm = mattressSurfaceZ(0.36f) + 0.185f
+        val zShoulder = mattressSurfaceZ(4.54f) + 0.52f
+        val zElbow = mattressSurfaceZ(2.28f) + 0.36f
+        val zWrist = mattressSurfaceZ(0.42f) + 0.195f
+        val zPalm = mattressSurfaceZ(0.00f) + 0.185f
 
-        val zNeckBase = mattressSurfaceZ(4.86f) + 0.56f
+        val zNeckBase = mattressSurfaceZ(4.86f) + 0.58f
         val zNeckTop = mattressSurfaceZ(5.78f) + 0.80f
 
-        // Smooth diagonal feminine trapezius curving softly from lower neck into rounded shoulder (zero horizontal step!)
+        // Smooth diagonal feminine trapezius curving softly from lower neck into rounded acromion
         val dTrapezius = sdCapsule(
             ax, y, z,
             0.30f, 5.10f, zNeckBase - 0.10f,
-            1.25f, 4.54f, zShoulder - 0.04f,
-            0.25f, 0.28f
+            1.28f, 4.54f, zShoulder - 0.05f,
+            0.25f, 0.27f
         )
-        // Low-profile soft feminine deltoid seamlessly tucked beside upper chest (NO armor pauldron bulge!)
+        // Anatomical anterior axillary fold (pectoralis-major tendon bridge linking upper chest & Tail of Spence into anterior deltoid)
+        val dPecAxilla = sdCapsule(
+            ax, y, z,
+            0.84f, 4.28f, zShoulder + 0.20f,
+            1.34f, 4.45f, zShoulder + 0.05f,
+            0.19f, 0.18f
+        )
+        // Low-profile soft feminine deltoid harmonized organically with ribcage & anterior axillary fold (NO pauldron bulge!)
         val dDeltoid = sdEllipsoid(
             px = ax - 1.29f,
             py = y - 4.50f,
             pz = z - zShoulder,
             rx = 0.26f,
             ry = 0.36f,
-            rz = 0.29f
+            rz = 0.30f
         )
         // Anatomically proportionate upper arm with natural open armpit-to-ribcage gap below axilla (ZERO ribcage webbing!)
-        val uax0 = 1.33f; val uay0 = 4.40f; val uaz0 = zShoulder
-        val uax1 = 2.14f; val uay1 = 2.50f; val uaz1 = zElbow
+        val uax0 = 1.34f; val uay0 = 4.40f; val uaz0 = zShoulder
+        val uax1 = 2.26f; val uay1 = 2.28f; val uaz1 = zElbow
         val uadx = uax1 - uax0; val uady = uay1 - uay0; val uadz = uaz1 - uaz0
         val uaLen2 = uadx * uadx + uady * uady + uadz * uadz
         val hUpperArm = (((ax - uax0) * uadx + (y - uay0) * uady + (z - uaz0) * uadz) / uaLen2).coerceIn(0f, 1f)
@@ -382,13 +414,13 @@ internal object BlossomSdfBodyBuilder {
         val uapy = y - (uay0 + uady * hUpperArm)
         val uapz = z - (uaz0 + uadz * hUpperArm)
         val uaDist = sqrt(uapx * uapx + uapy * uapy + uapz * uapz)
-        val bicepFullness = exp(-((hUpperArm - 0.46f) / 0.27f).let { it * it })
-        val rUpperArm = 0.340f - 0.018f * hUpperArm + 0.038f * bicepFullness
+        val bicepFullness = exp(-((hUpperArm - 0.44f) / 0.27f).let { it * it })
+        val rUpperArm = 0.338f - 0.030f * smoothStep(0.32f, 1.0f, hUpperArm) + 0.040f * bicepFullness
         val dUpperArm = uaDist - rUpperArm
 
-        // Natural muscular brachioradialis forearm tapering smoothly into an oval feminine wrist (zero stick pinch or wrist lump!)
+        // Natural feminine forearm: smoothly narrower than upper arm below elbow, tapering gradually to a balanced oval wrist (zero Popeye bulge or skinny pinch!)
         val fax0 = uax1; val fay0 = uay1; val faz0 = uaz1
-        val fax1 = 2.24f; val fay1 = 0.82f; val faz1 = zWrist
+        val fax1 = 2.34f; val fay1 = 0.42f; val faz1 = zWrist
         val fadx = fax1 - fax0; val fady = fay1 - fay0; val fadz = faz1 - faz0
         val faLen2 = fadx * fadx + fady * fady + fadz * fadz
         val hForearm = (((ax - fax0) * fadx + (y - fay0) * fady + (z - faz0) * fadz) / faLen2).coerceIn(0f, 1f)
@@ -396,55 +428,72 @@ internal object BlossomSdfBodyBuilder {
         val fapy = y - (fay0 + fady * hForearm)
         val fapz = z - (faz0 + fadz * hForearm)
         val faDist = sqrt(fapx * fapx + fapy * fapy + fapz * fapz)
-        val forearmBelly = exp(-((hForearm - 0.24f) / 0.22f).let { it * it })
-        val rForearmBase = 0.342f - 0.148f * smoothStep(0.16f, 1.0f, hForearm) + 0.036f * forearmBelly
-        val distalOvalW = smoothStep(0.42f, 1.0f, hForearm)
+        val forearmBelly = exp(-((hForearm - 0.20f) / 0.22f).let { it * it })
+        val rForearmBase = 0.308f - 0.080f * smoothStep(0.08f, 1.0f, hForearm) + 0.022f * forearmBelly
+        val distalOvalW = smoothStep(0.38f, 1.0f, hForearm)
         val rForearm = if (distalOvalW > 0.001f && faDist > 1e-4f) {
             val zComp = abs(fapz / faDist)
-            rForearmBase * (1f - 0.29f * distalOvalW * zComp * zComp)
+            rForearmBase * (1f - 0.32f * distalOvalW * zComp * zComp)
         } else {
             rForearmBase
         }
         val dForearm = faDist - rForearm
 
-        // Sleek tapered wrist & compact interior carpal core (high-res sculpted parametric palm mesh wraps flush outside with zero voxel blobbiness!)
+        // Balanced oval wrist & compact interior carpal core (high-res sculpted parametric palm mesh wraps flush outside with zero voxel blobbiness!)
         val dWristBridge = sdEllipsoid(
-            px = ax - 2.26f,
-            py = y - 0.66f,
+            px = ax - 2.365f,
+            py = y - 0.26f,
             pz = z - (zWrist * 0.5f + zPalm * 0.5f),
-            rx = 0.150f,
-            ry = 0.185f,
-            rz = 0.112f
+            rx = 0.190f,
+            ry = 0.195f,
+            rz = 0.130f
         )
         val dPalmCore = sdEllipsoid(
-            px = ax - 2.30f,
-            py = y - 0.42f,
+            px = ax - 2.415f,
+            py = y - (-0.02f),
             pz = z - zPalm,
-            rx = 0.132f,
-            ry = 0.230f,
-            rz = 0.090f
+            rx = 0.185f,
+            ry = 0.245f,
+            rz = 0.116f
         )
-        val dPalm = smin(dPalmCore, dWristBridge, 0.080f)
-        val dArmChain = smin(
+        // Subtle posterior elbow olecranon landmark + faint anterior cubital fossa crease (preserves v6.0/v6.1 arm widths!)
+        val dOlecranon = sdEllipsoid(
+            px = ax - 2.28f,
+            py = y - 2.26f,
+            pz = z - (zElbow - 0.15f),
+            rx = 0.155f,
+            ry = 0.180f,
+            rz = 0.145f
+        )
+        val dPalm = smin(dPalmCore, dWristBridge, 0.085f)
+        var dArmChain = smin(
             smin(dDeltoid, dUpperArm, 0.24f),
-            smin(dForearm, dPalm, 0.085f),
-            0.16f
+            smin(dForearm, dPalm, 0.090f),
+            0.12f
         )
+        dArmChain = smin(dArmChain, dOlecranon, 0.14f)
+        if (y in 2.02f..2.58f && ax > 1.92f && z > zElbow + 0.06f) {
+            val cubitalDip = exp(-(((ax - 2.24f) / 0.19f).let { it * it } + ((y - 2.30f) / 0.13f).let { it * it })) *
+                smoothStep(zElbow + 0.08f, zElbow + 0.28f, z)
+            dArmChain += 0.015f * cubitalDip
+        }
         val dShoulderArm = smin(dTrapezius, dArmChain, 0.24f)
 
-        // Classical-length graceful feminine cervical neck rising cleanly behind the chin into the skull base
+        // Classical-length graceful feminine cervical neck with subtle mid-neck taper & lordosis flowing smoothly into skull base
+        val neckTClamp = ((y - 4.84f) / 0.94f).coerceIn(0f, 1f)
+        val neckWaist = -0.022f * sin(neckTClamp * PI.toFloat())
+        val neckLordosisZ = 0.018f * sin(neckTClamp * PI.toFloat())
         var dNeck = sdCapsule(
-            ax, y, z,
+            ax, y, z - neckLordosisZ,
             0f, 4.84f, zNeckBase,
             0f, 5.78f, zNeckTop,
-            0.36f, 0.34f
-        )
-        // Delicate subtle sternocleidomastoid (SCM) V-contour framing the anterior throat gently
-        if (y in 4.78f..5.68f && ax < 0.52f) {
-            val neckT = ((y - 4.84f) / 0.94f).coerceIn(0f, 1f)
-            val scmTargetX = 0.11f + 0.21f * neckT
-            val scmRidge = -0.012f * exp(-((ax - scmTargetX) / 0.065f).let { it * it }) *
-                smoothBell(y, 4.88f, 5.56f, 0.10f) * smoothStep(-0.08f, 0.22f, z - (zNeckBase + (zNeckTop - zNeckBase) * neckT))
+            0.355f, 0.335f
+        ) - neckWaist
+        // Calibrated subtle sternocleidomastoid (SCM) V-contour framing the anterior throat gently (resolved cleanly at STEP=0.082)
+        if (y in 4.78f..5.68f && ax < 0.54f) {
+            val scmTargetX = 0.11f + 0.21f * neckTClamp
+            val scmRidge = -0.020f * exp(-((ax - scmTargetX) / 0.085f).let { it * it }) *
+                smoothBell(y, 4.88f, 5.56f, 0.12f) * smoothStep(-0.08f, 0.22f, z - (zNeckBase + (zNeckTop - zNeckBase) * neckTClamp))
             dNeck += scmRidge
         }
 
@@ -452,16 +501,91 @@ internal object BlossomSdfBodyBuilder {
         // 6. UNIFIED SEAMLESS FULL-BODY FUSION + EXAM MATTRESS SOFT CONTACT
         // ---------------------------------------------------------------------
         var dBody = smin(dPelvis, dFullLimb, 0.42f)
-        // Smooth shoulder/axilla fusion at true anatomical armpit (y=3.84..4.40 ONLY); crisp open separation along lateral ribcage & waist!
-        val kArmTorso = 0.22f * smoothStep(3.84f, 4.40f, y) + 0.002f
+        // Smooth pectoralis/anterior axillary fold anchored cleanly to upper chest
+        dBody = smin(dBody, dPecAxilla, 0.18f)
+        // Smooth shoulder/axilla fusion at true anatomical armpit (y=3.88..4.42 ONLY); crisp open separation along lateral ribcage & waist!
+        val kArmTorso = 0.22f * smoothStep(3.88f, 4.42f, y) + 0.002f
         dBody = smin(dBody, dShoulderArm, kArmTorso)
-        dBody = smin(dBody, dNeck, 0.16f)
+        dBody = smin(dBody, dNeck, 0.17f)
 
         // Softly flatten posterior torso, buttocks, arms, palms & foot soles onto the reclined exam mattress
         val matPlane = (mattressSurfaceZ(y) + 0.005f) - z
         dBody = smax(dBody, matPlane, 0.12f)
 
         return dBody
+    }
+
+    /**
+     * Exact half-width of Blossom's continuous torso/ribcage cross-section at vertical coordinate [y].
+     */
+    fun torsoRxAt(y: Float): Float {
+        val yc = y.coerceIn(-1.04f, 4.98f)
+        val hipFlare = 0.36f * exp(-((yc - 0.16f) / 1.12f).let { it * it })
+        val iliacFull = 0.14f * exp(-((yc - 1.08f) / 0.68f).let { it * it })
+        val waistPinch = -0.20f * exp(-((yc - 2.46f) / 0.68f).let { it * it })
+        val lowerRibTaper = -0.130f * smoothStep(2.50f, 3.20f, yc) * (1f - smoothStep(3.65f, 4.18f, yc))
+        val ribCage = 0.065f * exp(-((yc - 4.02f) / 0.62f).let { it * it })
+        val shoulderSpan = 0.05f * exp(-((yc - 4.46f) / 0.44f).let { it * it })
+        val shoulderTopTaper = 1f - 0.70f * smoothStep(4.54f, 4.98f, yc)
+        val pelvicBaseTaper = 1f - 0.44f * smoothStep(-0.22f, -1.04f, yc)
+        return ((1.36f + hipFlare + iliacFull + waistPinch + lowerRibTaper + ribCage + shoulderSpan) *
+            pelvicBaseTaper * shoulderTopTaper).coerceAtLeast(0.36f)
+    }
+
+    /**
+     * Evaluates ONLY Blossom's ribcage/torso + anterior axillary fold SDF (strictly excluding arms),
+     * ensuring breast patch projection stays smoothly anchored to the chest wall and NEVER snaps
+     * across the open armpit gap onto the inner upper arm!
+     */
+    fun evaluateTorsoChestSdf(x: Float, y: Float, z: Float): Float {
+        val ax = abs(x)
+        val yc = y.coerceIn(-1.04f, 4.98f)
+        val matY = mattressSurfaceZ(yc)
+        val upperFill = smoothStep(0.62f, 3.20f, yc)
+        val perinealRollZ = -0.34f * smoothStep(-0.34f, -1.04f, yc)
+        val thoraxSettle = -0.14f * smoothStep(3.35f, 4.92f, yc)
+        val zSpine = (matY + 0.56f) + 0.14f * upperFill + perinealRollZ + thoraxSettle
+
+        val rxTorso = torsoRxAt(yc)
+        val lowerBellyFull = 0.18f * exp(-((yc - 1.38f) / 0.86f).let { it * it })
+        val waistDepthDip = -0.045f * exp(-((yc - 2.48f) / 0.56f).let { it * it })
+        val thoraxArchDepth = 0.175f * exp(-((yc - 3.68f) / 0.88f).let { it * it })
+        val upperChestTaper = -0.22f * smoothStep(4.08f, 4.98f, yc)
+        val pelvicDepthTaper = 1f - 0.30f * smoothStep(-0.30f, -1.04f, yc)
+        val rzTorso = ((0.62f + lowerBellyFull + waistDepthDip + thoraxArchDepth + upperChestTaper) * pelvicDepthTaper).coerceAtLeast(0.32f)
+
+        val capR = 0.16f
+        val dRadTorso = sdEllipse2D(ax, z - zSpine, (rxTorso - capR).coerceAtLeast(0.14f), (rzTorso - capR).coerceAtLeast(0.14f))
+        val dyTorso = max(y - 4.98f, -1.04f - y)
+        var dTorso = sqrt(max(dRadTorso, 0f).let { it * it } + max(dyTorso, 0f).let { it * it }) +
+            min(max(dRadTorso, dyTorso), 0f) - capR
+
+        if (y > 0.15f && y < 5.14f && ax < 1.65f) {
+            val frontW = smoothStep(-0.08f, 0.34f, z - zSpine)
+            if (frontW > 0.001f) {
+                val costalY = 3.24f - 0.52f * smoothStep(0.08f, 0.96f, ax)
+                val costalArch = -0.026f * exp(-((y - costalY) / 0.16f).let { it * it }) * smoothBell(ax, 0.14f, 1.04f, 0.18f)
+                val epigastricDip = 0.022f * exp(-((x / 0.24f).let { it * it } + ((y - 2.94f) / 0.24f).let { it * it }))
+                val sternalHollow = 0.020f * exp(-((x / 0.15f).let { it * it })) * smoothBell(y, 3.38f, 4.62f, 0.24f)
+                val clavY = 4.74f - 0.055f * smoothStep(0.26f, 1.16f, ax) + 0.022f * sin(ax * 2.6f)
+                val clavicleRidge = -0.028f * exp(-((y - clavY) / 0.085f).let { it * it }) * smoothBell(ax, 0.16f, 1.18f, 0.16f)
+                val supraClavHollow = 0.032f * exp(-((y - (clavY + 0.15f)) / 0.110f).let { it * it }) * smoothBell(ax, 0.24f, 1.04f, 0.18f)
+                val sternalNotch = 0.036f * exp(-((x / 0.14f).let { it * it } + ((y - 4.82f) / 0.11f).let { it * it }))
+                dTorso += (costalArch + epigastricDip + sternalHollow + clavicleRidge + supraClavHollow + sternalNotch) * frontW
+            }
+        }
+
+        val zShoulder = mattressSurfaceZ(4.54f) + 0.52f
+        val dPecAxilla = sdCapsule(
+            ax, y, z,
+            0.84f, 4.28f, zShoulder + 0.20f,
+            1.34f, 4.45f, zShoulder + 0.05f,
+            0.19f, 0.18f
+        )
+        var dChest = smin(dTorso, dPecAxilla, 0.18f)
+        val matPlane = (mattressSurfaceZ(y) + 0.005f) - z
+        dChest = smax(dChest, matPlane, 0.12f)
+        return dChest
     }
 
     /**
@@ -474,36 +598,35 @@ internal object BlossomSdfBodyBuilder {
      */
     fun evaluateArmVsTorsoWeight(x: Float, y: Float, z: Float): Float {
         val ax = abs(x)
-        if (ax < 0.96f || y < -0.58f || y > 5.04f) return 0f
+        if (ax < 0.96f || y < -0.85f || y > 5.04f) return 0f
         // Strictly disjoint from LegSkinCache (legs sit inside y <= 0.44 and (ax <= 1.86 or z >= -0.35))
         if (y <= 0.44f && (ax <= 1.86f || z >= -0.35f)) return 0f
 
-        // Exact Torso + Trapezius SDF (matching evaluateBodySdf)
+        // Exact Torso + Anterior Axillary Fold + Trapezius SDF (matching evaluateBodySdf)
         val yc = y.coerceIn(-1.04f, 4.98f)
         val matY = mattressSurfaceZ(yc)
-        val upperFill = smoothStep(0.62f, 2.95f, yc)
+        val upperFill = smoothStep(0.62f, 3.20f, yc)
         val perinealRollZ = -0.34f * smoothStep(-0.34f, -1.04f, yc)
-        val thoraxSettle = -0.34f * smoothStep(2.55f, 4.86f, yc)
-        val zSpine = (matY + 0.56f) + 0.28f * upperFill + perinealRollZ + thoraxSettle
+        val thoraxSettle = -0.14f * smoothStep(3.35f, 4.92f, yc)
+        val zSpine = (matY + 0.56f) + 0.14f * upperFill + perinealRollZ + thoraxSettle
 
         val hipFlare = 0.36f * exp(-((yc - 0.16f) / 1.12f).let { it * it })
         val iliacFull = 0.14f * exp(-((yc - 1.08f) / 0.68f).let { it * it })
-        val waistPinch = -0.22f * exp(-((yc - 2.48f) / 0.62f).let { it * it })
-        val ribCage = 0.05f * exp(-((yc - 3.92f) / 0.78f).let { it * it })
-        val thoraxSlim = -0.14f * smoothStep(2.55f, 3.65f, yc)
-        val shoulderSpan = 0.04f * exp(-((yc - 4.46f) / 0.44f).let { it * it })
-        val shoulderTopTaper = 1f - 0.72f * smoothStep(4.50f, 4.98f, yc)
+        val waistPinch = -0.20f * exp(-((yc - 2.46f) / 0.68f).let { it * it })
+        val lowerRibTaper = -0.130f * smoothStep(2.50f, 3.20f, yc) * (1f - smoothStep(3.65f, 4.18f, yc))
+        val ribCage = 0.065f * exp(-((yc - 4.02f) / 0.62f).let { it * it })
+        val shoulderSpan = 0.05f * exp(-((yc - 4.46f) / 0.44f).let { it * it })
+        val shoulderTopTaper = 1f - 0.70f * smoothStep(4.54f, 4.98f, yc)
         val pelvicBaseTaper = 1f - 0.44f * smoothStep(-0.22f, -1.04f, yc)
-        val rxTorso = ((1.36f + hipFlare + iliacFull + waistPinch + ribCage + thoraxSlim + shoulderSpan) *
+        val rxTorso = ((1.36f + hipFlare + iliacFull + waistPinch + lowerRibTaper + ribCage + shoulderSpan) *
             pelvicBaseTaper * shoulderTopTaper).coerceAtLeast(0.36f)
 
-        val bellyDepth = 0.28f * exp(-((yc - 1.54f) / 1.05f).let { it * it }) +
-            0.25f * smoothStep(1.65f, 3.15f, yc)
-        val waistDepthDip = -0.050f * exp(-((yc - 2.42f) / 0.48f).let { it * it })
-        val chestWallCurve = -0.18f * smoothStep(2.75f, 4.18f, yc) -
-            0.25f * smoothStep(4.02f, 4.98f, yc)
+        val lowerBellyFull = 0.18f * exp(-((yc - 1.38f) / 0.86f).let { it * it })
+        val waistDepthDip = -0.045f * exp(-((yc - 2.48f) / 0.56f).let { it * it })
+        val thoraxArchDepth = 0.175f * exp(-((yc - 3.68f) / 0.88f).let { it * it })
+        val upperChestTaper = -0.22f * smoothStep(4.08f, 4.98f, yc)
         val pelvicDepthTaper = 1f - 0.30f * smoothStep(-0.30f, -1.04f, yc)
-        val rzTorso = ((0.62f + bellyDepth + waistDepthDip + chestWallCurve) * pelvicDepthTaper).coerceAtLeast(0.32f)
+        val rzTorso = ((0.62f + lowerBellyFull + waistDepthDip + thoraxArchDepth + upperChestTaper) * pelvicDepthTaper).coerceAtLeast(0.32f)
 
         val capR = 0.16f
         val dRadTorso = sdEllipse2D(ax, z - zSpine, (rxTorso - capR).coerceAtLeast(0.14f), (rzTorso - capR).coerceAtLeast(0.14f))
@@ -511,17 +634,23 @@ internal object BlossomSdfBodyBuilder {
         val dTorso = sqrt(max(dRadTorso, 0f).let { it * it } + max(dyTorso, 0f).let { it * it }) +
             min(max(dRadTorso, dyTorso), 0f) - capR
 
-        val zShoulder = mattressSurfaceZ(4.54f) + 0.45f
-        val zElbow = mattressSurfaceZ(2.50f) + 0.36f
-        val zWrist = mattressSurfaceZ(0.82f) + 0.195f
-        val zPalm = mattressSurfaceZ(0.36f) + 0.185f
-        val zNeckBase = mattressSurfaceZ(4.86f) + 0.56f
+        val zShoulder = mattressSurfaceZ(4.54f) + 0.52f
+        val zElbow = mattressSurfaceZ(2.28f) + 0.36f
+        val zWrist = mattressSurfaceZ(0.42f) + 0.195f
+        val zPalm = mattressSurfaceZ(0.00f) + 0.185f
+        val zNeckBase = mattressSurfaceZ(4.86f) + 0.58f
 
         val dTrapezius = sdCapsule(
             ax, y, z,
             0.30f, 5.10f, zNeckBase - 0.10f,
-            1.25f, 4.54f, zShoulder - 0.04f,
-            0.25f, 0.28f
+            1.28f, 4.54f, zShoulder - 0.05f,
+            0.25f, 0.27f
+        )
+        val dPecAxilla = sdCapsule(
+            ax, y, z,
+            0.84f, 4.28f, zShoulder + 0.20f,
+            1.34f, 4.45f, zShoulder + 0.05f,
+            0.19f, 0.18f
         )
         val dDeltoid = sdEllipsoid(
             px = ax - 1.29f,
@@ -529,11 +658,11 @@ internal object BlossomSdfBodyBuilder {
             pz = z - zShoulder,
             rx = 0.26f,
             ry = 0.36f,
-            rz = 0.29f
+            rz = 0.30f
         )
 
-        val uax0 = 1.33f; val uay0 = 4.40f; val uaz0 = zShoulder
-        val uax1 = 2.14f; val uay1 = 2.50f; val uaz1 = zElbow
+        val uax0 = 1.34f; val uay0 = 4.40f; val uaz0 = zShoulder
+        val uax1 = 2.26f; val uay1 = 2.28f; val uaz1 = zElbow
         val uadx = uax1 - uax0; val uady = uay1 - uay0; val uadz = uaz1 - uaz0
         val uaLen2 = uadx * uadx + uady * uady + uadz * uadz
         val hUpperArm = (((ax - uax0) * uadx + (y - uay0) * uady + (z - uaz0) * uadz) / uaLen2).coerceIn(0f, 1f)
@@ -541,12 +670,12 @@ internal object BlossomSdfBodyBuilder {
         val uapy = y - (uay0 + uady * hUpperArm)
         val uapz = z - (uaz0 + uadz * hUpperArm)
         val uaDist = sqrt(uapx * uapx + uapy * uapy + uapz * uapz)
-        val bicepFullness = exp(-((hUpperArm - 0.46f) / 0.27f).let { it * it })
-        val rUpperArm = 0.340f - 0.018f * hUpperArm + 0.038f * bicepFullness
+        val bicepFullness = exp(-((hUpperArm - 0.44f) / 0.27f).let { it * it })
+        val rUpperArm = 0.338f - 0.030f * smoothStep(0.32f, 1.0f, hUpperArm) + 0.040f * bicepFullness
         val dUpperArm = uaDist - rUpperArm
 
         val fax0 = uax1; val fay0 = uay1; val faz0 = uaz1
-        val fax1 = 2.24f; val fay1 = 0.82f; val faz1 = zWrist
+        val fax1 = 2.34f; val fay1 = 0.42f; val faz1 = zWrist
         val fadx = fax1 - fax0; val fady = fay1 - fay0; val fadz = faz1 - faz0
         val faLen2 = fadx * fadx + fady * fady + fadz * fadz
         val hForearm = (((ax - fax0) * fadx + (y - fay0) * fady + (z - faz0) * fadz) / faLen2).coerceIn(0f, 1f)
@@ -554,45 +683,57 @@ internal object BlossomSdfBodyBuilder {
         val fapy = y - (fay0 + fady * hForearm)
         val fapz = z - (faz0 + fadz * hForearm)
         val faDist = sqrt(fapx * fapx + fapy * fapy + fapz * fapz)
-        val forearmBelly = exp(-((hForearm - 0.24f) / 0.22f).let { it * it })
-        val rForearmBase = 0.342f - 0.148f * smoothStep(0.16f, 1.0f, hForearm) + 0.036f * forearmBelly
-        val distalOvalW = smoothStep(0.42f, 1.0f, hForearm)
+        val forearmBelly = exp(-((hForearm - 0.20f) / 0.22f).let { it * it })
+        val rForearmBase = 0.308f - 0.080f * smoothStep(0.08f, 1.0f, hForearm) + 0.022f * forearmBelly
+        val distalOvalW = smoothStep(0.38f, 1.0f, hForearm)
         val rForearm = if (distalOvalW > 0.001f && faDist > 1e-4f) {
             val zComp = abs(fapz / faDist)
-            rForearmBase * (1f - 0.29f * distalOvalW * zComp * zComp)
+            rForearmBase * (1f - 0.32f * distalOvalW * zComp * zComp)
         } else {
             rForearmBase
         }
         val dForearm = faDist - rForearm
 
         val dWristBridge = sdEllipsoid(
-            px = ax - 2.26f,
-            py = y - 0.66f,
+            px = ax - 2.365f,
+            py = y - 0.26f,
             pz = z - (zWrist * 0.5f + zPalm * 0.5f),
-            rx = 0.150f,
-            ry = 0.185f,
-            rz = 0.112f
+            rx = 0.190f,
+            ry = 0.195f,
+            rz = 0.130f
         )
         val dPalmCore = sdEllipsoid(
-            px = ax - 2.30f,
-            py = y - 0.42f,
+            px = ax - 2.415f,
+            py = y - (-0.02f),
             pz = z - zPalm,
-            rx = 0.132f,
-            ry = 0.230f,
-            rz = 0.090f
+            rx = 0.185f,
+            ry = 0.245f,
+            rz = 0.116f
         )
-        val dPalm = smin(dPalmCore, dWristBridge, 0.080f)
+        val dOlecranon = sdEllipsoid(
+            px = ax - 2.28f,
+            py = y - 2.26f,
+            pz = z - (zElbow - 0.15f),
+            rx = 0.155f,
+            ry = 0.180f,
+            rz = 0.145f
+        )
+        val dPalm = smin(dPalmCore, dWristBridge, 0.085f)
         val dArmChain = smin(
-            smin(dDeltoid, dUpperArm, 0.24f),
-            smin(dForearm, dPalm, 0.085f),
-            0.16f
+            smin(
+                smin(dDeltoid, dUpperArm, 0.24f),
+                smin(dForearm, dPalm, 0.090f),
+                0.12f
+            ),
+            dOlecranon,
+            0.14f
         )
 
-        val dTorsoAnchor = min(dTorso, dTrapezius)
+        val dTorsoAnchor = min(min(dTorso, dTrapezius), dPecAxilla)
         // Smooth SDF ownership transition across true axilla/shoulder crease (ZERO discontinuous cliff & ZERO ribcage-arm stretch!)
-        val sdfWeight = smoothStep(+0.26f, -0.26f, dArmChain - dTorsoAnchor)
+        val sdfWeight = smoothStep(+0.34f, -0.34f, dArmChain - dTorsoAnchor)
         val trapGuard = 1f - smoothStep(4.62f, 5.00f, y) * (1f - smoothStep(1.26f, 1.56f, ax))
-        val farFade = 1f - smoothStep(0.28f, 0.56f, dArmChain)
+        val farFade = 1f - smoothStep(0.30f, 0.60f, dArmChain)
         return (sdfWeight * trapGuard * farFade).coerceIn(0f, 1f)
     }
 
@@ -646,19 +787,34 @@ internal object BlossomSdfBodyBuilder {
         val popMask = exp(-(popDx * popDx + popDy * popDy + popDz * popDz)) * smoothStep(0.05f, 0.65f, -nz)
         val popAo = 1f - 0.26f * popMask
 
-        // Subtle upper-body anatomical AO (axillary folds, supraclavicular hollows, suprasternal notch, under-chin shadow & elbow crease)
+        // Subtle upper-body & joint anatomical AO (axillary folds, clavicles, suprasternal notch, under-chin, true v6.1 elbow, knee & ankle hollows)
         val axillaAo = 1f - 0.20f * exp(-(((ax - 1.18f) / 0.24f).let { it * it } + ((y - 4.28f) / 0.32f).let { it * it }))
         val notchAo = 1f - 0.15f * exp(-((x / 0.14f).let { it * it } + ((y - 4.82f) / 0.11f).let { it * it })) * frontW
         val supraClavAo = 1f - 0.10f * exp(-(((ax - 0.62f) / 0.34f).let { it * it } + ((y - 4.86f) / 0.10f).let { it * it })) * frontW
         val underChinAo = 1f - 0.26f * exp(-((x / 0.38f).let { it * it } + ((y - 5.44f) / 0.22f).let { it * it })) * frontW
-        val elbowAo = 1f - 0.14f * exp(-(((ax - 1.80f) / 0.26f).let { it * it } + ((y - 2.70f) / 0.24f).let { it * it })) * frontW
+        // Aligned to exact v6.1 anterior cubital crease (ax=2.26, y=2.28)
+        val cubitalLineY = 2.28f - (ax - 2.26f) * 0.12f
+        val elbowAo = 1f - 0.15f * exp(-(((ax - 2.26f) / 0.24f).let { it * it } + ((y - cubitalLineY) / 0.15f).let { it * it })) * frontW
+        // Gentle parapatellar & retromalleolar joint contour AO
+        val paraKneeAo = 1f - 0.065f * (
+            exp(-(((ax - 1.56f) / 0.16f).let { it * it } + ((y + 1.94f) / 0.22f).let { it * it })) +
+                exp(-(((ax - 2.04f) / 0.16f).let { it * it } + ((y + 1.94f) / 0.22f).let { it * it }))
+            ) * smoothStep(1.52f, 1.86f, z)
+        val ankleHollowAo = 1f - 0.10f * (
+            exp(-(((ax - 1.535f) / 0.13f).let { it * it } + ((y + 3.96f) / 0.22f).let { it * it })) +
+                exp(-(((ax - 1.825f) / 0.13f).let { it * it } + ((y + 3.98f) / 0.22f).let { it * it }))
+            ) * (1f - smoothStep(-0.92f, -0.56f, z))
 
-        val ao = (cushionAo * navelAo * cleftAo * ingAo * popAo * axillaAo * notchAo * supraClavAo * underChinAo * elbowAo).coerceIn(0.14f, 1f)
+        val ao = (cushionAo * navelAo * cleftAo * ingAo * popAo * axillaAo * notchAo * supraClavAo *
+            underChinAo * elbowAo * paraKneeAo * ankleHollowAo).coerceIn(0.14f, 1f)
 
         val kneeWarm = exp(-(((ax - 1.80f) / 0.42f).let { it * it } + ((y + 1.86f) / 0.42f).let { it * it } + ((z - 1.78f) / 0.42f).let { it * it })) * 0.09f
-        val shoulderWarm = exp(-(((ax - 1.56f) / 0.40f).let { it * it } + ((y - 4.78f) / 0.42f).let { it * it })) * 0.05f
+        val shoulderWarm = exp(-(((ax - 1.32f) / 0.40f).let { it * it } + ((y - 4.50f) / 0.40f).let { it * it })) * 0.05f
+        val elbowWarm = exp(-(((ax - 2.28f) / 0.30f).let { it * it } + ((y - 2.26f) / 0.30f).let { it * it })) * 0.055f * (1f - frontW * 0.55f)
+        val ankleWarm = exp(-(((ax - 1.68f) / 0.34f).let { it * it } + ((y + 4.18f) / 0.32f).let { it * it })) * 0.045f
         val toeWarm = smoothStep(-5.15f, -5.65f, y) * 0.09f
-        val pigment = (ingDip * 0.08f + exp(-navelR2 * 2.0f) * 0.16f * frontW + kneeWarm + shoulderWarm + toeWarm).coerceIn(0f, 1f)
+        val pigment = (ingDip * 0.08f + exp(-navelR2 * 2.0f) * 0.16f * frontW +
+            kneeWarm + shoulderWarm + elbowWarm + ankleWarm + toeWarm).coerceIn(0f, 1f)
 
         return Pair(ao, pigment)
     }
@@ -693,6 +849,134 @@ internal object BlossomSdfBodyBuilder {
         val n = evaluateBodyNormal(x, y, z)
         val (ao, pigment) = evaluateBodyMaterial(x, y, z, n[0], n[1], n[2])
         return SdfSurfaceSample(z, n[0], n[1], n[2], ao, pigment)
+    }
+
+    /**
+     * Exact ray-march + Newton-Raphson front-surface sampler strictly on Blossom's ribcage/chest wall
+     * (excluding the arm chain so breast patch edges never snap onto the inner upper arm across the armpit!).
+     */
+    fun sampleTorsoChestSurfacePoint(x: Float, y: Float): SdfSurfaceSample {
+        var z = 1.40f
+        for (step in 0 until 40) {
+            val d = evaluateTorsoChestSdf(x, y, z)
+            if (abs(d) < 0.0006f) break
+            z -= d.coerceIn(-0.22f, 0.38f)
+            if (z < -1.80f) {
+                z = mattressSurfaceZ(y) + 0.04f
+                break
+            }
+        }
+        for (it in 0 until 5) {
+            val d = evaluateTorsoChestSdf(x, y, z)
+            if (abs(d) < 0.0001f) break
+            val dz = (evaluateTorsoChestSdf(x, y, z + 0.006f) - evaluateTorsoChestSdf(x, y, z - 0.006f)) / 0.012f
+            if (abs(dz) > 0.10f) {
+                z -= (d / dz).coerceIn(-0.08f, 0.08f)
+            } else {
+                z -= d * 0.5f
+            }
+        }
+        val eps = 0.014f
+        val dx = evaluateTorsoChestSdf(x + eps, y, z) - evaluateTorsoChestSdf(x - eps, y, z)
+        val dy = evaluateTorsoChestSdf(x, y + eps, z) - evaluateTorsoChestSdf(x, y - eps, z)
+        val dz = evaluateTorsoChestSdf(x, y, z + eps) - evaluateTorsoChestSdf(x, y, z - eps)
+        val len = sqrt(dx * dx + dy * dy + dz * dz).coerceAtLeast(1e-6f)
+        val nx = dx / len
+        val ny = dy / len
+        val nz = dz / len
+        val (ao, pigment) = evaluateBodyMaterial(x, y, z, nx, ny, nz)
+        return SdfSurfaceSample(z, nx, ny, nz, ao, pigment)
+    }
+
+    data class WrappedChestSample(
+        val x: Float,
+        val y: Float,
+        val z: Float,
+        val nx: Float,
+        val ny: Float,
+        val nz: Float,
+        val ao: Float,
+        val pigment: Float
+    )
+
+    /**
+     * Smooth C1 radial-elliptical projection of unwarped breast patch coordinates `(xRaw, y)`
+     * strictly onto Blossom's arm-free torso/ribcage SDF (`evaluateTorsoChestSdf`):
+     *  - Exact 1:1 `(x == xRaw)` across the entire breast interior (`|xRaw| <= 0.78 * rxTorso`)
+     *    so the breast dome keeps its exact unpinched, unwarped anatomical shape.
+     *  - Smooth C1 wrap around the curved lateral ribcage for the outer collar (`|xRaw| > 0.78 * rxTorso`),
+     *    eliminating all armpit arm-snapping triangles AND hard lateral clamp ridges!
+     */
+    fun sampleTorsoChestWallWrapped(xRaw: Float, y: Float): WrappedChestSample {
+        val yc = y.coerceIn(-1.04f, 4.98f)
+        val matY = mattressSurfaceZ(yc)
+        val upperFill = smoothStep(0.62f, 3.20f, yc)
+        val perinealRollZ = -0.34f * smoothStep(-0.34f, -1.04f, yc)
+        val thoraxSettle = -0.14f * smoothStep(3.35f, 4.92f, yc)
+        val zSpine = (matY + 0.56f) + 0.14f * upperFill + perinealRollZ + thoraxSettle
+
+        val rxTorso = torsoRxAt(yc)
+        val lowerBellyFull = 0.18f * exp(-((yc - 1.38f) / 0.86f).let { it * it })
+        val waistDepthDip = -0.045f * exp(-((yc - 2.48f) / 0.56f).let { it * it })
+        val thoraxArchDepth = 0.175f * exp(-((yc - 3.68f) / 0.88f).let { it * it })
+        val upperChestTaper = -0.22f * smoothStep(4.08f, 4.98f, yc)
+        val pelvicDepthTaper = 1f - 0.30f * smoothStep(-0.30f, -1.04f, yc)
+        val rzTorso = ((0.62f + lowerBellyFull + waistDepthDip + thoraxArchDepth + upperChestTaper) * pelvicDepthTaper).coerceAtLeast(0.32f)
+
+        val side = if (xRaw >= 0f) 1f else -1f
+        val u = (abs(xRaw) / rxTorso.coerceAtLeast(0.36f)).coerceAtLeast(0f)
+        val uSplit = 0.78f
+        val theta = if (u <= uSplit) {
+            asin(u)
+        } else {
+            val theta0 = asin(uSplit)
+            val slope0 = 1f / sqrt(1f - uSplit * uSplit)
+            val thetaMax = 1.22f
+            val room = thetaMax - theta0
+            theta0 + room * tanh((u - uSplit) * (slope0 / room))
+        }
+
+        // Elliptical ray from (0, y, zSpine) passing directly through (side * rx * sin(theta), y, zSpine + rz * cos(theta))
+        val dirX = side * rxTorso * sin(theta)
+        val dirZ = rzTorso * cos(theta)
+        val dirLen = sqrt(dirX * dirX + dirZ * dirZ).coerceAtLeast(1e-5f)
+        val ux = dirX / dirLen
+        val uz = dirZ / dirLen
+
+        var r = max(rxTorso, rzTorso) + 0.65f
+        for (step in 0 until 42) {
+            val px = r * ux
+            val pz = zSpine + r * uz
+            val d = evaluateTorsoChestSdf(px, y, pz)
+            if (abs(d) < 0.0005f) break
+            r = (r - d.coerceIn(-0.18f, 0.34f)).coerceAtLeast(0.08f)
+        }
+        for (it in 0 until 5) {
+            val px = r * ux
+            val pz = zSpine + r * uz
+            val d = evaluateTorsoChestSdf(px, y, pz)
+            if (abs(d) < 0.0001f) break
+            val dr = (evaluateTorsoChestSdf((r + 0.006f) * ux, y, zSpine + (r + 0.006f) * uz) -
+                evaluateTorsoChestSdf((r - 0.006f) * ux, y, zSpine + (r - 0.006f) * uz)) / 0.012f
+            if (abs(dr) > 0.10f) {
+                r = (r - (d / dr).coerceIn(-0.08f, 0.08f)).coerceAtLeast(0.08f)
+            } else {
+                r = (r - d * 0.5f).coerceAtLeast(0.08f)
+            }
+        }
+
+        val px = r * ux
+        val pz = zSpine + r * uz
+        val eps = 0.014f
+        val dx = evaluateTorsoChestSdf(px + eps, y, pz) - evaluateTorsoChestSdf(px - eps, y, pz)
+        val dy = evaluateTorsoChestSdf(px, y + eps, pz) - evaluateTorsoChestSdf(px, y - eps, pz)
+        val dz = evaluateTorsoChestSdf(px, y, pz + eps) - evaluateTorsoChestSdf(px, y, pz - eps)
+        val len = sqrt(dx * dx + dy * dy + dz * dz).coerceAtLeast(1e-6f)
+        val nx = dx / len
+        val ny = dy / len
+        val nz = dz / len
+        val (ao, pigment) = evaluateBodyMaterial(px, y, pz, nx, ny, nz)
+        return WrappedChestSample(px, y, pz, nx, ny, nz, ao, pigment)
     }
 
     /**
@@ -1135,18 +1419,30 @@ internal object BlossomSdfBodyBuilder {
                         val cosP = cos(phi)
                         val sinP = sin(phi)
 
-                        // Subtle dorsal nail plate indentation on distal upper face (s in 0.62..0.90)
+                        // Subtle dorsal nail plate indentation & anatomical IP joint contour (s in 0.62..0.90)
                         val nailMask = smoothBell(s, 0.62f, 0.90f, 0.05f) * smoothStep(0.45f, 0.92f, sinP) *
                             (1f - smoothStep(0.55f, 0.88f, abs(cosP)))
                         val nailIndent = -0.0040f * nailMask
-                        val knuckleBump = (if (isHallux) 0.0028f else 0.0038f) *
-                            exp(-((s - 0.50f) / 0.075f).let { it * it }) * smoothStep(0.20f, 0.90f, sinP)
+                        val ipBand = exp(-((s - 0.50f) / 0.072f).let { it * it })
+                        val knuckleBump = (if (isHallux) 0.0034f else 0.0046f) * ipBand * smoothStep(0.20f, 0.90f, sinP)
 
-                        val localLat = spec.rLat * radScale * cosP
-                        var localZ = spec.rZ * radScale * sinP + nailIndent + knuckleBump
+                        // Anatomical toe cross-section: broader, gently flatter hallux & subtly side-flattened lesser toes (matches toenails!)
+                        val toeSectionW = smoothStep(0.10f, 0.28f, s) * (1f - smoothStep(0.84f, 0.96f, s))
+                        val cSignT = if (cosP >= 0f) 1f else -1f
+                        val sqCosT = cSignT * Math.pow(abs(cosP).toDouble().coerceAtLeast(1e-5), 0.90).toFloat()
+                        val shapedCosT = cosP * (1f - 0.34f * toeSectionW) + sqCosT * (0.34f * toeSectionW)
+                        val halluxBroad = if (isHallux) 1f + 0.055f * smoothStep(0.55f, 0.85f, s) else 1f
+                        val dorsalToeFlat = if (isHallux) {
+                            1f - 0.060f * smoothStep(0.45f, 0.84f, s)
+                        } else {
+                            1f - 0.035f * toeSectionW
+                        }
+
+                        val localLat = spec.rLat * radScale * shapedCosT * halluxBroad
+                        var localZ = spec.rZ * radScale * sinP * (if (sinP >= 0f) dorsalToeFlat else 1f) + nailIndent + knuckleBump
                         // Soft plantar toe pad resting gently against the exam cushion
                         if (sinP < 0f) {
-                            localZ *= (0.82f + 0.10f * smoothStep(0.60f, 0.90f, s))
+                            localZ *= (0.82f + 0.11f * smoothStep(0.60f, 0.90f, s))
                         }
 
                         val px = cx + latX * localLat
@@ -1172,12 +1468,14 @@ internal object BlossomSdfBodyBuilder {
                             nx = mx / mLen; ny = my / mLen; nz = mz / mLen
                         }
 
-                        // Soft interdigital crevice shadow + mattress contact shadow + subtle glossy nail sheen
-                        val interdigitalAo = 1f - abs(cosP) * 0.24f * (1f - smoothStep(0.10f, 0.62f, s))
+                        // Soft interdigital crevice shadow + subtle IP knuckle crease AO + mattress contact shadow
+                        val interdigitalAo = 1f - abs(cosP) * 0.25f * (1f - smoothStep(0.10f, 0.62f, s))
+                        val ipCreaseAo = 1f - 0.075f * ipBand * smoothStep(0.25f, 0.90f, sinP)
                         val soleAo = 1f - smoothStep(0.10f, 0.80f, -sinP) * 0.34f
-                        val ao = (interdigitalAo * soleAo).coerceIn(0.36f, 1f)
-                        val wetness = (0.055f + nailMask * 0.22f).coerceIn(0f, 0.45f)
-                        val pigment = (0.08f + smoothStep(0.60f, 0.96f, s) * 0.08f + nailMask * 0.14f).coerceIn(0f, 1f)
+                        val ao = (interdigitalAo * ipCreaseAo * soleAo).coerceIn(0.36f, 1f)
+                        val wetness = (0.052f + nailMask * 0.22f).coerceIn(0f, 0.45f)
+                        val pigment = (0.08f + smoothStep(0.60f, 0.96f, s) * 0.085f +
+                            ipBand * 0.045f * smoothStep(0.25f, 0.90f, sinP) + nailMask * 0.14f).coerceIn(0f, 1f)
 
                         val vIdx = (baseVert + r * cols + c) * stride
                         data[vIdx] = px
@@ -1250,12 +1548,21 @@ internal object BlossomSdfBodyBuilder {
         mesh: DynamicGlMesh,
         cache: BlossomVulvaPatchCache,
         detailEvaluator: (x: Float, y: Float) -> VulvaSurfaceSample,
-        computeNormals: (FloatArray, Int, Int, Boolean, Boolean) -> Unit
+        computeNormals: (FloatArray, Int, Int, Boolean, Boolean) -> Unit,
+        leftGluteX: Float = 0f,
+        leftGluteY: Float = 0f,
+        rightGluteX: Float = 0f,
+        rightGluteY: Float = 0f
     ) {
         val data = mesh.vertexData
         val cols = cache.cols
         val rows = cache.rows
         val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val lx = leftGluteX.coerceIn(-1f, 1f)
+        val ly = leftGluteY.coerceIn(-1f, 1f)
+        val rx = rightGluteX.coerceIn(-1f, 1f)
+        val ry = rightGluteY.coerceIn(-1f, 1f)
+        val hasGluteShift = abs(lx) > 1e-4f || abs(ly) > 1e-4f || abs(rx) > 1e-4f || abs(ry) > 1e-4f
 
         for (r in 0 until rows) {
             for (c in 0 until cols) {
@@ -1274,8 +1581,24 @@ internal object BlossomSdfBodyBuilder {
                     0.0035f * smoothStep(0.96f, 1.00f, edgeR)
 
                 val dz = (d?.dz ?: 0f) * vMask
-                // Displace cleanly along Z
-                val pz = cache.baseZ[i] + dz + overlapBias
+                var px = x
+                var py = y
+                var pz = cache.baseZ[i] + dz + overlapBias
+
+                // Seamlessly apply matching gluteal soft-tissue yield on the perianal buttock cheeks left & right of the anus
+                if (hasGluteShift && y < -0.34f) {
+                    val gw = gluteElasticWeight(x, y, cache.baseZ[i])
+                    if (gw > 0.002f) {
+                        val side = if (x >= 0f) 1f else -1f
+                        val gx = if (side < 0f) lx else rx
+                        val gy = if (side < 0f) ly else ry
+                        val compressMag = (abs(gx) + abs(gy)).coerceIn(0f, 1.4f)
+                        px += gx * 0.068f * gw
+                        py += gy * 0.064f * gw
+                        val gdz = (-0.015f * compressMag + 0.020f * (-gx * side)) * gw
+                        pz = max(pz + gdz, mattressSurfaceZ(py) + 0.008f)
+                    }
+                }
 
                 val mucosa = ((d?.mucosa ?: 0f) * vMask).coerceIn(0f, 1f)
                 val wetness = (0.055f + (d?.wetness ?: 0f) * vMask).coerceIn(0f, 1f)
@@ -1284,8 +1607,8 @@ internal object BlossomSdfBodyBuilder {
                 val pigment = (cache.basePigment[i] + (d?.pigment ?: 0f) * vMask).coerceIn(0f, 1f)
 
                 val vIdx = i * stride
-                data[vIdx] = x
-                data[vIdx + 1] = y
+                data[vIdx] = px
+                data[vIdx + 1] = py
                 data[vIdx + 2] = pz
                 data[vIdx + 6] = mucosa
                 data[vIdx + 7] = wetness
@@ -1302,18 +1625,33 @@ internal object BlossomSdfBodyBuilder {
             val normalBlend = smoothStep(0.74f, 0.92f, edgeR)
             if (normalBlend > 0.001f) {
                 val vIdx = i * stride
-                val mx = data[vIdx + 3] * (1f - normalBlend) + cache.baseNx[i] * normalBlend
-                val my = data[vIdx + 4] * (1f - normalBlend) + cache.baseNy[i] * normalBlend
-                val mz = data[vIdx + 5] * (1f - normalBlend) + cache.baseNz[i] * normalBlend
+                var bnx = cache.baseNx[i]
+                var bny = cache.baseNy[i]
+                var bnz = cache.baseNz[i]
+                if (hasGluteShift && cache.baseY[i] < -0.34f) {
+                    val gw = gluteElasticWeight(cache.baseX[i], cache.baseY[i], cache.baseZ[i])
+                    if (gw > 0.002f) {
+                        val side = if (cache.baseX[i] >= 0f) 1f else -1f
+                        val gx = if (side < 0f) lx else rx
+                        val gy = if (side < 0f) ly else ry
+                        bnx += gx * 0.08f * gw
+                        bny += gy * 0.08f * gw
+                        val bLen = sqrt(bnx * bnx + bny * bny + bnz * bnz).coerceAtLeast(1e-5f)
+                        bnx /= bLen; bny /= bLen; bnz /= bLen
+                    }
+                }
+                val mx = data[vIdx + 3] * (1f - normalBlend) + bnx * normalBlend
+                val my = data[vIdx + 4] * (1f - normalBlend) + bny * normalBlend
+                val mz = data[vIdx + 5] * (1f - normalBlend) + bnz * normalBlend
                 val len = sqrt(mx * mx + my * my + mz * mz)
                 if (len > 1e-5f) {
                     data[vIdx + 3] = mx / len
                     data[vIdx + 4] = my / len
                     data[vIdx + 5] = mz / len
                 } else {
-                    data[vIdx + 3] = cache.baseNx[i]
-                    data[vIdx + 4] = cache.baseNy[i]
-                    data[vIdx + 5] = cache.baseNz[i]
+                    data[vIdx + 3] = bnx
+                    data[vIdx + 4] = bny
+                    data[vIdx + 5] = bnz
                 }
             }
         }
@@ -1460,7 +1798,9 @@ internal object BlossomSdfBodyBuilder {
         nailsMesh: DynamicGlMesh,
         cache: LegSkinCache,
         leftLegSpread: Float,
-        rightLegSpread: Float
+        rightLegSpread: Float,
+        includeToesAndNails: Boolean = true,
+        commitBody: Boolean = true
     ) {
         val stride = DynamicGlMesh.FLOATS_PER_VERTEX
         val leftS = leftLegSpread.coerceIn(-0.35f, 1.0f)
@@ -1496,7 +1836,11 @@ internal object BlossomSdfBodyBuilder {
             bData[dst + 4] = nx * sinA + ny * cosA
             bData[dst + 5] = nz
         }
-        bodyMesh.commitVertices()
+        if (commitBody) {
+            bodyMesh.commitVertices()
+        }
+
+        if (!includeToesAndNails) return
 
         val tData = toesMesh.vertexData
         val tBase = cache.toesBasePosNorm
@@ -1554,6 +1898,180 @@ internal object BlossomSdfBodyBuilder {
             nData[dst + 5] = nz
         }
         nailsMesh.commitVertices()
+    }
+
+    // -------------------------------------------------------------------------
+    // SUBTLE ELASTIC GLUTEAL SOFT-TISSUE INTERACTIVITY (COMPOSED WITH LEG SPREAD)
+    // -------------------------------------------------------------------------
+    class GluteSkinCache(
+        val bodyVertIndices: IntArray,
+        val bodyRestPosNorm: FloatArray,
+        val bodyWeights: FloatArray,
+        val bodySides: FloatArray,
+        val isInLegCache: BooleanArray
+    )
+
+    /**
+     * Shared C1-continuous soft-tissue elasticity weight for Blossom's left and right buttocks,
+     * covering BOTH the fleshy medial-inferior cheeks directly to the left and right of her anus
+     * AND the outer-posterior buttock cheeks, while keeping the anus opening (`|x| < 0.14`),
+     * vulva/labia (`y > -0.34`), and resting mattress contact cleanly anchored.
+     */
+    fun gluteElasticWeight(x: Float, y: Float, z: Float): Float {
+        if (y !in -1.36f..-0.34f) return 0f
+        val ax = abs(x)
+        if (ax !in 0.14f..1.74f) return 0f
+        if (y > -0.72f && ax > 1.78f && z < -0.35f) return 0f
+
+        val midlineGuard = smoothStep(0.14f, 0.34f, ax)
+        val upperGuard = smoothStep(-0.34f, -0.62f, y)
+        val frontGuard = smoothStep(0.28f, -0.06f, z)
+        val matZ = mattressSurfaceZ(y)
+        val matGuard = smoothStep(matZ + 0.01f, matZ + 0.12f, z)
+        val guard = midlineGuard * upperGuard * frontGuard * matGuard
+        if (guard <= 0.002f) return 0f
+
+        // Primary lobe: fleshy medial-inferior buttock cheek directly left & right of her anus (-0.86)
+        val mx = (ax - 0.68f) / 0.48f
+        val my = (y + 0.88f) / 0.44f
+        val mz = (z + 0.34f) / 0.48f
+        val bellMedial = exp(-(mx * mx + my * my + mz * mz) * 1.10f)
+
+        // Secondary lobe: outer-posterior buttock cheek visible from 3/4 angles
+        val ox = (ax - 1.12f) / 0.58f
+        val oy = (y + 0.72f) / 0.52f
+        val oz = (z + 0.74f) / 0.50f
+        val bellOuter = exp(-(ox * ox + oy * oy + oz * oz) * 1.05f)
+
+        val bell = 1f - (1f - bellMedial) * (1f - bellOuter)
+        return (bell * guard).coerceIn(0f, 1f)
+    }
+
+    fun buildGluteSkinCache(
+        bodyMesh: DynamicGlMesh,
+        legCache: LegSkinCache
+    ): GluteSkinCache {
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val bData = bodyMesh.vertexData
+        val legMember = BooleanArray(bodyMesh.vertexCount)
+        for (idx in legCache.bodyVertIndices) {
+            if (idx in legMember.indices) legMember[idx] = true
+        }
+
+        val idxBuf = IntArray(bodyMesh.vertexCount)
+        val weightBuf = FloatArray(bodyMesh.vertexCount)
+        val sideBuf = FloatArray(bodyMesh.vertexCount)
+        val inLegBuf = BooleanArray(bodyMesh.vertexCount)
+        var count = 0
+
+        for (i in 0 until bodyMesh.vertexCount) {
+            val base = i * stride
+            val x = bData[base]
+            val y = bData[base + 1]
+            val z = bData[base + 2]
+            val w = gluteElasticWeight(x, y, z)
+            if (w > 0.005f) {
+                idxBuf[count] = i
+                weightBuf[count] = w
+                sideBuf[count] = if (x >= 0f) 1f else -1f
+                inLegBuf[count] = legMember[i]
+                count++
+            }
+        }
+
+        val indices = idxBuf.copyOf(count)
+        val rest = FloatArray(count * 6)
+        for (k in 0 until count) {
+            val src = indices[k] * stride
+            val dst = k * 6
+            rest[dst] = bData[src]; rest[dst + 1] = bData[src + 1]; rest[dst + 2] = bData[src + 2]
+            rest[dst + 3] = bData[src + 3]; rest[dst + 4] = bData[src + 4]; rest[dst + 5] = bData[src + 5]
+        }
+
+        return GluteSkinCache(
+            bodyVertIndices = indices,
+            bodyRestPosNorm = rest,
+            bodyWeights = weightBuf.copyOf(count),
+            bodySides = sideBuf.copyOf(count),
+            isInLegCache = inLegBuf.copyOf(count)
+        )
+    }
+
+    /**
+     * Applies very slight, volume-preserving elastic soft-tissue yield to Blossom's left and right buttocks.
+     * Must be invoked immediately after [applyLegSpread] so leg-shared vertices compose cleanly.
+     */
+    fun applyGluteElasticity(
+        bodyMesh: DynamicGlMesh,
+        cache: GluteSkinCache,
+        leftGluteX: Float,
+        leftGluteY: Float,
+        rightGluteX: Float,
+        rightGluteY: Float
+    ) {
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val bData = bodyMesh.vertexData
+        val lx = leftGluteX.coerceIn(-1f, 1f)
+        val ly = leftGluteY.coerceIn(-1f, 1f)
+        val rx = rightGluteX.coerceIn(-1f, 1f)
+        val ry = rightGluteY.coerceIn(-1f, 1f)
+
+        val indices = cache.bodyVertIndices
+        val rest = cache.bodyRestPosNorm
+        val weights = cache.bodyWeights
+        val sides = cache.bodySides
+        val inLeg = cache.isInLegCache
+
+        for (k in indices.indices) {
+            val dst = indices[k] * stride
+            val baseX: Float
+            val baseY: Float
+            val baseZ: Float
+            val baseNx: Float
+            val baseNy: Float
+            val baseNz: Float
+            if (inLeg[k]) {
+                baseX = bData[dst]; baseY = bData[dst + 1]; baseZ = bData[dst + 2]
+                baseNx = bData[dst + 3]; baseNy = bData[dst + 4]; baseNz = bData[dst + 5]
+            } else {
+                val src = k * 6
+                baseX = rest[src]; baseY = rest[src + 1]; baseZ = rest[src + 2]
+                baseNx = rest[src + 3]; baseNy = rest[src + 4]; baseNz = rest[src + 5]
+            }
+
+            val side = sides[k]
+            val gx = if (side < 0f) lx else rx
+            val gy = if (side < 0f) ly else ry
+            val w = weights[k]
+
+            if (abs(gx) < 1e-4f && abs(gy) < 1e-4f) {
+                bData[dst] = baseX; bData[dst + 1] = baseY; bData[dst + 2] = baseZ
+                bData[dst + 3] = baseNx; bData[dst + 4] = baseNy; bData[dst + 5] = baseNz
+                continue
+            }
+
+            // Very slight, realistic soft-tissue displacement + gentle volume-preserving cushion swell
+            val dx = gx * 0.068f * w
+            val dy = gy * 0.064f * w
+            val compressMag = (abs(gx) + abs(gy)).coerceIn(0f, 1.4f)
+            val dz = (-0.015f * compressMag + 0.020f * (-gx * side)) * w
+
+            val newY = baseY + dy
+            val minZ = mattressSurfaceZ(newY) + 0.008f
+            bData[dst] = baseX + dx
+            bData[dst + 1] = newY
+            bData[dst + 2] = max(baseZ + dz, minZ)
+
+            var nnx = baseNx + gx * 0.08f * w
+            var nny = baseNy + gy * 0.08f * w
+            var nnz = baseNz
+            val nLen = sqrt(nnx * nnx + nny * nny + nnz * nnz).coerceAtLeast(1e-5f)
+            nnx /= nLen; nny /= nLen; nnz /= nLen
+            bData[dst + 3] = nnx
+            bData[dst + 4] = nny
+            bData[dst + 5] = nnz
+        }
+        bodyMesh.commitVertices()
     }
 
     // -------------------------------------------------------------------------

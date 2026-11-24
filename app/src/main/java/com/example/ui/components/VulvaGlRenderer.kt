@@ -591,14 +591,14 @@ class VulvaGlTextureView(
 
             // Procedural multi-scale skin, velvety mucosal & fine labial crease micro-heightfield in true 3D object space
             float skinDetailHeight(vec3 p, float mucosa, float pigment, float stretch) {
-                float pores = vnoise3(p * 78.0) * 0.50 + vnoise3(p * 165.0) * 0.32;
-                float fineGrain = vnoise3(p * 290.0) * 0.18;
+                float pores = vnoise3(p * 78.0) * 0.46 + vnoise3(p * 165.0) * 0.30;
+                float fineWeave = vnoise3(p * vec3(195.0, 145.0, 195.0)) * 0.12 + vnoise3(p * 300.0) * 0.12;
                 float creaseWave = sin(p.y * 58.0 + vnoise3(p * 15.0) * 4.2 + p.x * 22.0);
                 float fineLabialStriae = sin(p.y * 132.0 + vnoise3(p * 28.0) * 3.4 - abs(p.x) * 46.0);
                 float creaseRidges = ((0.5 + 0.5 * creaseWave) * 0.72 + (0.5 + 0.5 * fineLabialStriae) * 0.28) *
                                      (0.24 + 0.76 * pigment) * (1.0 - stretch * 0.38);
                 float mucosaRipple = vnoise3(p * 38.0) * 0.30 + vnoise3(p * 96.0) * 0.14;
-                return mix(pores + fineGrain + creaseRidges * 0.44, mucosaRipple + creaseRidges * 0.26, mucosa);
+                return mix(pores + fineWeave + creaseRidges * 0.44, mucosaRipple + creaseRidges * 0.26, mucosa);
             }
 
             void main() {
@@ -735,11 +735,17 @@ class VulvaGlTextureView(
 
                     vec3 HkeyE = normalize(Lkey + V);
                     vec3 HfillE = normalize(Lfill + V);
-                    float corneaGlint1 = pow(max(dot(N, HkeyE), 0.0), 145.0) * 1.28;
-                    float corneaGlint2 = pow(max(dot(N, HfillE), 0.0), 92.0) * 0.40;
+                    // Subtle proud corneal bulge normal inside iris zone for crisp, dimensional catchlights
+                    float corneaZone = 1.0 - smoothstep(0.32, 0.46, irisR);
+                    vec3 corneaOffset = vec3(cos(irisAngle), sin(irisAngle), 0.14) * (irisR * 0.20 * corneaZone);
+                    vec3 Ncornea = normalize(N + corneaOffset);
+                    float corneaGlint1 = pow(max(dot(Ncornea, HkeyE), 0.0), 152.0) * 1.24;
+                    float corneaGlint2 = pow(max(dot(Ncornea, HfillE), 0.0), 92.0) * 0.38;
+                    // Delicate lower-lid tear-meniscus moisture sheen along the bottom scleral margin
+                    float tearLine = smoothstep(0.56, 0.78, 1.0 - vMat.w) * (1.0 - inIris) * 0.14 * pow(max(dot(N, HkeyE), 0.0), 48.0);
 
                     vec3 eyeLit = eyeAlbedo * (0.28 + dKeyE * 0.66 + dFillE * 0.22 + irisGlow) * lidAo +
-                                  vec3(1.0, 0.99, 0.98) * (corneaGlint1 + corneaGlint2);
+                                  vec3(1.0, 0.99, 0.98) * (corneaGlint1 + corneaGlint2 + tearLine);
                     vec3 eyeMapped = eyeLit / (eyeLit + vec3(0.70));
                     eyeMapped = pow(clamp(eyeMapped * 1.22, 0.0, 1.0), vec3(1.01));
                     gl_FragColor = vec4(eyeMapped, 1.0);
@@ -779,28 +785,38 @@ class VulvaGlTextureView(
                 float ao = clamp(vMat.z, 0.06, 1.0);
                 float pigment = clamp(vMat.w, 0.0, 1.0);
 
-                // Multi-octave 3D procedural skin albedo mottling (zero UV seams across unified SDF body & vulva!)
+                // Multi-octave 3D procedural skin albedo mottling + subtle living dual-chromophore (hemoglobin/melanin) variation
                 float nMacro = vnoise3(vWorldPos * 3.8);
                 float nMid = vnoise3(vWorldPos * 14.5);
                 float nMicro = vnoise3(vWorldPos * 62.0);
+                float nHemo = vnoise3(vWorldPos * 7.8 + vec3(4.3, -2.7, 1.9));
+                float nMelanin = vnoise3(vWorldPos * 23.0 + vec3(-3.1, 5.4, 2.2));
 
-                // Analytical finite-difference 3D micro-normal bump for crisp pore, dermal & labial-crease relief
-                float eps = 0.0038;
+                // True 3D tangent-projected micro-normal bump (consistent velvety grain across front, 3/4 & profile views!)
+                float eps = 0.0034;
                 float hC = skinDetailHeight(vWorldPos, mucosa, pigment, uStretch);
                 float hX = skinDetailHeight(vWorldPos + vec3(eps, 0.0, 0.0), mucosa, pigment, uStretch);
                 float hY = skinDetailHeight(vWorldPos + vec3(0.0, eps, 0.0), mucosa, pigment, uStretch);
+                float hZ = skinDetailHeight(vWorldPos + vec3(0.0, 0.0, eps), mucosa, pigment, uStretch);
 
                 // Finer, velvety portrait skin micro-normal on face & chest (prevents coarse orange-peel pores!)
                 float faceVelvet = smoothstep(5.25, 5.85, vWorldPos.y);
-                float bumpGain = (mix(0.140, 0.058, mucosa) + pigment * 0.052) * (1.0 - faceVelvet * 0.56);
-                vec3 microGrad = vec3(hC - hX, hC - hY, 0.0) * (bumpGain / eps * 0.0056);
+                float bumpGain = (mix(0.128, 0.052, mucosa) + pigment * 0.044) * (1.0 - faceVelvet * 0.52);
+                vec3 rawGrad = vec3(hC - hX, hC - hY, hC - hZ);
+                vec3 tanGrad = rawGrad - N * dot(rawGrad, N);
+                vec3 microGrad = tanGrad * (bumpGain / eps * 0.0056);
                 N = normalize(N + microGrad);
 
                 // Subtle cavity micro-occlusion inside pores & delicate labial folds (softer on facial skin)
-                float microAo = mix(mix(0.88, 0.95, faceVelvet), 1.04, hC);
+                float microAo = mix(mix(0.895, 0.958, faceVelvet), 1.032, hC);
 
                 // Harmonized organic skin & mucosa albedo — keeps body, areolae, face, outer labia & inner lips living & cohesive
-                vec3 skinMottle = mix(uSkinBase * 0.94, uSkinBase * 1.05, nMacro * 0.62 + nMid * 0.38);
+                vec3 skinMottle = mix(uSkinBase * 0.94, uSkinBase * 1.05, nMacro * 0.60 + nMid * 0.40);
+                // Delicate living capillary & melanin micro-variation (restrained on face so portrait skin stays clean & luminous)
+                float chromoStrength = (1.0 - faceVelvet * 0.45) * (1.0 - mucosa);
+                vec3 hemoShift = mix(vec3(0.986, 1.004, 1.007), vec3(1.028, 0.980, 0.978), nHemo);
+                float melaninShift = mix(0.976, 1.022, nMelanin);
+                skinMottle *= mix(vec3(1.0), hemoShift * melaninShift, chromoStrength * 0.82);
                 vec3 warmBlush = mix(skinMottle, skinMottle * vec3(1.05, 0.94, 0.92), 0.25 + nMid * 0.25);
                 // Velvety-matte dry pigmented skin (areolae, nipples) receives authentic warm dusty-rose/cocoa depth
                 float isHeadRegion = smoothstep(5.40, 5.62, vWorldPos.y);
@@ -918,25 +934,38 @@ class VulvaGlTextureView(
                 float thinTransmit = pow(clamp(dot(V, Hback), 0.0, 1.0), 2.8) * (0.10 + 0.36 * mucosa + 0.05 * jointSss);
                 float grazingTrans = pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 2.3) * (0.14 + 0.34 * mucosa + 0.08 * jointSss);
 
-                // Dual-lobe micro-faceted specular BRDF (dampened softly over mons hair & hip-joint transitions)
+                // Dual-lobe matte-velvet specular BRDF with gentle regional roughness variation (ZERO oily gloss or sparkle!)
                 vec3 H1 = normalize(Lkey + V);
                 vec3 H2 = normalize(Lfill + V);
                 float NdotH1 = max(dot(N, H1), 0.0);
                 float NdotH2 = max(dot(N, H2), 0.0);
 
+                // Gentle anatomical sheen zones: shoulders/collarbones, cheekbones/nose bridge, and limbs catch slightly softer natural sheen
+                float shoulderClavZone = smoothstep(4.25, 4.65, vWorldPos.y) * (1.0 - smoothstep(4.85, 5.20, vWorldPos.y));
+                float cheekNoseZone = isHeadRegion * smoothstep(0.35, 0.85, N.z) * (1.0 - smoothstep(0.50, 0.72, ax));
+                float limbZone = clamp(smoothstep(1.35, 1.95, ax) + smoothstep(-0.35, -1.65, vWorldPos.y), 0.0, 1.0);
+                float naturalSheen = clamp(shoulderClavZone * 0.75 + cheekNoseZone * 0.50 + limbZone * 0.55, 0.0, 1.0) * (1.0 - mucosa);
+
                 float hairSpecDamp = 1.0 - hairCoverage * 0.65;
                 float jointSpecSoften = 1.0 - jointSss * 0.22;
                 // Natural matte-velvet portrait finish on face & dry pigmented areolae (eliminates synthetic vinyl/doll shine!)
-                float faceMatteDamp = 1.0 - smoothstep(5.45, 5.95, vWorldPos.y) * 0.38;
-                float areolaMatteDamp = 1.0 - dryPigmentMask * 0.34;
-                float oilBreakup = mix(0.76, 1.22, nMicro) * hairSpecDamp * jointSpecSoften * faceMatteDamp * areolaMatteDamp;
-                float broadSpec = pow(NdotH1, mix(22.0, 32.0, wetness)) * mix(0.09, 0.16, wetness) * oilBreakup;
-                float wetSharpSpec = (pow(NdotH1, mix(70.0, 152.0, wetness)) * wetness * 0.54 +
-                                      pow(NdotH2, 84.0) * wetness * 0.16) * faceMatteDamp * areolaMatteDamp;
+                float faceMatteDamp = 1.0 - smoothstep(5.45, 5.95, vWorldPos.y) * 0.36;
+                float areolaMatteDamp = 1.0 - dryPigmentMask * 0.36;
+                float oilBreakup = mix(0.79, 1.19, nMicro * 0.65 + nMelanin * 0.35) * hairSpecDamp * jointSpecSoften * faceMatteDamp * areolaMatteDamp;
+                float microRough = mix(-3.0, 3.2, nMid * 0.55 + nMicro * 0.45);
+                float broadExp = max(12.0, mix(18.0, 29.0, clamp(wetness + naturalSheen * 0.22, 0.0, 1.0)) + microRough * (1.0 - mucosa));
+                float broadAmp = mix(0.072, 0.148, wetness) * (0.88 + 0.24 * naturalSheen);
+                float broadSpec = pow(NdotH1, broadExp) * broadAmp * oilBreakup;
+                // Secondary crisp highlight strictly reserved for naturally moist lips & mucosa (never glossy dry skin!)
+                float moistMask = smoothstep(0.045, 0.14, wetness);
+                float wetSharpSpec = (pow(NdotH1, mix(68.0, 148.0, wetness)) * wetness * 0.50 +
+                                      pow(NdotH2, 84.0) * wetness * 0.14) * moistMask * faceMatteDamp * areolaMatteDamp;
 
-                // Soft studio rim light sculpting Blossom's thighs, knees, hips, outer labia & hood
-                float fresnel = pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 3.4);
-                float rimLight = fresnel * (0.28 + 0.24 * mucosa) * (0.45 + 0.55 * max(dot(N, Lrim), 0.0));
+                // Soft studio rim light + subtle matte-velvet peach-fuzz Fresnel wrap across dry skin silhouettes
+                float viewRim = clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0);
+                float fresnel = pow(viewRim, 3.4);
+                float rimLight = fresnel * (0.26 + 0.24 * mucosa) * (0.45 + 0.55 * max(dot(N, Lrim), 0.0));
+                float velvetWrap = pow(viewRim, 2.2) * (1.0 - mucosa) * (1.0 - hairCoverage * 0.80) * 0.052;
 
                 // Colored Hemoglobin AO Bounce: prevents crevices from looking muddy gray & softens hip/lip/body contrast
                 float fullAo = clamp(ao * microAo, 0.06, 1.0);
@@ -952,8 +981,9 @@ class VulvaGlTextureView(
 
                 vec3 lit = ambient * coloredAo +
                            albedo * (diffKeyRGB * 0.78 * keyColor + diffFillRGB * (0.22 + isHeadRegion * 0.08) * fillColor) * (vec3(0.28) + 0.72 * coloredAo) +
-                           sssTint * (terminator * 0.34 * faceSssTrim + grazingTrans * 0.20 + thinTransmit * (0.22 + 0.20 * uLightMode)) * coloredAo +
-                           vec3(1.0, 0.96, 0.94) * (broadSpec + wetSharpSpec) * (0.28 + 0.72 * fullAo) +
+                           sssTint * (terminator * 0.35 * faceSssTrim + grazingTrans * 0.19 + thinTransmit * (0.22 + 0.20 * uLightMode)) * coloredAo +
+                           vec3(1.0, 0.96, 0.94) * (broadSpec + wetSharpSpec) * (0.30 + 0.70 * fullAo) +
+                           mix(uSkinBase, vec3(1.0, 0.96, 0.93), 0.28) * velvetWrap * (0.45 + 0.55 * fullAo) +
                            mix(uSkinBase, sssTint, 0.46) * rimLight;
 
                 // Soft warm subsurface glow right under active fingertip touch
@@ -963,9 +993,11 @@ class VulvaGlTextureView(
                     lit += uTouchColor * glowMask * 0.28;
                 }
 
-                // Balanced photographic filmic tone mapping (keeps skin warm, luminous & organic across all 6 tones)
+                // Balanced photographic filmic tone mapping with gentle warm highlight saturation preservation
                 vec3 mapped = lit / (lit + vec3(0.76));
                 mapped = pow(clamp(mapped * 1.32, 0.0, 1.0), vec3(1.01));
+                float mappedLuma = dot(mapped, vec3(0.299, 0.587, 0.114));
+                mapped = clamp(mix(vec3(mappedLuma), mapped, 1.03), 0.0, 1.0);
 
                 gl_FragColor = vec4(mapped, 1.0);
             }

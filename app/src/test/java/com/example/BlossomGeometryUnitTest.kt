@@ -1,5 +1,6 @@
 package com.example
 
+import com.example.ui.components.BlossomBodyBuilder
 import com.example.ui.components.BlossomSdfBodyBuilder
 import com.example.ui.components.BlossomUpperBodyBuilder
 import com.example.ui.components.DynamicGlMesh
@@ -130,37 +131,78 @@ class BlossomGeometryUnitTest {
             if (ax > handsMaxAbsX) handsMaxAbsX = ax
         }
         assertTrue("Hands mesh should contain 10 sculpted articulated fingers (2880 verts), got ${hands.vertexCount}", hands.vertexCount == 2880)
-        assertTrue("Middle fingertips should reach naturally beside upper thighs (handsMinY < -0.48), got $handsMinY", handsMinY < -0.48f)
-        assertTrue("Relaxed hands should rest cleanly beside hips without clipping (handsMaxAbsX > 2.30), got $handsMaxAbsX", handsMaxAbsX > 2.30f)
+        assertTrue("Middle fingertips should reach naturally beside upper-to-mid thighs (handsMinY < -0.90), got $handsMinY", handsMinY < -0.90f)
+        assertTrue("Relaxed hands should rest cleanly beside hips without clipping (handsMaxAbsX > 2.40), got $handsMaxAbsX", handsMaxAbsX > 2.40f)
 
         // Verify clean air-gap between hip and wrist/palm (ZERO hip-merge!), smooth wrist-to-palm arch, & realistic arm fullness
         val hipHandGapSdf = BlossomSdfBodyBuilder.evaluateBodySdf(1.88f, 0.45f, -0.95f)
         assertTrue("Air gap between hip and palm must remain open outside body (SDF > 0.04), got $hipHandGapSdf", hipHandGapSdf > 0.04f)
-        val wristTopZ = BlossomSdfBodyBuilder.sampleBodySurfacePoint(2.24f, 0.82f).z
-        val palmTopZ = BlossomSdfBodyBuilder.sampleBodySurfacePoint(2.32f, 0.36f).z
+        val wristTopZ = BlossomSdfBodyBuilder.sampleBodySurfacePoint(2.34f, 0.42f).z
+        val palmTopZ = BlossomSdfBodyBuilder.sampleBodySurfacePoint(2.42f, -0.02f).z
         assertTrue(
             "Wrist-to-palm dorsal transition must be smooth with no wrist bump or pancake drop (|wristTopZ=$wristTopZ - palmTopZ=$palmTopZ| < 0.06)",
             abs(wristTopZ - palmTopZ) < 0.06f
         )
-        // Measure forearm cross-section width at mid-forearm (y ~ 1.85) & upper arm fullness (y ~ 3.55)
+        // Measure upper-arm fullness (y ~ 3.55), proximal forearm (y ~ 1.90), mid-forearm (y ~ 1.35), wrist (y ~ 0.42), & palm width
+        var midUpperArmMinX = Float.POSITIVE_INFINITY
+        var midUpperArmMaxX = Float.NEGATIVE_INFINITY
+        var proxForearmMinX = Float.POSITIVE_INFINITY
+        var proxForearmMaxX = Float.NEGATIVE_INFINITY
         var midForearmMinX = Float.POSITIVE_INFINITY
         var midForearmMaxX = Float.NEGATIVE_INFINITY
-        var midUpperArmMaxX = Float.NEGATIVE_INFINITY
+        var wristMinX = Float.POSITIVE_INFINITY
+        var wristMaxX = Float.NEGATIVE_INFINITY
         for (i in 0 until body.vertexCount) {
             val ax = abs(bData[i * stride])
             val y = bData[i * stride + 1]
-            if (y in 1.75f..1.95f && ax > 1.55f) {
+            if (y in 3.45f..3.65f && ax > 1.32f) {
+                if (ax < midUpperArmMinX) midUpperArmMinX = ax
+                if (ax > midUpperArmMaxX) midUpperArmMaxX = ax
+            }
+            if (y in 1.80f..1.98f && ax > 1.65f) {
+                if (ax < proxForearmMinX) proxForearmMinX = ax
+                if (ax > proxForearmMaxX) proxForearmMaxX = ax
+            }
+            if (y in 1.25f..1.45f && ax > 1.65f) {
                 if (ax < midForearmMinX) midForearmMinX = ax
                 if (ax > midForearmMaxX) midForearmMaxX = ax
             }
-            if (y in 3.45f..3.65f && ax > midUpperArmMaxX) {
-                midUpperArmMaxX = ax
+            if (y in 0.36f..0.48f && ax > 1.95f) {
+                if (ax < wristMinX) wristMinX = ax
+                if (ax > wristMaxX) wristMaxX = ax
             }
         }
+        val midUpperArmWidth = midUpperArmMaxX - midUpperArmMinX
+        val proxForearmWidth = proxForearmMaxX - proxForearmMinX
         val midForearmWidth = midForearmMaxX - midForearmMinX
+        val wristWidth = wristMaxX - wristMinX
+        var palmMinX = Float.POSITIVE_INFINITY
+        var palmMaxX = Float.NEGATIVE_INFINITY
+        val palmData = scene.blossomPalmsMesh.vertexData
+        for (i in 0 until scene.blossomPalmsMesh.vertexCount) {
+            val ax = abs(palmData[i * stride])
+            val y = palmData[i * stride + 1]
+            if (y in -0.28f..0.02f) {
+                if (ax < palmMinX) palmMinX = ax
+                if (ax > palmMaxX) palmMaxX = ax
+            }
+        }
+        val palmWidth = palmMaxX - palmMinX
+        assertTrue(
+            "Proximal forearm ($proxForearmWidth) must be strictly slimmer than mid upper arm ($midUpperArmWidth) with zero Popeye bulge",
+            proxForearmWidth < midUpperArmWidth - 0.04f
+        )
         assertTrue(
             "Mid-forearm must have realistic non-spindly width (> 0.56), got $midForearmWidth ($midForearmMinX..$midForearmMaxX)",
             midForearmWidth > 0.56f
+        )
+        assertTrue(
+            "Wrist must stay naturally proportioned and non-pinched (width > 0.42), got $wristWidth ($wristMinX..$wristMaxX)",
+            wristWidth > 0.42f
+        )
+        assertTrue(
+            "Palm width ($palmWidth) must be anatomically fuller than wrist ($wristWidth) and >= 0.52",
+            palmWidth >= 0.52f && palmWidth > wristWidth * 1.12f
         )
         assertTrue(
             "Upper arm bicep contour must have healthy feminine fullness (outer ax > 1.94), got $midUpperArmMaxX",
@@ -254,33 +296,64 @@ class BlossomGeometryUnitTest {
         )
         scene.update(VulvaDeformationState(breastSize = 1.0f), includeLithotomyBody = true)
         val fullApexZ = scene.blossomBreastsMesh.vertexData[leftApexIdx + 2]
-        // Verify large breasts swell naturally toward midline sternum (cleavage) without crossing x=0
-        val sternumBaseZ = BlossomSdfBodyBuilder.sampleBodySurfacePoint(0f, BlossomUpperBodyBuilder.BREAST_CENTER_Y).z
+        // Verify supine gravity redistributes full breasts laterally toward axillae without crossing x=0, while preserving volume!
         val bVertsPerSide = bCols * bRows
         var fullLeftMaxX = Float.NEGATIVE_INFINITY
-        var fullCleavageElevatedCount = 0
+        var fullLeftApexWorldX = 0f
+        var fullLeftMaxZ = Float.NEGATIVE_INFINITY
         for (i in 0 until bVertsPerSide) {
             val px = scene.blossomBreastsMesh.vertexData[i * stride]
-            val py = scene.blossomBreastsMesh.vertexData[i * stride + 1]
             val pz = scene.blossomBreastsMesh.vertexData[i * stride + 2]
             if (px > fullLeftMaxX) fullLeftMaxX = px
-            if (abs(px) < 0.16f && py in 3.30f..4.40f && pz > sternumBaseZ + 0.14f) {
-                fullCleavageElevatedCount++
+            if (pz > fullLeftMaxZ) {
+                fullLeftMaxZ = pz
+                fullLeftApexWorldX = px
             }
         }
         assertTrue(
-            "Left full breast must press softly toward sternum midline without crossing x=0 (fullLeftMaxX in -0.06..-0.002), got $fullLeftMaxX",
-            fullLeftMaxX in -0.06f..-0.002f
-        )
-        assertTrue(
-            "Large breasts must produce visible fuller medial cleavage volume near midline (> 40 elevated verts above sternumBaseZ=$sternumBaseZ), got $fullCleavageElevatedCount",
-            fullCleavageElevatedCount > 40
+            "Left full breast must stay strictly on left chest without crossing x=0 (fullLeftMaxX <= -0.003), got $fullLeftMaxX",
+            fullLeftMaxX <= -0.003f
         )
         scene.update(VulvaDeformationState(breastSize = 0.0f), includeLithotomyBody = true)
         val petiteApexZ = scene.blossomBreastsMesh.vertexData[leftApexIdx + 2]
+        var petiteLeftApexWorldX = 0f
+        var petiteLeftMaxZ = Float.NEGATIVE_INFINITY
+        for (i in 0 until bVertsPerSide) {
+            val px = scene.blossomBreastsMesh.vertexData[i * stride]
+            val pz = scene.blossomBreastsMesh.vertexData[i * stride + 2]
+            if (pz > petiteLeftMaxZ) {
+                petiteLeftMaxZ = pz
+                petiteLeftApexWorldX = px
+            }
+        }
         assertTrue(
-            "Breast size slider must visibly scale volume (fullApexZ=$fullApexZ > restApexZ=$restApexZ > petiteApexZ=$petiteApexZ)",
-            fullApexZ > restApexZ + 0.10f && restApexZ > petiteApexZ + 0.10f
+            "Larger supine breasts must redistribute more laterally toward axillae (|fullApexX|=${abs(fullLeftApexWorldX)} > |petiteApexX|=${abs(petiteLeftApexWorldX)})",
+            abs(fullLeftApexWorldX) > abs(petiteLeftApexWorldX) + 0.04f
+        )
+        assertTrue(
+            "Breast size slider must visibly scale volume while staying non-spherical (fullApexZ=$fullApexZ > restApexZ=$restApexZ > petiteApexZ=$petiteApexZ)",
+            fullApexZ > restApexZ + 0.06f && restApexZ > petiteApexZ + 0.06f
+        )
+
+        // Verify supine torso AP depth: bony ribcage height above mattress must exceed settled waist height!
+        val waistSurfaceZ = BlossomSdfBodyBuilder.sampleBodySurfacePoint(0f, 2.48f).z - BlossomBodyBuilder.mattressSurfaceZ(2.48f)
+        val ribSurfaceZ = BlossomSdfBodyBuilder.sampleBodySurfacePoint(0f, 3.68f).z - BlossomBodyBuilder.mattressSurfaceZ(3.68f)
+        assertTrue(
+            "Reclining ribcage depth ($ribSurfaceZ) must exceed softly settled waist depth ($waistSurfaceZ)",
+            ribSurfaceZ > waistSurfaceZ + 0.06f
+        )
+
+        // Verify orthognathic chin projection (no recessed chin relative to lips!)
+        var lipFrontZ = Float.NEGATIVE_INFINITY
+        for (i in 0 until scene.blossomHeadMesh.vertexCount) {
+            val ax = abs(headData[i * stride])
+            val y = headData[i * stride + 1]
+            val z = headData[i * stride + 2]
+            if (ax < 0.14f && y in 5.82f..6.04f && z > lipFrontZ) lipFrontZ = z
+        }
+        assertTrue(
+            "Orthognathic chin ($chinFrontMaxZ) must project cleanly near lower lip ($lipFrontZ, gap < 0.14), got gap=${lipFrontZ - chinFrontMaxZ}",
+            (lipFrontZ - chinFrontMaxZ) < 0.14f
         )
 
         // 1G. Verify interactive side-to-side leg spread moves knees & toes outward while keeping vulva patch perimeter locked
@@ -407,6 +480,209 @@ class BlossomGeometryUnitTest {
                 assertTrue("Cushion must stay behind vulva midline (z < -0.68), got $z at ($x, $y)", z < -0.68f)
             }
         }
+    }
+
+    @Test
+    fun blossomV62RefinementInvariantsHold() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+
+        // 1. Verify large breast (breastSize = 1.0) fades smoothly near outer collar without a steep cliff
+        scene.update(VulvaDeformationState(breastSize = 1.0f), includeLithotomyBody = true)
+        val breastsCache = BlossomUpperBodyBuilder.buildBreastsCache()
+        val bData = scene.blossomBreastsMesh.vertexData
+        var maxOuterCollarLift = 0f
+        for (i in 0 until breastsCache.left.count) {
+            val edgeR = breastsCache.left.edgeR[i]
+            if (edgeR >= 0.86f) {
+                val liftZ = bData[i * stride + 2] - breastsCache.left.baseZ[i]
+                if (liftZ > maxOuterCollarLift) maxOuterCollarLift = liftZ
+            }
+        }
+        assertTrue(
+            "Large breast (size=1.0) outer collar (edgeR>=0.86) must blend smoothly into chest wall (< 0.09), got $maxOuterCollarLift",
+            maxOuterCollarLift < 0.09f
+        )
+
+        // 2. Verify elbow cubital crease AO sits at the true v6.1 elbow (ax=2.26, y=2.28), not legacy (1.80, 2.70)
+        val zElbowSurface = BlossomBodyBuilder.mattressSurfaceZ(2.28f) + 0.66f
+        val (trueElbowAo, _) = BlossomSdfBodyBuilder.evaluateBodyMaterial(2.26f, 2.28f, zElbowSurface, 0f, 0f, 1f)
+        val (legacyElbowAo, _) = BlossomSdfBodyBuilder.evaluateBodyMaterial(1.80f, 2.70f, zElbowSurface, 0f, 0f, 1f)
+        assertTrue(
+            "True v6.1 elbow crease AO ($trueElbowAo) must be darker than legacy off-arm spot ($legacyElbowAo)",
+            trueElbowAo < 0.90f && legacyElbowAo > 0.95f
+        )
+
+        // 3. Verify eye mesh carries natural corner-canthus & lower-lid contact AO while keeping iris center bright
+        val eyeData = scene.blossomEyesMesh.vertexData
+        var minEyeAo = 1f
+        var maxEyeAo = 0f
+        for (i in 0 until scene.blossomEyesMesh.vertexCount) {
+            val ao = eyeData[i * stride + 8]
+            if (ao < minEyeAo) minEyeAo = ao
+            if (ao > maxEyeAo) maxEyeAo = ao
+        }
+        assertTrue(
+            "Eye sclera/canthus AO should span natural shadow range (min < 0.72, max > 0.92), got $minEyeAo..$maxEyeAo",
+            minEyeAo < 0.72f && maxEyeAo > 0.92f
+        )
+
+        // 4. Verify all refined meshes stay strictly valid and outward-wound at breastSize=1.0 + spread pose
+        scene.update(VulvaDeformationState(breastSize = 1.0f, selfSpreadPose = 1.0f), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomBreastsMesh)
+        assertValidMesh(scene.blossomPalmsMesh)
+        assertValidMesh(scene.blossomHandsMesh)
+        assertValidMesh(scene.blossomNailsMesh)
+        assertValidMesh(scene.blossomToesMesh)
+        assertOutwardWindingMatchesNormals("blossomBreastsMesh(large+spread)", scene.blossomBreastsMesh)
+        assertOutwardWindingMatchesNormals("blossomPalmsMesh(spread)", scene.blossomPalmsMesh)
+        assertOutwardWindingMatchesNormals("blossomHandsMesh(spread)", scene.blossomHandsMesh)
+        assertOutwardWindingMatchesNormals("blossomNailsMesh(spread)", scene.blossomNailsMesh)
+    }
+
+    @Test
+    fun blossomV63FixesAndInteractivityInvariantsHold() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+
+        // 1. Armpit fix: every breast base vertex wraps smoothly onto the arm-free ribcage/chest wall (zero arm snap & zero hard wall!)
+        val breastsCache = BlossomUpperBodyBuilder.buildBreastsCache()
+        for (sideCache in listOf(breastsCache.left, breastsCache.right)) {
+            var minBaseNz = Float.POSITIVE_INFINITY
+            var minAxillaNz = Float.POSITIVE_INFINITY
+            var maxAbsX = 0f
+            for (i in 0 until sideCache.count) {
+                val ax = abs(sideCache.baseX[i])
+                val y = sideCache.baseY[i]
+                val nz = sideCache.baseNz[i]
+                if (ax > maxAbsX) maxAbsX = ax
+                if (nz < minBaseNz) minBaseNz = nz
+                if (y in 3.0f..4.65f && nz < minAxillaNz) minAxillaNz = nz
+            }
+            assertTrue("Breast patch must never snap outward onto upper arms (maxAbsX < 1.56), got $maxAbsX", maxAbsX < 1.56f)
+            assertTrue("Breast base patch must remain forward-facing everywhere (minBaseNz > 0.02), got $minBaseNz", minBaseNz > 0.02f)
+            assertTrue("Breast base patch across armpit/ribcage band must sit cleanly on anterior/antero-lateral chest wall (minAxillaNz > 0.25), got $minAxillaNz", minAxillaNz > 0.25f)
+        }
+
+        // 2. Hollow neck collar fix: bottom rim of blossomHeadMesh (row 0) sits strictly INSIDE the solid SDF neck cylinder!
+        val headCols = 120
+        val headData = scene.blossomHeadMesh.vertexData
+        val zNeckBase = BlossomBodyBuilder.mattressSurfaceZ(4.86f) + 0.58f
+        val zNeckTop = BlossomBodyBuilder.mattressSurfaceZ(5.78f) + 0.80f
+        var maxBottomRimRadialOffset = 0f
+        for (c in 0 until headCols) {
+            val idx = c * stride
+            val wx = headData[idx]
+            val wy = headData[idx + 1]
+            val wz = headData[idx + 2]
+            val neckT = ((wy - 4.84f) / 0.94f).coerceIn(0f, 1f)
+            val neckAxisZ = zNeckBase + (zNeckTop - zNeckBase) * neckT + 0.018f * kotlin.math.sin(neckT * kotlin.math.PI.toFloat())
+            val radial = sqrt(wx * wx + (wz - neckAxisZ) * (wz - neckAxisZ))
+            if (radial > maxBottomRimRadialOffset) maxBottomRimRadialOffset = radial
+        }
+        assertTrue(
+            "Head bottom neck rim must tuck strictly inside SDF neck cylinder (< 0.24 vs neck R ~0.335) with ZERO hollow collar, got $maxBottomRimRadialOffset",
+            maxBottomRimRadialOffset < 0.24f
+        )
+
+        // 3. Natural blinking: eyeBlink = 1f closes upper eyelids smoothly with outward winding & restores exact rest identity at 0f
+        assertTrue("HeadRigCache should capture upper eyelid blink vertices (> 80)", scene.blossomHeadRigCache.blinkVertIndices.size > 80)
+        val restHeadCopy = scene.blossomHeadMesh.vertexData.copyOf()
+        scene.update(VulvaDeformationState(eyeBlink = 1.0f), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomHeadMesh)
+        assertOutwardWindingMatchesNormals("blossomHeadMesh(blink=1)", scene.blossomHeadMesh)
+        var maxLidDropY = 0f
+        for (vertIdx in scene.blossomHeadRigCache.blinkVertIndices) {
+            val dropY = restHeadCopy[vertIdx * stride + 1] - scene.blossomHeadMesh.vertexData[vertIdx * stride + 1]
+            if (dropY > maxLidDropY) maxLidDropY = dropY
+        }
+        assertTrue("Full blink must smoothly lower upper eyelids over eyeballs (dropY > 0.06), got $maxLidDropY", maxLidDropY > 0.06f)
+
+        // 4. Downward head pitch: headPitch = 1f nods anterior face gently downward; negative pitch clamps safely to 0f
+        scene.update(VulvaDeformationState(headPitch = -0.8f), includeLithotomyBody = true)
+        var maxNegPitchDiff = 0f
+        for (i in restHeadCopy.indices) {
+            val d = abs(scene.blossomHeadMesh.vertexData[i] - restHeadCopy[i])
+            if (d > maxNegPitchDiff) maxNegPitchDiff = d
+        }
+        assertTrue("Negative headPitch must clamp cleanly to resting 0f (< 1e-4), got $maxNegPitchDiff", maxNegPitchDiff < 1e-4f)
+
+        scene.update(VulvaDeformationState(headPitch = 1.0f, headTurn = 0.5f, eyeBlink = 0.6f), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomHeadMesh)
+        assertValidMesh(scene.blossomEyesMesh)
+        assertValidMesh(scene.blossomHairMesh)
+        assertOutwardWindingMatchesNormals("blossomHeadMesh(nod+turn+blink)", scene.blossomHeadMesh)
+        var noseVertIdx = 0
+        var restMaxZ = Float.NEGATIVE_INFINITY
+        for (i in 0 until scene.blossomHeadMesh.vertexCount) {
+            val z = restHeadCopy[i * stride + 2]
+            if (z > restMaxZ) {
+                restMaxZ = z
+                noseVertIdx = i
+            }
+        }
+        val restNoseY = restHeadCopy[noseVertIdx * stride + 1]
+        val noddedNoseY = scene.blossomHeadMesh.vertexData[noseVertIdx * stride + 1]
+        assertTrue(
+            "Downward headPitch=1 must gently lower anterior face (noddedNoseY=$noddedNoseY < restNoseY=$restNoseY - 0.12)",
+            noddedNoseY < restNoseY - 0.12f
+        )
+
+        // 5. Subtle elastic glute interactivity: gently deforms posterior glutes, stays restrained, and composes cleanly with legSpread
+        assertTrue("GluteSkinCache should capture gluteal vertices (> 100)", scene.blossomGluteSkinCache.bodyVertIndices.size > 100)
+        scene.update(VulvaDeformationState(leftLegSpread = 0.5f, rightLegSpread = 0.5f), includeLithotomyBody = true)
+        val spreadOnlyBody = scene.blossomBodyMesh.vertexData.copyOf()
+        val spreadOnlyPatch = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+        scene.update(
+            VulvaDeformationState(
+                leftLegSpread = 0.5f,
+                rightLegSpread = 0.5f,
+                leftGluteX = -1.0f,
+                leftGluteY = 0.8f,
+                rightGluteX = 1.0f,
+                rightGluteY = -0.6f
+            ),
+            includeLithotomyBody = true
+        )
+        assertValidMesh(scene.blossomBodyMesh)
+        assertValidMesh(scene.blossomVulvaPatchMesh)
+        var maxGluteDelta = 0f
+        for (idx in scene.blossomGluteSkinCache.bodyVertIndices) {
+            val b = idx * stride
+            val dx = scene.blossomBodyMesh.vertexData[b] - spreadOnlyBody[b]
+            val dy = scene.blossomBodyMesh.vertexData[b + 1] - spreadOnlyBody[b + 1]
+            val dz = scene.blossomBodyMesh.vertexData[b + 2] - spreadOnlyBody[b + 2]
+            val d = sqrt(dx * dx + dy * dy + dz * dz)
+            if (d > maxGluteDelta) maxGluteDelta = d
+        }
+        assertTrue(
+            "Glute elasticity must be perceptible yet very slight (0.03..0.12), got $maxGluteDelta",
+            maxGluteDelta in 0.03f..0.12f
+        )
+        var maxPerianalPatchDelta = 0f
+        var maxAnusCenterDelta = 0f
+        for (i in 0 until scene.blossomVulvaPatchMesh.vertexCount) {
+            val b = i * stride
+            val rx = spreadOnlyPatch[b]
+            val ry = spreadOnlyPatch[b + 1]
+            val dx = scene.blossomVulvaPatchMesh.vertexData[b] - rx
+            val dy = scene.blossomVulvaPatchMesh.vertexData[b + 1] - ry
+            val dz = scene.blossomVulvaPatchMesh.vertexData[b + 2] - spreadOnlyPatch[b + 2]
+            val d = sqrt(dx * dx + dy * dy + dz * dz)
+            if (ry < -0.55f && abs(rx) > 0.25f && d > maxPerianalPatchDelta) maxPerianalPatchDelta = d
+            if (abs(rx) < 0.12f && d > maxAnusCenterDelta) maxAnusCenterDelta = d
+        }
+        assertTrue("Perianal cheeks left/right of anus must subtly flex (> 0.015), got $maxPerianalPatchDelta", maxPerianalPatchDelta > 0.015f)
+        assertTrue("Anus midline must stay anchored (< 1e-4), got $maxAnusCenterDelta", maxAnusCenterDelta < 1e-4f)
+
+        // Releasing glutes returns body cleanly to spreadOnlyBody
+        scene.update(VulvaDeformationState(leftLegSpread = 0.5f, rightLegSpread = 0.5f), includeLithotomyBody = true)
+        var maxGluteResetErr = 0f
+        for (i in spreadOnlyBody.indices) {
+            val d = abs(scene.blossomBodyMesh.vertexData[i] - spreadOnlyBody[i])
+            if (d > maxGluteResetErr) maxGluteResetErr = d
+        }
+        assertTrue("Releasing glute elasticity must restore exact leg-spread geometry (< 1e-4), got $maxGluteResetErr", maxGluteResetErr < 1e-4f)
     }
 
     /**

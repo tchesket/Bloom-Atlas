@@ -52,7 +52,13 @@ data class VulvaDeformationState(
     val leftLegSpread: Float = 0f,
     val rightLegSpread: Float = 0f,
     val selfSpreadPose: Float = 0f,
-    val headTurn: Float = 0f
+    val headTurn: Float = 0f,
+    val headPitch: Float = 0f,
+    val eyeBlink: Float = 0f,
+    val leftGluteX: Float = 0f,
+    val leftGluteY: Float = 0f,
+    val rightGluteX: Float = 0f,
+    val rightGluteY: Float = 0f
 )
 
 class DynamicGlMesh(
@@ -106,14 +112,21 @@ class VulvaAnatomySceneMesh {
     val blossomHandsMesh: DynamicGlMesh
     val blossomNailsMesh: DynamicGlMesh
     internal val blossomLegSkinCache: BlossomSdfBodyBuilder.LegSkinCache
+    internal val blossomGluteSkinCache: BlossomSdfBodyBuilder.GluteSkinCache
     internal val blossomArmSkinCache: BlossomArmIkRig.ArmSkinCache
     internal val blossomHeadRigCache: BlossomUpperBodyBuilder.HeadRigCache
     private var lastAppliedLeftLegSpread = Float.NaN
     private var lastAppliedRightLegSpread = Float.NaN
+    private var lastAppliedLeftGluteX = Float.NaN
+    private var lastAppliedLeftGluteY = Float.NaN
+    private var lastAppliedRightGluteX = Float.NaN
+    private var lastAppliedRightGluteY = Float.NaN
     private var lastAppliedSelfSpreadPose = Float.NaN
     private var lastAppliedArmLeftOuter = Float.NaN
     private var lastAppliedArmRightOuter = Float.NaN
     private var lastAppliedHeadTurn = Float.NaN
+    private var lastAppliedHeadPitch = Float.NaN
+    private var lastAppliedEyeBlink = Float.NaN
     private val blossomBreastsCache: BlossomUpperBodyBuilder.BlossomBreastsCache
     val blossomBreastsMesh = DynamicGlMesh(
         BlossomUpperBodyBuilder.BREAST_COLS * BlossomUpperBodyBuilder.BREAST_ROWS * 2,
@@ -174,6 +187,10 @@ class VulvaAnatomySceneMesh {
             nailsMesh = blossomNailsMesh,
             toeNailStartVert = toeNailStartVert
         )
+        blossomGluteSkinCache = BlossomSdfBodyBuilder.buildGluteSkinCache(
+            bodyMesh = blossomBodyMesh,
+            legCache = blossomLegSkinCache
+        )
         blossomArmSkinCache = BlossomArmIkRig.buildArmSkinCache(blossomBodyMesh)
         blossomBreastsCache = BlossomUpperBodyBuilder.buildBreastsCache()
         blossomHeadMesh = BlossomUpperBodyBuilder.buildBlossomHeadMesh(
@@ -219,17 +236,37 @@ class VulvaAnatomySceneMesh {
         if (includeLithotomyBody) {
             updateBlossomVulvaPatch(state)
             updateBlossomBreasts(state)
-            if (state.leftLegSpread != lastAppliedLeftLegSpread || state.rightLegSpread != lastAppliedRightLegSpread) {
+            val legsChanged = state.leftLegSpread != lastAppliedLeftLegSpread ||
+                state.rightLegSpread != lastAppliedRightLegSpread
+            val glutesChanged = state.leftGluteX != lastAppliedLeftGluteX ||
+                state.leftGluteY != lastAppliedLeftGluteY ||
+                state.rightGluteX != lastAppliedRightGluteX ||
+                state.rightGluteY != lastAppliedRightGluteY
+            if (legsChanged || glutesChanged) {
                 BlossomSdfBodyBuilder.applyLegSpread(
                     bodyMesh = blossomBodyMesh,
                     toesMesh = blossomToesMesh,
                     nailsMesh = blossomNailsMesh,
                     cache = blossomLegSkinCache,
                     leftLegSpread = state.leftLegSpread,
-                    rightLegSpread = state.rightLegSpread
+                    rightLegSpread = state.rightLegSpread,
+                    includeToesAndNails = legsChanged,
+                    commitBody = false
+                )
+                BlossomSdfBodyBuilder.applyGluteElasticity(
+                    bodyMesh = blossomBodyMesh,
+                    cache = blossomGluteSkinCache,
+                    leftGluteX = state.leftGluteX,
+                    leftGluteY = state.leftGluteY,
+                    rightGluteX = state.rightGluteX,
+                    rightGluteY = state.rightGluteY
                 )
                 lastAppliedLeftLegSpread = state.leftLegSpread
                 lastAppliedRightLegSpread = state.rightLegSpread
+                lastAppliedLeftGluteX = state.leftGluteX
+                lastAppliedLeftGluteY = state.leftGluteY
+                lastAppliedRightGluteX = state.rightGluteX
+                lastAppliedRightGluteY = state.rightGluteY
             }
             val armPoseNeedsUpdate = state.selfSpreadPose != lastAppliedSelfSpreadPose ||
                 (state.selfSpreadPose > 0.001f &&
@@ -249,16 +286,23 @@ class VulvaAnatomySceneMesh {
                 lastAppliedArmLeftOuter = state.leftOuter
                 lastAppliedArmRightOuter = state.rightOuter
             }
-            if (state.headTurn != lastAppliedHeadTurn) {
+            if (state.headTurn != lastAppliedHeadTurn ||
+                state.headPitch != lastAppliedHeadPitch ||
+                state.eyeBlink != lastAppliedEyeBlink
+            ) {
                 BlossomUpperBodyBuilder.applyHeadTurn(
                     bodyMesh = blossomBodyMesh,
                     headMesh = blossomHeadMesh,
                     eyesMesh = blossomEyesMesh,
                     hairMesh = blossomHairMesh,
                     cache = blossomHeadRigCache,
-                    headTurn = state.headTurn
+                    headTurn = state.headTurn,
+                    headPitch = state.headPitch,
+                    eyeBlink = state.eyeBlink
                 )
                 lastAppliedHeadTurn = state.headTurn
+                lastAppliedHeadPitch = state.headPitch
+                lastAppliedEyeBlink = state.eyeBlink
             }
         } else {
             updateContouredPelvis(state)
@@ -531,7 +575,11 @@ class VulvaAnatomySceneMesh {
             mesh = blossomVulvaPatchMesh,
             cache = blossomVulvaPatchCache,
             detailEvaluator = { x, y -> evaluateVulvaDetail(x, y, s) },
-            computeNormals = ::computeGridNormals
+            computeNormals = ::computeGridNormals,
+            leftGluteX = s.leftGluteX,
+            leftGluteY = s.leftGluteY,
+            rightGluteX = s.rightGluteX,
+            rightGluteY = s.rightGluteY
         )
     }
 

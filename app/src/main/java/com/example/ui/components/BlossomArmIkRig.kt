@@ -27,21 +27,21 @@ internal object BlossomArmIkRig {
     const val SELF_SPREAD_INNER_TARGET = 0.78f
 
     // Exact rest arm joint anchors matching BlossomSdfBodyBuilder.evaluateBodySdf()
-    const val SHOULDER_AX = 1.33f
+    const val SHOULDER_AX = 1.34f
     const val SHOULDER_Y = 4.40f
-    val SHOULDER_Z: Float = BlossomBodyBuilder.mattressSurfaceZ(4.54f) + 0.45f
+    val SHOULDER_Z: Float = BlossomBodyBuilder.mattressSurfaceZ(4.54f) + 0.52f
 
-    const val ELBOW_AX = 2.14f
-    const val ELBOW_Y = 2.50f
-    val ELBOW_Z: Float = BlossomBodyBuilder.mattressSurfaceZ(2.50f) + 0.36f
+    const val ELBOW_AX = 2.26f
+    const val ELBOW_Y = 2.28f
+    val ELBOW_Z: Float = BlossomBodyBuilder.mattressSurfaceZ(2.28f) + 0.36f
 
-    const val WRIST_AX = 2.24f
-    const val WRIST_Y = 0.82f
-    val WRIST_Z: Float = BlossomBodyBuilder.mattressSurfaceZ(0.82f) + 0.195f
+    const val WRIST_AX = 2.34f
+    const val WRIST_Y = 0.42f
+    val WRIST_Z: Float = BlossomBodyBuilder.mattressSurfaceZ(0.42f) + 0.195f
 
-    const val PALM_TIP_AX = 2.27f
-    const val PALM_TIP_Y = -0.03f
-    val PALM_TIP_Z: Float = BlossomBodyBuilder.mattressSurfaceZ(0.36f) + 0.185f
+    const val PALM_TIP_AX = 2.41f
+    const val PALM_TIP_Y = -0.45f
+    val PALM_TIP_Z: Float = BlossomBodyBuilder.mattressSurfaceZ(0.00f) + 0.185f
 
     val UPPER_ARM_LEN: Float = dist3(
         SHOULDER_AX, SHOULDER_Y, SHOULDER_Z,
@@ -181,7 +181,7 @@ internal object BlossomArmIkRig {
 
             val ax = abs(x)
             // Quick bounding box rejection (well inside the smooth SDF zero-weight zone)
-            if (ax < 0.96f || y < -0.58f || y > 5.04f) continue
+            if (ax < 0.96f || y < -0.85f || y > 5.04f) continue
             // Guarantee 100% disjoint membership from LegSkinCache (legs sit in y <= 0.44 and ax <= 1.86 or z >= -0.35)
             if (y <= 0.44f && (ax <= 1.86f || z >= -0.35f)) continue
 
@@ -197,10 +197,10 @@ internal object BlossomArmIkRig {
             )
 
             // Smooth multi-bone weights along the Shoulder -> Elbow -> Wrist -> Palm chain
-            // Elbow transition centered around y = 2.50 (blended over ±0.34, strictly disjoint from shoulder y >= 3.15)
-            val toForearm = smoothStep(2.84f, 2.16f, y)
-            // Wrist transition centered around y = 0.82 (blended over ±0.28 for silky volume-preserving bend)
-            val toHand = smoothStep(1.10f, 0.54f, y)
+            // Elbow transition centered around ELBOW_Y (blended over +-0.34, strictly disjoint from shoulder)
+            val toForearm = smoothStep(ELBOW_Y + 0.34f, ELBOW_Y - 0.34f, y)
+            // Wrist transition centered around WRIST_Y (blended over +-0.28 for silky volume-preserving bend)
+            val toHand = smoothStep(WRIST_Y + 0.28f, WRIST_Y - 0.28f, y)
 
             val rawHand = toHand
             val rawForearm = toForearm * (1f - toHand)
@@ -297,12 +297,12 @@ internal object BlossomArmIkRig {
             s0.z + 0.24f * reachT
         )
 
-        // 2. Cubic Bezier wrist trajectory calibrated for realistic feminine hand/finger proportions
+        // 2. Cubic Bezier wrist trajectory calibrated for lengthened anatomical feminine arms & hands
         val uArc = smoothStep(0.0f, 0.68f, p)
         val b0 = w0
-        val b1 = Vec3(side * 2.36f, 1.04f, 0.14f)
-        val b2 = Vec3(side * 1.60f, 1.44f, 1.00f)
-        val b3 = Vec3(side * 0.75f, 1.13f, 0.945f)
+        val b1 = Vec3(side * 2.42f, 0.82f, 0.16f)
+        val b2 = Vec3(side * 1.66f, 1.48f, 1.04f)
+        val b3 = Vec3(side * 0.80f, 1.24f, 1.00f)
         val wristArc = cubicBezier(b0, b1, b2, b3, uArc)
 
         // 3. Synchronized lateral spread glide (Phase 3: 0.68 -> 1.00) riding gently up the inguinal contour

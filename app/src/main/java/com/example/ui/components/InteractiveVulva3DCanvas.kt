@@ -165,10 +165,17 @@ fun InteractiveVulva3DCanvas(
     val leftBreastY = remember { Animatable(0f) }
     val rightBreastX = remember { Animatable(0f) }
     val rightBreastY = remember { Animatable(0f) }
-    // Persistent leg-spread & head-turn channels (stay in place until moved again or explicitly reset)
+    // Persistent leg-spread & head-turn/nod channels (stay in place until moved again or explicitly reset)
     val leftLegSpread = remember { Animatable(0f) }
     val rightLegSpread = remember { Animatable(0f) }
     val headTurn = remember { Animatable(0f) }
+    val headPitch = remember { Animatable(0f) }
+    // Subtle elastic buttock soft-tissue channels + natural interval eyelid blink
+    val leftGluteX = remember { Animatable(0f) }
+    val leftGluteY = remember { Animatable(0f) }
+    val rightGluteX = remember { Animatable(0f) }
+    val rightGluteY = remember { Animatable(0f) }
+    val eyeBlink = remember { Animatable(0f) }
     // Animated self-spread hand/arm IK pose (0 = relaxed at sides, 1 = hands holding labia open)
     var blossomSpreadPoseActive by remember { mutableStateOf(false) }
     val selfSpreadPose = remember { Animatable(0f) }
@@ -215,6 +222,10 @@ fun InteractiveVulva3DCanvas(
             dampingRatio = 0.50f,
             stiffness = Spring.StiffnessMediumLow
         )
+        val gluteSpring = spring<Float>(
+            dampingRatio = 0.58f,
+            stiffness = Spring.StiffnessMedium
+        )
         // While Blossom holds the self-spread pose, releasing manual touches returns labia to her held pose
         val outerRestTarget = if (latestBlossomSpreadPoseActive && !resetLegs) {
             BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET
@@ -235,7 +246,11 @@ fun InteractiveVulva3DCanvas(
         coroutineScope.launch { leftBreastY.animateTo(0f, breastSpring) }
         coroutineScope.launch { rightBreastX.animateTo(0f, breastSpring) }
         coroutineScope.launch { rightBreastY.animateTo(0f, breastSpring) }
-        // Only reset legs & head turn when explicitly requested (e.g., Reset button) — they are positional, not elastic
+        coroutineScope.launch { leftGluteX.animateTo(0f, gluteSpring) }
+        coroutineScope.launch { leftGluteY.animateTo(0f, gluteSpring) }
+        coroutineScope.launch { rightGluteX.animateTo(0f, gluteSpring) }
+        coroutineScope.launch { rightGluteY.animateTo(0f, gluteSpring) }
+        // Only reset legs & head pose when explicitly requested (e.g., Reset button) — they are positional, not elastic
         if (resetLegs) {
             val positionalSpring = spring<Float>(
                 dampingRatio = 0.78f,
@@ -244,6 +259,7 @@ fun InteractiveVulva3DCanvas(
             coroutineScope.launch { leftLegSpread.animateTo(0f, positionalSpring) }
             coroutineScope.launch { rightLegSpread.animateTo(0f, positionalSpring) }
             coroutineScope.launch { headTurn.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { headPitch.animateTo(0f, positionalSpring) }
         }
     }
 
@@ -327,6 +343,28 @@ fun InteractiveVulva3DCanvas(
         }
     }
 
+    // Natural involuntary blinking at calm randomized intervals (~3.2–6.2s with occasional soft double-blink)
+    LaunchedEffect(showExperimentalLegs) {
+        if (!showExperimentalLegs) {
+            eyeBlink.snapTo(0f)
+            return@LaunchedEffect
+        }
+        val rng = kotlin.random.Random(System.currentTimeMillis())
+        delay(1800L)
+        while (true) {
+            eyeBlink.animateTo(1f, tween(durationMillis = 75, easing = FastOutSlowInEasing))
+            delay(28L)
+            eyeBlink.animateTo(0f, tween(durationMillis = 135, easing = FastOutSlowInEasing))
+            if (rng.nextFloat() < 0.16f) {
+                delay(150L)
+                eyeBlink.animateTo(1f, tween(durationMillis = 70, easing = FastOutSlowInEasing))
+                delay(22L)
+                eyeBlink.animateTo(0f, tween(durationMillis = 130, easing = FastOutSlowInEasing))
+            }
+            delay(rng.nextLong(3200L, 6200L))
+        }
+    }
+
     fun trigger3DSensory(part: AnatomyPart, nx: Float, ny: Float, isDrag: Boolean) {
         latestOnSelectPart(part.id)
         touchGlowX = nx
@@ -369,7 +407,13 @@ fun InteractiveVulva3DCanvas(
         leftLegSpread = leftLegSpread.value,
         rightLegSpread = rightLegSpread.value,
         selfSpreadPose = selfSpreadPose.value,
-        headTurn = headTurn.value
+        headTurn = headTurn.value,
+        headPitch = headPitch.value,
+        eyeBlink = eyeBlink.value,
+        leftGluteX = leftGluteX.value,
+        leftGluteY = leftGluteY.value,
+        rightGluteX = rightGluteX.value,
+        rightGluteY = rightGluteY.value
     )
     val currentCam = VulvaCamera3D(
         yawDeg = camYaw.value,
@@ -529,6 +573,11 @@ fun InteractiveVulva3DCanvas(
                                         var dLeftLeg = 0f
                                         var dRightLeg = 0f
                                         var dHeadTurn = 0f
+                                        var dHeadPitch = 0f
+                                        var dLeftGluteX = 0f
+                                        var dLeftGluteY = 0f
+                                        var dRightGluteX = 0f
+                                        var dRightGluteY = 0f
 
                                         val zoomScale = camZoom.value.coerceIn(0.10f, 1.90f)
                                         val liveCam = VulvaCamera3D(
@@ -553,7 +602,13 @@ fun InteractiveVulva3DCanvas(
                                             leftLegSpread = leftLegSpread.value,
                                             rightLegSpread = rightLegSpread.value,
                                             selfSpreadPose = selfSpreadPose.value,
-                                            headTurn = headTurn.value
+                                            headTurn = headTurn.value,
+                                            headPitch = headPitch.value,
+                                            eyeBlink = eyeBlink.value,
+                                            leftGluteX = leftGluteX.value,
+                                            leftGluteY = leftGluteY.value,
+                                            rightGluteX = rightGluteX.value,
+                                            rightGluteY = rightGluteY.value
                                         )
 
                                         pressed.forEach { change ->
@@ -583,7 +638,9 @@ fun InteractiveVulva3DCanvas(
 
                                                 if (zone == TouchTargetZone.VULVA ||
                                                     zone == TouchTargetZone.LEFT_BREAST ||
-                                                    zone == TouchTargetZone.RIGHT_BREAST
+                                                    zone == TouchTargetZone.RIGHT_BREAST ||
+                                                    zone == TouchTargetZone.LEFT_GLUTE ||
+                                                    zone == TouchTargetZone.RIGHT_GLUTE
                                                 ) {
                                                     touchedElasticZone = true
                                                 }
@@ -600,6 +657,8 @@ fun InteractiveVulva3DCanvas(
                                                     }
                                                     TouchTargetZone.LEFT_LEG,
                                                     TouchTargetZone.RIGHT_LEG,
+                                                    TouchTargetZone.LEFT_GLUTE,
+                                                    TouchTargetZone.RIGHT_GLUTE,
                                                     TouchTargetZone.HEAD -> {
                                                         if (latestHapticsEnabled) {
                                                             hapticsEngine.triggerTap(SensitivityTier.MODERATE)
@@ -673,11 +732,37 @@ fun InteractiveVulva3DCanvas(
                                                             }
                                                         }
                                                     }
+                                                    TouchTargetZone.LEFT_GLUTE -> {
+                                                        val gluteGain = (1.50f / zoomScale.coerceAtLeast(0.20f)).coerceIn(2.4f, 6.8f)
+                                                        dLeftGluteX += rawDx * gluteGain
+                                                        dLeftGluteY += -rawDy * gluteGain
+                                                        val nowMs = System.currentTimeMillis()
+                                                        if (hypot(rawDx, rawDy) > 0.006f && nowMs - lastDragFeedbackMs >= 125L) {
+                                                            lastDragFeedbackMs = nowMs
+                                                            if (latestHapticsEnabled) {
+                                                                hapticsEngine.triggerDragPulse(SensitivityTier.MODERATE)
+                                                            }
+                                                        }
+                                                    }
+                                                    TouchTargetZone.RIGHT_GLUTE -> {
+                                                        val gluteGain = (1.50f / zoomScale.coerceAtLeast(0.20f)).coerceIn(2.4f, 6.8f)
+                                                        dRightGluteX += rawDx * gluteGain
+                                                        dRightGluteY += -rawDy * gluteGain
+                                                        val nowMs = System.currentTimeMillis()
+                                                        if (hypot(rawDx, rawDy) > 0.006f && nowMs - lastDragFeedbackMs >= 125L) {
+                                                            lastDragFeedbackMs = nowMs
+                                                            if (latestHapticsEnabled) {
+                                                                hapticsEngine.triggerDragPulse(SensitivityTier.MODERATE)
+                                                            }
+                                                        }
+                                                    }
                                                     TouchTargetZone.HEAD -> {
                                                         val headGain = (1.95f / zoomScale.coerceAtLeast(0.24f)).coerceIn(2.6f, 7.2f)
+                                                        val headPitchGain = (1.65f / zoomScale.coerceAtLeast(0.24f)).coerceIn(2.2f, 6.2f)
                                                         dHeadTurn += rawDx * headGain
+                                                        dHeadPitch += rawDy * headPitchGain
                                                         val nowMs = System.currentTimeMillis()
-                                                        if (abs(rawDx) > 0.005f && nowMs - lastDragFeedbackMs >= 120L) {
+                                                        if (hypot(rawDx, rawDy) > 0.005f && nowMs - lastDragFeedbackMs >= 120L) {
                                                             lastDragFeedbackMs = nowMs
                                                             if (latestHapticsEnabled) {
                                                                 hapticsEngine.triggerDragPulse(SensitivityTier.MODERATE)
@@ -772,10 +857,25 @@ fun InteractiveVulva3DCanvas(
                                             }
                                         }
 
-                                        if (dHeadTurn != 0f) {
+                                        if (dLeftGluteX != 0f || dLeftGluteY != 0f || dRightGluteX != 0f || dRightGluteY != 0f) {
+                                            val nextLGX = (leftGluteX.value + dLeftGluteX).coerceIn(-1f, 1f)
+                                            val nextLGY = (leftGluteY.value + dLeftGluteY).coerceIn(-1f, 1f)
+                                            val nextRGX = (rightGluteX.value + dRightGluteX).coerceIn(-1f, 1f)
+                                            val nextRGY = (rightGluteY.value + dRightGluteY).coerceIn(-1f, 1f)
+                                            coroutineScope.launch {
+                                                leftGluteX.snapTo(nextLGX)
+                                                leftGluteY.snapTo(nextLGY)
+                                                rightGluteX.snapTo(nextRGX)
+                                                rightGluteY.snapTo(nextRGY)
+                                            }
+                                        }
+
+                                        if (dHeadTurn != 0f || dHeadPitch != 0f) {
                                             val nextHead = (headTurn.value + dHeadTurn).coerceIn(-1f, 1f)
+                                            val nextPitch = (headPitch.value + dHeadPitch).coerceIn(0f, 1f)
                                             coroutineScope.launch {
                                                 headTurn.snapTo(nextHead)
+                                                headPitch.snapTo(nextPitch)
                                             }
                                         }
                                     }
@@ -1017,7 +1117,7 @@ fun InteractiveVulva3DCanvas(
             text = if (isOrbitMode) {
                 "${BlossomBodyBuilder.BLOSSOM_MILESTONE_TAG} · Orbit 3D: drag to rotate, or pinch & slide two fingers to zoom/pan head-to-toe."
             } else {
-                "${BlossomBodyBuilder.BLOSSOM_MILESTONE_TAG} · Touch labia, hood, or breasts; drag legs or face side-to-side (they stay put), or ask Blossom to spread."
+                "${BlossomBodyBuilder.BLOSSOM_MILESTONE_TAG} · Touch labia, hood, breasts, or glutes; drag legs or face to turn/nod (they stay put), or ask Blossom to spread."
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

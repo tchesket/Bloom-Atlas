@@ -14,7 +14,9 @@ internal enum class TouchTargetZone {
     RIGHT_BREAST,
     HEAD,
     LEFT_LEG,
-    RIGHT_LEG
+    RIGHT_LEG,
+    LEFT_GLUTE,
+    RIGHT_GLUTE
 }
 
 internal data class ProjectedVulvaFrame(
@@ -205,15 +207,16 @@ internal object BlossomTouchHitResolver {
 
         // 2. PRIORITY 2 — Snug 3D-Projected Left & Right Breasts (matches raised mound, isolated from upper arms!)
         val sizeNorm = deform.breastSize.coerceIn(0f, 1f)
-        val worldBreastR = 0.48f + 0.12f * sizeNorm
-        val breastZ = BlossomBodyBuilder.mattressSurfaceZ(BlossomUpperBodyBuilder.BREAST_CENTER_Y) + 1.38f + 0.32f * sizeNorm
+        val worldBreastR = 0.50f + 0.12f * sizeNorm
+        val breastZ = BlossomBodyBuilder.mattressSurfaceZ(BlossomUpperBodyBuilder.BREAST_CENTER_Y) + 1.48f + 0.24f * sizeNorm
+        val supineShiftX = 0.04f * sizeNorm
         val leftBreastW = floatArrayOf(
-            -BlossomUpperBodyBuilder.BREAST_CENTER_AX + deform.leftBreastX * 0.22f,
+            -(BlossomUpperBodyBuilder.BREAST_CENTER_AX + supineShiftX) + deform.leftBreastX * 0.22f,
             BlossomUpperBodyBuilder.BREAST_CENTER_Y + deform.leftBreastY * 0.20f,
             breastZ
         )
         val rightBreastW = floatArrayOf(
-            BlossomUpperBodyBuilder.BREAST_CENTER_AX + deform.rightBreastX * 0.22f,
+            (BlossomUpperBodyBuilder.BREAST_CENTER_AX + supineShiftX) + deform.rightBreastX * 0.22f,
             BlossomUpperBodyBuilder.BREAST_CENTER_Y + deform.rightBreastY * 0.20f,
             breastZ
         )
@@ -235,10 +238,35 @@ internal object BlossomTouchHitResolver {
             return TouchHitResult(zone = TouchTargetZone.HEAD)
         }
 
-        // 4. PRIORITY 4 — Snug 3D-Projected Thigh & Calf Bone Capsules (isolated from hands, arms, hips & vulva!)
+        // 4 & 5. Snug 3D-Projected Thigh/Calf Capsules & Posterior Gluteal Cheeks (isolated from hands, arms, vulva & edges!)
         val leftLegDist = evaluateLegCapsuleDist(rawScreenNorm, projector, side = -1f, spread = deform.leftLegSpread)
         val rightLegDist = evaluateLegCapsuleDist(rawScreenNorm, projector, side = +1f, spread = deform.rightLegSpread)
-        if (leftLegDist <= 1.0f || rightLegDist <= 1.0f) {
+        val bestLegDist = minOf(leftLegDist, rightLegDist)
+
+        // Left & right buttock cheeks: primary medial cheeks directly left/right of her anus + outer cheeks in 3/4 views
+        val leftPerianalGluteW = floatArrayOf(-0.64f, -0.90f, -0.32f)
+        val rightPerianalGluteW = floatArrayOf(0.64f, -0.90f, -0.32f)
+        val leftOuterGluteW = floatArrayOf(-1.14f, -0.74f, -0.78f)
+        val rightOuterGluteW = floatArrayOf(1.14f, -0.74f, -0.78f)
+        val leftGluteDist = minOf(
+            evaluateGluteEllipseDist(rawScreenNorm, projector, leftPerianalGluteW, worldRadius = 0.40f),
+            evaluateGluteEllipseDist(rawScreenNorm, projector, leftOuterGluteW, worldRadius = 0.40f)
+        )
+        val rightGluteDist = minOf(
+            evaluateGluteEllipseDist(rawScreenNorm, projector, rightPerianalGluteW, worldRadius = 0.40f),
+            evaluateGluteEllipseDist(rawScreenNorm, projector, rightOuterGluteW, worldRadius = 0.40f)
+        )
+        val bestGluteDist = minOf(leftGluteDist, rightGluteDist)
+
+        if (bestGluteDist <= 1.0f && (bestLegDist > 1.0f || bestGluteDist < bestLegDist * 0.90f)) {
+            val zone = if (leftGluteDist <= rightGluteDist) {
+                TouchTargetZone.LEFT_GLUTE
+            } else {
+                TouchTargetZone.RIGHT_GLUTE
+            }
+            return TouchHitResult(zone = zone)
+        }
+        if (bestLegDist <= 1.0f) {
             val zone = if (leftLegDist <= rightLegDist) {
                 TouchTargetZone.LEFT_LEG
             } else {
@@ -247,7 +275,7 @@ internal object BlossomTouchHitResolver {
             return TouchHitResult(zone = zone)
         }
 
-        // 5. Everything else (arms, hands, waist, belly, shoulders, neck, mattress, background) -> NONE!
+        // 6. Everything else (arms, hands, waist, belly, shoulders, neck, mattress, background) -> NONE!
         return TouchHitResult(zone = TouchTargetZone.NONE)
     }
 
@@ -317,6 +345,19 @@ internal object BlossomTouchHitResolver {
         if (p.x !in -0.25f..1.25f || p.y !in -0.25f..1.25f) return Float.POSITIVE_INFINITY
         val rx = (projector.projectRadiusX(0.76f, p.depth) + 0.010f).coerceIn(0.032f, 0.34f)
         val ry = (projector.projectRadiusY(0.94f, p.depth) + 0.010f).coerceIn(0.038f, 0.42f)
+        return hypot((touch.x - p.x) / rx, (touch.y - p.y) / ry)
+    }
+
+    private fun evaluateGluteEllipseDist(
+        touch: Offset,
+        projector: BlossomCameraProjector,
+        worldCenter: FloatArray,
+        worldRadius: Float = 0.40f
+    ): Float {
+        val p = projector.projectUnclamped(worldCenter) ?: return Float.POSITIVE_INFINITY
+        if (p.x !in -0.15f..1.15f || p.y !in -0.15f..1.15f) return Float.POSITIVE_INFINITY
+        val rx = (projector.projectRadiusX(worldRadius, p.depth) + 0.004f).coerceIn(0.024f, 0.22f)
+        val ry = (projector.projectRadiusY(worldRadius, p.depth) + 0.004f).coerceIn(0.024f, 0.22f)
         return hypot((touch.x - p.x) / rx, (touch.y - p.y) / ry)
     }
 

@@ -124,6 +124,37 @@ class BlossomTouchHitResolverTest {
             TouchTargetZone.NONE,
             BlossomTouchHitResolver.resolveTouchZone(rightArmS, threeQuarterLeftCam, aspect, spreadDeform, showFullBody = true).zone
         )
+
+        // Touching her exposed near-side buttock cheek in left & right 3/4 views resolves cleanly to LEFT_GLUTE / RIGHT_GLUTE
+        val leftGluteS = projector.projectUnclamped(-1.14f, -0.74f, -0.82f)!!.toOffset()
+        assertEquals(
+            "Left 3/4 rotated exposed left buttock touch must resolve to LEFT_GLUTE",
+            TouchTargetZone.LEFT_GLUTE,
+            BlossomTouchHitResolver.resolveTouchZone(leftGluteS, threeQuarterLeftCam, aspect, spreadDeform, showFullBody = true).zone
+        )
+        val threeQuarterRightCam = threeQuarterLeftCam.copy(yawDeg = +46f)
+        val rightProjector = BlossomCameraProjector(threeQuarterRightCam, aspect)
+        val rightGluteS = rightProjector.projectUnclamped(1.14f, -0.74f, -0.82f)!!.toOffset()
+        assertEquals(
+            "Right 3/4 rotated exposed right buttock touch must resolve to RIGHT_GLUTE",
+            TouchTargetZone.RIGHT_GLUTE,
+            BlossomTouchHitResolver.resolveTouchZone(rightGluteS, threeQuarterRightCam, aspect, spreadDeform, showFullBody = true).zone
+        )
+
+        // Front Exam view: touching directly to the left and right of her anus resolves cleanly to LEFT_GLUTE / RIGHT_GLUTE
+        val examProjector = BlossomCameraProjector(examCam, aspect)
+        val leftPerianalS = examProjector.projectUnclamped(-0.62f, -0.90f, -0.32f)!!.toOffset()
+        val rightPerianalS = examProjector.projectUnclamped(0.62f, -0.90f, -0.32f)!!.toOffset()
+        assertEquals(
+            "Front view touch directly left of anus must resolve to LEFT_GLUTE",
+            TouchTargetZone.LEFT_GLUTE,
+            resolve(leftPerianalS, examCam)
+        )
+        assertEquals(
+            "Front view touch directly right of anus must resolve to RIGHT_GLUTE",
+            TouchTargetZone.RIGHT_GLUTE,
+            resolve(rightPerianalS, examCam)
+        )
     }
 
     private fun resolve(pt: Offset, cam: VulvaCamera3D): TouchTargetZone =
