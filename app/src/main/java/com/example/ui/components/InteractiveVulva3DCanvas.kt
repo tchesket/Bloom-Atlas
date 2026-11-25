@@ -40,6 +40,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -67,6 +68,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.data.model.AnatomyPart
 import com.example.data.model.SensitivityTier
 import kotlinx.coroutines.delay
@@ -176,6 +180,9 @@ fun InteractiveVulva3DCanvas(
     val rightGluteX = remember { Animatable(0f) }
     val rightGluteY = remember { Animatable(0f) }
     val eyeBlink = remember { Animatable(0f) }
+    // Unified touch-engagement stimulus (0 = calm rest, ~0.55 = breast/vulva touch, 1.0 = clitoris/hood touch)
+    var touchStimulus by remember { mutableFloatStateOf(0f) }
+    var lastStimulusTouchMs by remember { mutableStateOf(0L) }
     // Animated self-spread hand/arm IK pose (0 = relaxed at sides, 1 = hands holding labia open)
     var blossomSpreadPoseActive by remember { mutableStateOf(false) }
     val selfSpreadPose = remember { Animatable(0f) }
@@ -212,6 +219,13 @@ fun InteractiveVulva3DCanvas(
     val latestOrbitMode by rememberUpdatedState(isOrbitMode)
     val latestShowFullBody by rememberUpdatedState(showExperimentalLegs)
     val latestBlossomSpreadPoseActive by rememberUpdatedState(blossomSpreadPoseActive)
+    val latestTouchStimulus by rememberUpdatedState(touchStimulus)
+
+    fun registerPhysiologicalStimulus(level: Float) {
+        val clamped = level.coerceIn(0f, 1f)
+        lastStimulusTouchMs = System.currentTimeMillis()
+        touchStimulus = max(touchStimulus, clamped)
+    }
 
     fun springBackTissue(resetLegs: Boolean = false) {
         val tissueSpring = spring<Float>(
@@ -343,25 +357,61 @@ fun InteractiveVulva3DCanvas(
         }
     }
 
-    // Natural involuntary blinking at calm randomized intervals (~3.2–6.2s with occasional soft double-blink)
+    // Smoothly settle touch-engagement stimulus back to calm baseline ~3.5s after tactile contact ends
+    LaunchedEffect(showExperimentalLegs) {
+        if (!showExperimentalLegs) {
+            touchStimulus = 0f
+            return@LaunchedEffect
+        }
+        while (true) {
+            delay(100L)
+            val current = touchStimulus
+            if (current > 0.001f) {
+                val idleMs = System.currentTimeMillis() - lastStimulusTouchMs
+                if (idleMs > 950L) {
+                    val next = (current - 0.030f).coerceAtLeast(0f)
+                    touchStimulus = next
+                }
+            }
+        }
+    }
+
+    // Natural involuntary blinking: calm randomized intervals at rest (~3.4–6.2s), smoothly becoming
+    // more frequent during breast/vulva touch (~1.8–3.2s) and especially clitoral engagement (~1.1–2.1s)
     LaunchedEffect(showExperimentalLegs) {
         if (!showExperimentalLegs) {
             eyeBlink.snapTo(0f)
             return@LaunchedEffect
         }
         val rng = kotlin.random.Random(System.currentTimeMillis())
-        delay(1800L)
+        delay(1600L)
         while (true) {
-            eyeBlink.animateTo(1f, tween(durationMillis = 75, easing = FastOutSlowInEasing))
-            delay(28L)
-            eyeBlink.animateTo(0f, tween(durationMillis = 135, easing = FastOutSlowInEasing))
-            if (rng.nextFloat() < 0.16f) {
-                delay(150L)
+            val stimAtBlink = latestTouchStimulus.coerceIn(0f, 1f)
+            val closeMs = (75 + (stimAtBlink * 18f)).roundToInt()
+            val holdMs = (28 + (stimAtBlink * 16f)).roundToInt().toLong()
+            val openMs = (135 + (stimAtBlink * 22f)).roundToInt()
+            eyeBlink.animateTo(1f, tween(durationMillis = closeMs, easing = FastOutSlowInEasing))
+            delay(holdMs)
+            eyeBlink.animateTo(0f, tween(durationMillis = openMs, easing = FastOutSlowInEasing))
+
+            val doubleBlinkProb = 0.16f + 0.16f * stimAtBlink
+            if (rng.nextFloat() < doubleBlinkProb) {
+                delay(145L)
                 eyeBlink.animateTo(1f, tween(durationMillis = 70, easing = FastOutSlowInEasing))
                 delay(22L)
                 eyeBlink.animateTo(0f, tween(durationMillis = 130, easing = FastOutSlowInEasing))
             }
-            delay(rng.nextLong(3200L, 6200L))
+
+            // Slice wait into 120ms steps so newly starting breast/vulva/clitoris touches shorten the wait immediately
+            val jitter = rng.nextFloat()
+            var elapsedWaitMs = 0L
+            while (true) {
+                val range = computeBlinkIntervalRangeMs(latestTouchStimulus)
+                val targetWaitMs = range.first + ((range.last - range.first) * jitter).toLong()
+                if (elapsedWaitMs >= targetWaitMs) break
+                delay(120L)
+                elapsedWaitMs += 120L
+            }
         }
     }
 
@@ -452,14 +502,32 @@ fun InteractiveVulva3DCanvas(
                 val heightPx = constraints.maxHeight.toFloat().coerceAtLeast(1f)
                 val aspect = widthPx / heightPx
 
+                val lifecycleOwner = LocalLifecycleOwner.current
+                var glViewRef by remember { mutableStateOf<VulvaGlTextureView?>(null) }
+
+                DisposableEffect(lifecycleOwner, glViewRef) {
+                    val observer = LifecycleEventObserver { _, event ->
+                        when (event) {
+                            Lifecycle.Event.ON_PAUSE -> glViewRef?.setRenderingPaused(true)
+                            Lifecycle.Event.ON_RESUME -> glViewRef?.setRenderingPaused(false)
+                            else -> Unit
+                        }
+                    }
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    onDispose {
+                        lifecycleOwner.lifecycle.removeObserver(observer)
+                    }
+                }
+
                 AndroidView(
                     factory = { ctx ->
                         VulvaGlTextureView(
                             context = ctx,
                             onGlError = { glUnavailable = true }
-                        )
+                        ).also { glViewRef = it }
                     },
                     update = { glView ->
+                        glViewRef = glView
                         glView.deformationState = currentDeform
                         glView.cameraState = currentCam
                         glView.toneStyle = tone
@@ -468,7 +536,12 @@ fun InteractiveVulva3DCanvas(
                         glView.touchGlow = currentGlow
                         glView.dramaticSideLight = dramaticSideLight
                         glView.showExperimentalLegs = showExperimentalLegs
+                        glView.touchStimulus = touchStimulus
                         glView.requestFrame()
+                    },
+                    onRelease = { glView ->
+                        if (glViewRef === glView) glViewRef = null
+                        glView.shutdown()
                     },
                     modifier = Modifier.fillMaxSize()
                 )
@@ -651,6 +724,7 @@ fun InteractiveVulva3DCanvas(
                                                     }
                                                     TouchTargetZone.LEFT_BREAST,
                                                     TouchTargetZone.RIGHT_BREAST -> {
+                                                        registerPhysiologicalStimulus(0.55f)
                                                         if (latestHapticsEnabled) {
                                                             hapticsEngine.triggerTap(SensitivityTier.HIGH)
                                                         }
@@ -671,6 +745,9 @@ fun InteractiveVulva3DCanvas(
                                                             deform = liveDeform,
                                                             parts = latestParts
                                                         )
+                                                        val isClitoralHit = hit?.id == "ext_glans" || hit?.id == "ext_hood" ||
+                                                            hit?.sensitivityTier == SensitivityTier.ULTRA
+                                                        registerPhysiologicalStimulus(if (isClitoralHit) 1.0f else 0.62f)
                                                         if (hit != null) {
                                                             lastHitPartId = hit.id
                                                             trigger3DSensory(hit, startLocal.x, startLocal.y, isDrag = false)
@@ -690,6 +767,9 @@ fun InteractiveVulva3DCanvas(
                                                         val breastGain = (1.65f / zoomScale.coerceAtLeast(0.22f)).coerceIn(2.6f, 7.5f)
                                                         dLeftBreastX += rawDx * breastGain
                                                         dLeftBreastY += -rawDy * breastGain
+                                                        if (hypot(rawDx, rawDy) > 0.002f) {
+                                                            registerPhysiologicalStimulus(0.58f)
+                                                        }
                                                         val nowMs = System.currentTimeMillis()
                                                         if (hypot(rawDx, rawDy) > 0.005f && nowMs - lastDragFeedbackMs >= 110L) {
                                                             lastDragFeedbackMs = nowMs
@@ -702,6 +782,9 @@ fun InteractiveVulva3DCanvas(
                                                         val breastGain = (1.65f / zoomScale.coerceAtLeast(0.22f)).coerceIn(2.6f, 7.5f)
                                                         dRightBreastX += rawDx * breastGain
                                                         dRightBreastY += -rawDy * breastGain
+                                                        if (hypot(rawDx, rawDy) > 0.002f) {
+                                                            registerPhysiologicalStimulus(0.58f)
+                                                        }
                                                         val nowMs = System.currentTimeMillis()
                                                         if (hypot(rawDx, rawDy) > 0.005f && nowMs - lastDragFeedbackMs >= 110L) {
                                                             lastDragFeedbackMs = nowMs
@@ -799,17 +882,22 @@ fun InteractiveVulva3DCanvas(
                                                         }
 
                                                         val nowMs = System.currentTimeMillis()
-                                                        if (hypot(dxNorm, dyNorm) > 0.004f && nowMs - lastDragFeedbackMs >= 85L) {
-                                                            val hit = hitTest3DVulva(
+                                                        if (hypot(dxNorm, dyNorm) > 0.003f) {
+                                                            val dragHit = hitTest3DVulva(
                                                                 nx = curLocal.x,
                                                                 ny = curLocal.y,
                                                                 deform = liveDeform,
                                                                 parts = latestParts
                                                             )
-                                                            if (hit != null && (hit.id != lastHitPartId || nowMs - lastDragFeedbackMs >= 135L)) {
-                                                                lastHitPartId = hit.id
+                                                            val isClitDrag = inHoodZone || dragHit?.id == "ext_glans" ||
+                                                                dragHit?.id == "ext_hood" || dragHit?.sensitivityTier == SensitivityTier.ULTRA
+                                                            registerPhysiologicalStimulus(if (isClitDrag) 1.0f else 0.64f)
+                                                            if (hypot(dxNorm, dyNorm) > 0.004f && nowMs - lastDragFeedbackMs >= 85L &&
+                                                                dragHit != null && (dragHit.id != lastHitPartId || nowMs - lastDragFeedbackMs >= 135L)
+                                                            ) {
+                                                                lastHitPartId = dragHit.id
                                                                 lastDragFeedbackMs = nowMs
-                                                                trigger3DSensory(hit, curLocal.x, curLocal.y, isDrag = true)
+                                                                trigger3DSensory(dragHit, curLocal.x, curLocal.y, isDrag = true)
                                                             }
                                                         }
                                                     }
@@ -1287,4 +1375,17 @@ private fun hitTest3DVulva(
 private fun smoothStepPose(edge0: Float, edge1: Float, x: Float): Float {
     val t = ((x - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
     return t * t * (3f - 2f * t)
+}
+
+/**
+ * Computes randomized blink wait range (min..max ms) from touch engagement stimulus [0..1]:
+ *  - Rest (0.0): calm ~3.4–6.2s
+ *  - Breasts / Vulva (~0.55–0.65): subtly more frequent ~1.8–3.2s
+ *  - Clitoris / Clitoral Hood (1.0): noticeably more frequent ~1.1–2.1s
+ */
+internal fun computeBlinkIntervalRangeMs(stimulus: Float): LongRange {
+    val s = stimulus.coerceIn(0f, 1f)
+    val minMs = (3400f - 2300f * s).roundToInt().toLong()
+    val maxMs = (6200f - 4100f * s).roundToInt().toLong()
+    return minMs..maxMs
 }

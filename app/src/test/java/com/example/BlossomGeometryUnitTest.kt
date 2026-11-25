@@ -6,6 +6,8 @@ import com.example.ui.components.BlossomUpperBodyBuilder
 import com.example.ui.components.DynamicGlMesh
 import com.example.ui.components.VulvaAnatomySceneMesh
 import com.example.ui.components.VulvaDeformationState
+import com.example.ui.components.VulvaGlTextureView
+import com.example.ui.components.computeBlinkIntervalRangeMs
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
@@ -331,8 +333,8 @@ class BlossomGeometryUnitTest {
             abs(fullLeftApexWorldX) > abs(petiteLeftApexWorldX) + 0.04f
         )
         assertTrue(
-            "Breast size slider must visibly scale volume while staying non-spherical (fullApexZ=$fullApexZ > restApexZ=$restApexZ > petiteApexZ=$petiteApexZ)",
-            fullApexZ > restApexZ + 0.06f && restApexZ > petiteApexZ + 0.06f
+            "Breast size slider must visibly scale volume while staying proportionate & non-spherical (fullApexZ=$fullApexZ > restApexZ=$restApexZ > petiteApexZ=$petiteApexZ)",
+            fullApexZ > restApexZ + 0.045f && restApexZ > petiteApexZ + 0.055f
         )
 
         // Verify supine torso AP depth: bony ribcage height above mattress must exceed settled waist height!
@@ -545,24 +547,53 @@ class BlossomGeometryUnitTest {
         val scene = VulvaAnatomySceneMesh()
         val stride = DynamicGlMesh.FLOATS_PER_VERTEX
 
-        // 1. Armpit fix: every breast base vertex wraps smoothly onto the arm-free ribcage/chest wall (zero arm snap & zero hard wall!)
+        // 1. Breast footprint, sternal gap, collarbone clearance & torso seam/material match
         val breastsCache = BlossomUpperBodyBuilder.buildBreastsCache()
         for (sideCache in listOf(breastsCache.left, breastsCache.right)) {
             var minBaseNz = Float.POSITIVE_INFINITY
             var minAxillaNz = Float.POSITIVE_INFINITY
             var maxAbsX = 0f
+            var minAbsX = Float.POSITIVE_INFINITY
+            var maxBaseY = Float.NEGATIVE_INFINITY
             for (i in 0 until sideCache.count) {
                 val ax = abs(sideCache.baseX[i])
                 val y = sideCache.baseY[i]
                 val nz = sideCache.baseNz[i]
                 if (ax > maxAbsX) maxAbsX = ax
+                if (ax < minAbsX) minAbsX = ax
+                if (y > maxBaseY) maxBaseY = y
                 if (nz < minBaseNz) minBaseNz = nz
                 if (y in 3.0f..4.65f && nz < minAxillaNz) minAxillaNz = nz
             }
-            assertTrue("Breast patch must never snap outward onto upper arms (maxAbsX < 1.56), got $maxAbsX", maxAbsX < 1.56f)
-            assertTrue("Breast base patch must remain forward-facing everywhere (minBaseNz > 0.02), got $minBaseNz", minBaseNz > 0.02f)
+            assertTrue("Breast patch must stay cleanly on its own side of midline (minAbsX >= 0.06), got $minAbsX", minAbsX >= 0.06f)
+            assertTrue("Breast patch outer edge must stay inside ribcage away from upper arms (maxAbsX <= 1.38), got $maxAbsX", maxAbsX <= 1.38f)
+            assertTrue("Breast upper start must sit cleanly below collarbone (maxBaseY <= 4.55), got $maxBaseY", maxBaseY <= 4.55f)
+            assertTrue("Breast base patch must remain forward-facing everywhere (minBaseNz > 0.25), got $minBaseNz", minBaseNz > 0.25f)
             assertTrue("Breast base patch across armpit/ribcage band must sit cleanly on anterior/antero-lateral chest wall (minAxillaNz > 0.25), got $minAxillaNz", minAxillaNz > 0.25f)
         }
+        // Verify clear sternal gap & torso-matched wetness/AO even at maximum "Full" (breastSize = 1.0)
+        scene.update(VulvaDeformationState(breastSize = 1.0f), includeLithotomyBody = true)
+        val fullData = scene.blossomBreastsMesh.vertexData
+        var minFullAbsX = Float.POSITIVE_INFINITY
+        var maxCollarWetnessDiff = 0f
+        var maxLowerAoDiff = 0f
+        for (i in 0 until breastsCache.left.count) {
+            val b = i * stride
+            val ax = abs(fullData[b])
+            if (ax < minFullAbsX) minFullAbsX = ax
+            if (breastsCache.left.edgeR[i] >= 0.88f) {
+                val wDiff = abs(fullData[b + 7] - 0.055f)
+                if (wDiff > maxCollarWetnessDiff) maxCollarWetnessDiff = wDiff
+            }
+            if (breastsCache.left.localEy[i] < -0.58f) {
+                val aoDiff = abs(fullData[b + 8] - breastsCache.left.baseAo[i])
+                if (aoDiff > maxLowerAoDiff) maxLowerAoDiff = aoDiff
+            }
+        }
+        assertTrue("Clean midline valley must persist even at Full breastSize=1.0 (minFullAbsX >= 0.05), got $minFullAbsX", minFullAbsX >= 0.05f)
+        assertTrue("Breast boundary wetness must match torso skin 0.055 (< 1e-3), got $maxCollarWetnessDiff", maxCollarWetnessDiff < 1e-3f)
+        assertTrue("No dark smeared under-breast AO band (< 1e-3 diff from baseAo), got $maxLowerAoDiff", maxLowerAoDiff < 1e-3f)
+        scene.update(VulvaDeformationState(), includeLithotomyBody = true)
 
         // 2. Hollow neck collar fix: bottom rim of blossomHeadMesh (row 0) sits strictly INSIDE the solid SDF neck cylinder!
         val headCols = 120
@@ -683,6 +714,98 @@ class BlossomGeometryUnitTest {
             if (d > maxGluteResetErr) maxGluteResetErr = d
         }
         assertTrue("Releasing glute elasticity must restore exact leg-spread geometry (< 1e-4), got $maxGluteResetErr", maxGluteResetErr < 1e-4f)
+    }
+
+    @Test
+    fun blossomPhysiologyBreathingBlinkAndVulvaPolishInvariantsHold() {
+        // 1. Periodic breathing cadence & amplitude: calm baseline (~14 bpm) subtly quickens & deepens with touch
+        val calmHz = VulvaGlTextureView.breathFrequencyHz(0f)
+        val breastHz = VulvaGlTextureView.breathFrequencyHz(0.55f)
+        val clitoralHz = VulvaGlTextureView.breathFrequencyHz(1.0f)
+        assertTrue("Calm breathing should be near ~14 breaths/min (0.20..0.28 Hz), got $calmHz", calmHz in 0.20f..0.28f)
+        assertTrue("Touch stimulus must smoothly increase breathing frequency ($calmHz < $breastHz < $clitoralHz)", calmHz < breastHz && breastHz < clitoralHz)
+        assertTrue("Elevated breathing should stay gentle & natural (<= 0.42 Hz), got $clitoralHz", clitoralHz <= 0.42f)
+
+        var maxCalmChest = 0f
+        var maxCalmAbdomen = 0f
+        var maxTouchChest = 0f
+        var maxTouchAbdomen = 0f
+        var phaseDiffSum = 0f
+        for (k in 0 until 64) {
+            val phase = k / 64f
+            val (calmChest, calmAbdomen) = VulvaGlTextureView.evaluateBreathingDisplacement(phase, 0f)
+            val (touchChest, touchAbdomen) = VulvaGlTextureView.evaluateBreathingDisplacement(phase, 1f)
+            assertTrue("Breathing displacement must remain non-negative and bounded", calmChest in 0f..0.09f && calmAbdomen in 0f..0.11f)
+            assertTrue("Touch breathing displacement must remain gentle and bounded", touchChest in 0f..0.12f && touchAbdomen in 0f..0.14f)
+            if (calmChest > maxCalmChest) maxCalmChest = calmChest
+            if (calmAbdomen > maxCalmAbdomen) maxCalmAbdomen = calmAbdomen
+            if (touchChest > maxTouchChest) maxTouchChest = touchChest
+            if (touchAbdomen > maxTouchAbdomen) maxTouchAbdomen = touchAbdomen
+            phaseDiffSum += abs(calmChest - calmAbdomen)
+        }
+        assertTrue("Calm breathing must produce subtle visible chest & abdomen rise (> 0.02)", maxCalmChest > 0.02f && maxCalmAbdomen > 0.025f)
+        assertTrue("Touch should subtly deepen breathing amplitude ($maxTouchChest > $maxCalmChest, $maxTouchAbdomen > $maxCalmAbdomen)", maxTouchChest > maxCalmChest && maxTouchAbdomen > maxCalmAbdomen)
+        assertTrue("Abdomen and chest waveforms should carry natural phase offset", phaseDiffSum > 0.10f)
+
+        // 2. Touch-responsive blinking cadence: calm rest -> breast/vulva -> clitoris fastest
+        val calmBlink = computeBlinkIntervalRangeMs(0f)
+        val breastBlink = computeBlinkIntervalRangeMs(0.55f)
+        val clitoralBlink = computeBlinkIntervalRangeMs(1.0f)
+        assertTrue("Resting blink interval should be relaxed (first >= 3000ms), got $calmBlink", calmBlink.first >= 3000L)
+        assertTrue("Breast/vulva touch should shorten blink interval vs calm ($breastBlink vs $calmBlink)", breastBlink.first < calmBlink.first && breastBlink.last < calmBlink.last)
+        assertTrue("Clitoral touch should shorten blink interval further ($clitoralBlink vs $breastBlink)", clitoralBlink.first < breastBlink.first && clitoralBlink.last < breastBlink.last)
+        assertTrue("Clitoral blink interval must stay natural (>= 900ms), got $clitoralBlink", clitoralBlink.first >= 900L)
+
+        // 3. Subtle vulva polish: organic L/R labia minora asymmetry, preserved resting peek & softened vignette perimeter
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        scene.update(VulvaDeformationState(), includeLithotomyBody = false)
+        assertValidMesh(scene.pelvisMesh)
+        assertValidMesh(scene.labiaHoodArchMesh)
+
+        // Vignette outer rim must not have a harsh dark halo ring (AO stays softly feathered > 0.62)
+        val pelvData = scene.pelvisMesh.vertexData
+        var minPerimeterAo = 1f
+        for (i in 0 until scene.pelvisMesh.vertexCount) {
+            val x = pelvData[i * stride]
+            val y = pelvData[i * stride + 1]
+            val ao = pelvData[i * stride + 8]
+            val r = sqrt((x / 1.40f).let { it * it } + ((y + 0.06f) / 1.80f).let { it * it })
+            if (r >= 0.92f && ao < minPerimeterAo) minPerimeterAo = ao
+        }
+        assertTrue("Vignette perimeter AO should avoid dark halo ring (>= 0.60), got $minPerimeterAo", minPerimeterAo >= 0.60f)
+
+        // Labia minora left vs right sides must exhibit subtle organic asymmetry (non-mirror-identical)
+        val archData = scene.labiaHoodArchMesh.vertexData
+        var leftLabiaMaxZ = Float.NEGATIVE_INFINITY
+        var rightLabiaMaxZ = Float.NEGATIVE_INFINITY
+        var leftLabiaMinY = Float.POSITIVE_INFINITY
+        var rightLabiaMinY = Float.POSITIVE_INFINITY
+        for (i in 0 until scene.labiaHoodArchMesh.vertexCount) {
+            val x = archData[i * stride]
+            val y = archData[i * stride + 1]
+            val z = archData[i * stride + 2]
+            if (y in -0.58f..0.12f) {
+                if (x < -0.02f) {
+                    if (z > leftLabiaMaxZ) leftLabiaMaxZ = z
+                    if (y < leftLabiaMinY) leftLabiaMinY = y
+                } else if (x > 0.02f) {
+                    if (z > rightLabiaMaxZ) rightLabiaMaxZ = z
+                    if (y < rightLabiaMinY) rightLabiaMinY = y
+                }
+            }
+        }
+        val zAsym = abs(leftLabiaMaxZ - rightLabiaMaxZ)
+        val yAsym = abs(leftLabiaMinY - rightLabiaMinY)
+        assertTrue(
+            "Labia minora should have subtle organic L/R asymmetry (zAsym=$zAsym or yAsym=$yAsym > 0.004) without exaggeration (< 0.12)",
+            (zAsym > 0.004f || yAsym > 0.004f) && zAsym < 0.12f && yAsym < 0.12f
+        )
+
+        // 4. Reverted v6.3 breasts remain valid and cleanly outward-wound
+        scene.update(VulvaDeformationState(breastSize = 0.50f), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomBreastsMesh)
+        assertOutwardWindingMatchesNormals("blossomBreastsMesh(medium)", scene.blossomBreastsMesh)
     }
 
     /**

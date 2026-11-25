@@ -21,22 +21,22 @@ import kotlin.math.sqrt
  */
 internal object BlossomUpperBodyBuilder {
 
-    // Classical adult female head (1.08x scale -> balanced oval proportion) resting elevated on ergonomic pillow
-    const val HEAD_CENTER_Y = 6.38f
-    val HEAD_CENTER_Z: Float = BlossomBodyBuilder.mattressSurfaceZ(HEAD_CENTER_Y) + 1.24f
-    private const val HEAD_SCALE = 1.08f
+    // Classical adult female head (1.14x scale -> naturally balanced shoulder-to-head oval proportion) resting elevated on ergonomic pillow
+    const val HEAD_CENTER_Y = 6.42f
+    val HEAD_CENTER_Z: Float = BlossomBodyBuilder.mattressSurfaceZ(HEAD_CENTER_Y) + 1.25f
+    private const val HEAD_SCALE = 1.14f
     private const val HEAD_PITCH_RAD = 0.09f
     private val COS_PITCH = cos(HEAD_PITCH_RAD)
     private val SIN_PITCH = sin(HEAD_PITCH_RAD)
 
-    // C1-smooth asymmetric anatomical chest patch integrated across sternum-to-anterior-axillary ribcage
-    // Slightly wider lateral/inferior envelope accommodates full supine drape at breastSize=1.0 without collar clipping
-    const val BREAST_CENTER_AX = 0.64f
-    const val BREAST_CENTER_Y = 3.92f
-    const val BREAST_FOOTPRINT_R = 0.96f
-    private const val BREAST_MEDIAL_R = 0.632f
-    private const val BREAST_LATERAL_R = 0.94f
-    private const val BREAST_VERTICAL_R = 1.04f
+    // Natural closer-set chest patch with soft cleavage valley (|x| >= 0.065),
+    // staying strictly inside the ribcage away from upper arms (|x| <= 1.35), and starting cleanly below the collarbone (y <= 4.53)
+    const val BREAST_CENTER_AX = 0.59f
+    const val BREAST_CENTER_Y = 3.68f
+    const val BREAST_FOOTPRINT_R = 0.76f
+    private const val BREAST_MEDIAL_R = 0.525f
+    private const val BREAST_LATERAL_R = 0.76f
+    private const val BREAST_VERTICAL_R = 0.85f
     const val BREAST_COLS = 64
     const val BREAST_ROWS = 60
 
@@ -79,13 +79,13 @@ internal object BlossomUpperBodyBuilder {
 
     internal val BLOSSOM_FINGER_SPECS: List<BlossomFingerSpec> by lazy {
         val zPalm = BlossomBodyBuilder.mattressSurfaceZ(0.00f) + 0.185f
-        // Harmonious adult feminine hand proportions: true opposable thumb + realistically proportioned longer fingers across full palm width
+        // Proportionate adult feminine hands relative to forearms with soft, relaxed natural finger posture (zero claw arch!)
         listOf(
-            BlossomFingerSpec(rootAx = 2.185f, rootY = 0.14f, rootZ = zPalm - 0.014f, length = 0.540f, rLat = 0.072f, rZ = 0.062f, yawOut = -0.46f, archLift = 0.018f, tipCurlDown = 0.018f, isThumb = true),
-            BlossomFingerSpec(rootAx = 2.235f, rootY = -0.40f, rootZ = zPalm + 0.008f, length = 0.555f, rLat = 0.069f, rZ = 0.060f, yawOut = -0.025f, archLift = 0.032f, tipCurlDown = 0.038f),
-            BlossomFingerSpec(rootAx = 2.362f, rootY = -0.435f, rootZ = zPalm + 0.012f, length = 0.620f, rLat = 0.071f, rZ = 0.062f, yawOut = 0.005f, archLift = 0.035f, tipCurlDown = 0.042f),
-            BlossomFingerSpec(rootAx = 2.488f, rootY = -0.405f, rootZ = zPalm + 0.008f, length = 0.550f, rLat = 0.067f, rZ = 0.058f, yawOut = 0.030f, archLift = 0.030f, tipCurlDown = 0.038f),
-            BlossomFingerSpec(rootAx = 2.602f, rootY = -0.355f, rootZ = zPalm + 0.002f, length = 0.440f, rLat = 0.060f, rZ = 0.052f, yawOut = 0.062f, archLift = 0.024f, tipCurlDown = 0.032f)
+            BlossomFingerSpec(rootAx = 2.165f, rootY = 0.11f, rootZ = zPalm - 0.012f, length = 0.595f, rLat = 0.077f, rZ = 0.066f, yawOut = -0.42f, archLift = 0.008f, tipCurlDown = 0.009f, isThumb = true),
+            BlossomFingerSpec(rootAx = 2.230f, rootY = -0.460f, rootZ = zPalm + 0.007f, length = 0.620f, rLat = 0.074f, rZ = 0.064f, yawOut = -0.020f, archLift = 0.011f, tipCurlDown = 0.012f),
+            BlossomFingerSpec(rootAx = 2.370f, rootY = -0.498f, rootZ = zPalm + 0.010f, length = 0.690f, rLat = 0.076f, rZ = 0.066f, yawOut = 0.005f, archLift = 0.013f, tipCurlDown = 0.015f),
+            BlossomFingerSpec(rootAx = 2.510f, rootY = -0.465f, rootZ = zPalm + 0.007f, length = 0.615f, rLat = 0.072f, rZ = 0.062f, yawOut = 0.028f, archLift = 0.011f, tipCurlDown = 0.014f),
+            BlossomFingerSpec(rootAx = 2.638f, rootY = -0.410f, rootZ = zPalm + 0.002f, length = 0.495f, rLat = 0.065f, rZ = 0.056f, yawOut = 0.055f, archLift = 0.009f, tipCurlDown = 0.012f)
         )
     }
 
@@ -292,14 +292,14 @@ internal object BlossomUpperBodyBuilder {
                 val capScale = cos(capAngle).coerceAtLeast(0.03f)
                 val wristTuck = 0.96f + 0.04f * smoothStep(0.0f, 0.16f, s)
 
-                val cxAx = 2.340f + 0.080f * smoothStep(0.0f, 0.85f, s)
-                val cyBase = 0.48f - s * 0.960f
+                val cxAx = 2.345f + 0.095f * smoothStep(0.0f, 0.85f, s)
+                val cyBase = 0.48f - s * 1.035f
                 val czBase = zWrist * (1f - s) + (zPalm + 0.004f) * s
 
-                // Proportionate adult feminine palm silhouette (balanced oval wrist -> organic arched metacarpal fan -> smoothly rounded knuckle web)
-                val wristPinch = -0.008f * exp(-((s - 0.12f) / 0.10f).let { it * it })
-                val halfW = (0.226f + wristPinch + 0.062f * smoothStep(0.14f, 0.68f, s) - 0.024f * smoothStep(0.70f, 0.94f, s)) * wristTuck * capScale
-                val halfZ = (0.146f - 0.020f * smoothStep(0.06f, 0.44f, s) - 0.012f * smoothStep(0.56f, 0.88f, s)) * wristTuck * capScale
+                // Proportionate adult feminine palm silhouette (wrist locked flush to forearm -> fuller natural metacarpal fan -> rounded knuckle web)
+                val wristPinch = -0.006f * exp(-((s - 0.12f) / 0.10f).let { it * it })
+                val halfW = (0.226f + wristPinch + 0.088f * smoothStep(0.12f, 0.66f, s) - 0.024f * smoothStep(0.72f, 0.94f, s)) * wristTuck * capScale
+                val halfZ = (0.148f - 0.018f * smoothStep(0.06f, 0.44f, s) - 0.012f * smoothStep(0.56f, 0.88f, s)) * wristTuck * capScale
                 val flatMix = smoothStep(0.16f, 0.46f, s)
 
                 for (c in 0 until cols) {
@@ -734,10 +734,9 @@ internal object BlossomUpperBodyBuilder {
                         val knuckleAo = 1f - (0.10f * pipCrease + 0.08f * dipCrease) * smoothStep(0.22f, 0.90f, sinPhi) -
                             (0.08f * pipCrease + 0.06f * dipCrease) * smoothStep(0.22f, 0.85f, -sinPhi)
                         val ao = (interdigitalAo * padAo * knuckleAo).coerceIn(0.40f, 1f)
-                        val wetness = (0.052f + nailMask * 0.22f).coerceIn(0f, 0.45f)
+                        val wetness = 0.052f
                         val pigment = (0.05f + smoothStep(0.68f, 0.96f, s) * 0.085f +
-                            (pipCrease * 0.06f + dipCrease * 0.045f) * smoothStep(0.2f, 0.9f, sinPhi) +
-                            nailMask * 0.14f).coerceIn(0f, 1f)
+                            (pipCrease * 0.06f + dipCrease * 0.045f) * smoothStep(0.2f, 0.9f, sinPhi)).coerceIn(0f, 1f)
 
                         val vIdx = (baseVert + r * cols + c) * stride
                         data[vIdx] = px; data[vIdx + 1] = py; data[vIdx + 2] = pz
@@ -816,7 +815,7 @@ internal object BlossomUpperBodyBuilder {
                         val shaftFlat = 1f - 0.045f * sectionW * (1f - smoothStep(0.72f, 0.86f, s))
 
                         val edgeBevel = sin(v * PI.toFloat()).coerceAtLeast(0.15f) * cos(uCentered * PI.toFloat() * 0.46f)
-                        val plateLift = 0.0044f * (0.45f + 0.55f * edgeBevel)
+                        val plateLift = 0.0058f * (0.48f + 0.52f * edgeBevel)
                         val localLat = spec.rLat * radScale * shapedCos
                         val localDors = spec.rZ * radScale * sinPhi * shaftFlat
 
@@ -979,7 +978,7 @@ internal object BlossomUpperBodyBuilder {
                         }
 
                         val edgeBevel = sin(v * PI.toFloat()).coerceAtLeast(0.18f) * cos(uCentered * PI.toFloat() * 0.45f)
-                        val plateLift = 0.0044f * (0.48f + 0.52f * edgeBevel)
+                        val plateLift = 0.0056f * (0.50f + 0.50f * edgeBevel)
                         val localLat = spec.rLat * radScale * shapedCosT * halluxBroad
                         val localZ = spec.rZ * radScale * sinP * dorsalToeFlat
 
@@ -1131,165 +1130,159 @@ internal object BlossomUpperBodyBuilder {
             BlossomBodyBuilder.mattressSurfaceZ(BREAST_CENTER_Y - epsY)) / (2f * epsY)
         val supineCos = (1f / sqrt(1f + reclineSlope * reclineSlope)).coerceIn(0f, 1f)
         // Larger breasts have greater soft-tissue mobility under supine gravity; arm-spread naturally yields tissue inward
-        val gravityMobility = supineCos * (0.48f + 0.52f * sizeNorm) * (1f - 0.65f * armSqueeze)
+        val gravityMobility = supineCos * (0.22f + 0.78f * sizeNorm) * (1f - 0.65f * armSqueeze)
 
-        // Volume-preserving supine redistribution with gentle upper-range coherence so breastSize=1.0 stays organic & ridge-free
-        val supineFlattenZ = 1f - 0.24f * gravityMobility
+        // True 3D volume-proportional scaling: X/Y base footprint AND Z projection grow together harmoniously!
+        val supineFlattenZ = 1f - 0.11f * gravityMobility
         val supineBroaden = 1f / sqrt(supineFlattenZ)
-        val sizeCurve = sizeNorm - 0.018f * largeT * largeT
-        val footprintScaleX = (0.83f + sizeCurve * 0.21f) * (0.94f + 0.06f * supineBroaden)
-        val footprintScaleY = (0.81f + sizeCurve * 0.19f) * (0.95f + 0.05f * supineBroaden)
-        val moundZScale = (0.76f + sizeCurve * 0.71f) * supineFlattenZ
+        val sizeBloom = ((sizeNorm - 0.45f) / 0.55f).coerceIn(0f, 1f)
+        val footprintScaleX = (0.72f + sizeNorm * 0.48f) * (0.95f + 0.05f * supineBroaden)
+        val footprintScaleY = (0.72f + sizeNorm * 0.48f) * (0.95f + 0.05f * supineBroaden)
+        val moundZScale = (0.60f + sizeNorm * 0.52f) * supineFlattenZ
+
+        // Size-adaptive chest-wall collar envelope: Petite stays compact while Full fills out broadly across X/Y
+        // while ALWAYS converging smoothly to exact zero by edgeR = 0.90 (zero seam cliff!)
+        val collarStart = 0.34f + 0.30f * sizeNorm
+        val collarEnd = 0.78f + 0.12f * sizeNorm
+        val collarPow = (1.50f - 0.36f * sizeNorm).toDouble()
 
         fun updateSide(sideCache: BreastSideCache, shiftX: Float, shiftY: Float, sideOffsetVerts: Int) {
             val side = sideCache.side
-            val sx = shiftX.coerceIn(-1f, 1f) * (0.20f + 0.09f * sizeNorm)
-            val sy = shiftY.coerceIn(-1f, 1f) * (0.18f + 0.08f * sizeNorm)
-            val medialGather = (-sx * side).coerceIn(-0.16f, 0.24f)
-            val liftFullness = (sy * 0.18f).coerceIn(-0.04f, 0.05f)
+            val sx = shiftX.coerceIn(-1f, 1f) * (0.20f + 0.08f * sizeNorm)
+            val sy = shiftY.coerceIn(-1f, 1f) * (0.18f + 0.07f * sizeNorm)
+            val medialGather = (-sx * side).coerceIn(-0.14f, 0.22f)
+            val liftFullness = (sy * 0.15f).coerceIn(-0.04f, 0.05f)
             val manualMedialT = (medialGather / 0.22f).coerceIn(0f, 1f)
 
-            // Supine gravity shifts apex gently laterally toward axillae; arm-spread or inward touch gathers it medially
-            val apexEx = side * (0.070f + 0.125f * gravityMobility - 0.080f * armSqueeze - 0.072f * manualMedialT)
-            val apexEy = -(0.110f + 0.050f * sizeNorm)
-            // Evaluate world-scale metric at the shifted apex so areola stays naturally circular even at breastSize = 1.0
+            // Natural closer-set sit with realistic lateral supine settle as size increases
+            val apexEx = side * (-0.018f + 0.148f * gravityMobility - 0.062f * armSqueeze - 0.065f * manualMedialT)
+            val apexEy = -(0.090f + 0.055f * sizeNorm)
             val latBlendApex = smoothStep(-0.35f, 0.35f, apexEx * side)
             val rxWorldAtApex = BREAST_MEDIAL_R * (1f - latBlendApex) + BREAST_LATERAL_R * latBlendApex
-            val areolaLatComp = 1f / (1f + 0.12f * gravityMobility * largeT)
+            val areolaLatComp = 1f / (1f + 0.06f * gravityMobility * largeT)
 
             for (i in 0 until sideCache.count) {
                 val ex = sideCache.localEx[i]
                 val ey = sideCache.localEy[i]
                 val edgeR = sideCache.edgeR[i]
 
-                // Wider, softer C1 outer fade collar so even maximum-size supine breasts blend seamlessly with zero rim wall
-                val collarFade = 1f - smoothStep(0.68f, 0.985f, edgeR)
-                val softShiftW = (1f - smoothStep(0.0f, 0.94f, edgeR)).let { t -> t * t * (3f - 2f * t) }
+                // Size-adaptive C2 zero-slope chest-wall collar falloff reaching exact zero cleanly before edgeR = 0.90
+                val collarLinear = 1f - smoothStep(collarStart, collarEnd, edgeR)
+                val collarFade = Math.pow(collarLinear.toDouble(), collarPow).toFloat()
+                val softShiftW = (1f - smoothStep(0.0f, 0.86f, edgeR)).let { t -> t * t * (3f - 2f * t) }
 
-                // C1-smooth asymmetric radial spread calibrated inside the ribcage-safe patch envelope
                 val dxRel = ex - apexEx
                 val dyRel = ey - apexEy
-                val dxLatBlend = smoothStep(-0.34f, 0.34f, dxRel * side)
-                val dyUpBlend = smoothStep(-0.34f, 0.34f, dyRel)
-                val medialSpread = (0.84f + 0.17f * sizeNorm + 0.16f * (armSqueeze + manualMedialT)) * footprintScaleX
-                val lateralSpread = (0.86f + 0.16f * gravityMobility - 0.12f * armSqueeze) * footprintScaleX
-                val upperSpread = (1.06f + 0.09f * sizeNorm) * footprintScaleY
-                val lowerSpread = (0.74f + 0.12f * sizeNorm) * footprintScaleY
+                val dxLatBlend = smoothStep(-0.36f, 0.36f, dxRel * side)
+                val dyUpBlend = smoothStep(-0.38f, 0.38f, dyRel)
+                val medialSpread = (0.86f + 0.14f * sizeNorm + 0.14f * (armSqueeze + manualMedialT)) * footprintScaleX
+                val lateralSpread = (0.88f + 0.14f * gravityMobility - 0.09f * armSqueeze) * footprintScaleX
+                val upperSpread = (1.08f + 0.10f * sizeNorm) * footprintScaleY
+                val lowerSpread = (0.84f + 0.14f * sizeNorm) * footprintScaleY
 
                 val spreadX = medialSpread * (1f - dxLatBlend) + lateralSpread * dxLatBlend
                 val spreadY = lowerSpread * (1f - dyUpBlend) + upperSpread * dyUpBlend
                 val dxA = dxRel / spreadX
                 val dyA = dyRel / spreadY
                 val rawRDome = sqrt(dxA * dxA + dyA * dyA)
-                // Gentle boundary-aware skirt roll-off guarantees zero-slope root integration across 0.0..1.0
-                val rDome = (rawRDome + 0.16f * smoothStep(0.70f, 0.96f, edgeR)).coerceIn(0f, 1f)
+                val rDome = (rawRDome + 0.09f * smoothStep(0.66f, 0.90f, edgeR)).coerceIn(0f, 1f)
 
-                // C1 zero-slope-at-root Wendland/soft-tissue profile (eliminates spherical saucer/patch rim!)
+                // Soft natural teardrop with rounder side profile (broad blunt crown, long seamless upper pectoral slope,
+                // and gentle cushioned lower roll without a hard front edge or pointed cone!)
                 val u2 = (1f - rDome * rDome).coerceAtLeast(0f)
-                val rootSkirt = u2 * u2
-                val softCrown = u2 * sqrt(u2)
-                val bellyMix = (0.18f + 0.28f * sizeNorm * smoothStep(0.32f, -0.45f, dyRel)).coerceIn(0.14f, 0.48f)
-                val roundedDome = (rootSkirt * (1f - bellyMix) + softCrown * bellyMix) * collarFade
+                val upperRamp = Math.pow(u2.toDouble(), 1.14).toFloat() * smoothStep(1.0f, 0.16f, rDome)
+                val lowerFull = Math.pow(u2.toDouble(), 0.85).toFloat() * smoothStep(1.0f, 0.44f, rDome)
+                val lowerHalfT = smoothStep(0.36f, -0.32f, dyRel)
+                val roundedDome = (upperRamp * (1f - lowerHalfT) + lowerFull * lowerHalfT) * collarFade
 
-                // Supine upper-pole flattening (natural gentle infraclavicular slope) + broad lateral axillary gravity fullness
-                val upperSlopeSoften = 1f - (0.34f + 0.16f * gravityMobility) * smoothStep(0.02f, 0.84f, ey)
-                val lowerPlush = 1f + (0.12f + 0.15f * sizeNorm) * smoothStep(-0.08f, -0.62f, ey) * (1f - smoothStep(0.66f, 0.95f, edgeR))
-                val lateralGravityFull = 1f + (0.14f + 0.22f * gravityMobility) * smoothStep(-0.06f, 0.64f, ex * side) * (1f - smoothStep(0.68f, 0.95f, edgeR))
-                val medialCompressFull = 1f + (0.20f * (armSqueeze + manualMedialT)) *
-                    smoothStep(0.14f, -0.62f, ex * side) * (1f - smoothStep(0.72f, 0.96f, edgeR))
+                // Subtle anatomical upper-outer pectoral bridge (Tail of Spence) so breasts grow organically from the chest wall
+                val tailOfSpence = 0.036f * moundZScale *
+                    smoothStep(-0.08f, 0.48f, ex * side) * smoothStep(0.02f, 0.52f, ey) *
+                    (1f - smoothStep(0.60f, 0.87f, edgeR)) * collarFade
 
-                // Organic Tail of Spence blending upper-outer quadrant smoothly into the anterior axillary fold
-                val tailDx = (ex * side - 0.50f) / 0.36f
-                val tailDy = (ey - 0.34f) / 0.34f
-                val tailOfSpence = (0.044f + 0.022f * gravityMobility) * moundZScale * exp(-(tailDx * tailDx + tailDy * tailDy)) * collarFade
-                val moundHeight = (0.452f * moundZScale + medialGather * 0.16f + liftFullness) *
-                    roundedDome * upperSlopeSoften * lowerPlush * lateralGravityFull * medialCompressFull + tailOfSpence
+                // Gentle upper-pole softness, fuller lower teardrop weight at large sizes, and realistic supine lateral fullness
+                val upperSlopeSoften = 1f - (0.12f + 0.05f * gravityMobility) * smoothStep(0.12f, 0.84f, ey)
+                val medialSupineSlope = 1f - (0.16f * gravityMobility * (1f - armSqueeze)) * smoothStep(0.10f, -0.55f, ex * side)
+                val lowerPlush = 1f + (0.06f + 0.10f * sizeNorm) * smoothStep(-0.04f, -0.56f, ey) * (1f - smoothStep(0.56f, 0.86f, edgeR))
+                val lateralGravityFull = 1f + (0.06f + 0.30f * gravityMobility) * smoothStep(-0.02f, 0.48f, ex * side) * (1f - smoothStep(0.56f, 0.87f, edgeR))
+                val medialCompressFull = 1f + (0.16f * (armSqueeze + manualMedialT)) *
+                    smoothStep(0.14f, -0.58f, ex * side) * (1f - smoothStep(0.58f, 0.86f, edgeR))
 
-                // High-resolution anatomical Areola (~4.0 cm organic slightly oval disc + Montgomery tubercles)
-                // Local apex-centered metric keeps areola cleanly circular under large-size supine lateral redistribution
+                val moundHeight = (0.515f * moundZScale + medialGather * 0.16f + liftFullness) *
+                    roundedDome * upperSlopeSoften * medialSupineSlope * lowerPlush * lateralGravityFull * medialCompressFull + tailOfSpence
+
+                // Richer, more visible natural v6.3 areola & sculpted 3D nipple papilla on soft teardrop breasts (apex-centered circular coords)
                 val relWx = dxRel * rxWorldAtApex * areolaLatComp
                 val relWy = dyRel * BREAST_VERTICAL_R
                 val distApexWorld = sqrt(relWx * relWx + relWy * relWy)
                 val ang = kotlin.math.atan2(relWy, relWx)
-                val organicEdge = 1f + 0.044f * sin(ang * 3f + side * 1.1f) +
-                    0.026f * cos(ang * 5f - side * 0.7f) +
-                    0.018f * sin(ang * 7f + side * 2.1f)
-                val distOrg = sqrt((relWx * 0.96f).let { it * it } + (relWy * 1.03f).let { it * it }) / organicEdge
+                val organicEdge = 1f + 0.032f * sin(ang * 3f + side * 1.1f) +
+                    0.018f * cos(ang * 5f - side * 0.7f)
+                val distOrg = sqrt((relWx * 0.98f).let { it * it } + (relWy * 1.02f).let { it * it }) / organicEdge
 
-                val areolaScale = 0.88f + 0.22f * sizeNorm
-                val areolaMask = (1f - smoothStep(0.135f * areolaScale, 0.232f * areolaScale, distOrg)) * collarFade
-                val areolaCushion = 0.010f * (1f - smoothStep(0.035f, 0.215f * areolaScale, distOrg)) * collarFade
-                val montRing = smoothBell(distApexWorld, 0.092f * areolaScale, 0.182f * areolaScale, 0.028f)
-                val montA = (sin(ang * 7f + side * 0.8f) * cos(ang * 3f - distApexWorld * 44f)).coerceAtLeast(0f)
-                val montB = (cos(ang * 11f - side * 1.4f) * sin(distApexWorld * 58f + 0.6f)).coerceAtLeast(0f)
-                val montBump = 0.0040f * montRing * (montA * montA * 0.65f + montB * montB * 0.35f) * collarFade
+                val areolaScale = 0.86f + 0.24f * sizeNorm
+                val areolaMask = (1f - smoothStep(0.094f * areolaScale, 0.164f * areolaScale, distOrg)) * collarFade
+                val areolaCushion = 0.0052f * (1f - smoothStep(0.024f, 0.152f * areolaScale, distOrg)) * collarFade
+                val basalGroove = -0.0032f * exp(-((distApexWorld - 0.044f) / 0.013f).let { it * it }) * collarFade
 
-                val basalGroove = -0.0070f * exp(-((distApexWorld - 0.075f) / 0.017f).let { it * it }) * collarFade
-
-                val nipR = 0.066f
+                val nipR = 0.038f
                 val nipT = (distApexWorld / nipR).coerceIn(0f, 1.4f)
                 val nippleDome = if (nipT < 1f) {
-                    val flatCrown = Math.pow((1.0 - Math.pow(nipT.toDouble(), 3.4)), 0.48).toFloat()
-                    val tipOrganic = 1f + 0.032f * sin(ang * 4f + 0.5f) * smoothStep(0.12f, 0.65f, nipT) +
-                        0.020f * cos(ang * 6f - 0.9f) * smoothStep(0.18f, 0.72f, nipT)
-                    0.058f * flatCrown * tipOrganic * collarFade
+                    val roundedCrown = Math.pow((1.0 - Math.pow(nipT.toDouble(), 2.4)), 0.56).toFloat()
+                    0.035f * roundedCrown * collarFade
                 } else {
                     0f
                 }
-                val nippleMask = (1f - smoothStep(0.054f, 0.078f, distApexWorld)) * collarFade
+                val nippleMask = (1f - smoothStep(0.026f, 0.044f, distApexWorld)) * collarFade
 
-                // Feather only the extreme perimeter lip so the soft-tissue skirt merges invisibly with chest skin
-                val collarBias = -0.0022f * smoothStep(0.95f, 1.0f, edgeR)
-                val totalLift = moundHeight + areolaCushion + montBump + basalGroove + nippleDome + collarBias
+                // Smooth micro-lift through the transition band then invisible tuck beneath the ribcage at edgeR 0.89..1.00
+                val collarBias = 0.0028f * smoothStep(0.58f, 0.78f, edgeR) * (1f - smoothStep(0.85f, 0.91f, edgeR)) -
+                    0.0068f * smoothStep(0.89f, 1.0f, edgeR)
+                val totalLift = moundHeight + areolaCushion + basalGroove + nippleDome + collarBias
 
-                // Natural supine outward tissue redistribution toward axillae; arm-spread cleanly tucks tissue inward to prevent clipping!
+                // True tangential X/Y radial tissue expansion as size grows toward Full (wider cleavage/ribcage + fuller lower drape)
+                val bloomMask = roundedDome * (1f - smoothStep(0.62f, 0.88f, edgeR))
+                val bloomX = ex * 0.155f * sizeBloom * bloomMask
+                val bloomY = (ey * 0.115f - 0.072f * smoothStep(0.22f, -0.68f, ey)) * sizeBloom * bloomMask
+
+                // Moderate natural lateral settle & gentle lower drape (keeps breasts seated comfortably closer while redistributing fuller sizes outward)
                 val lateralTuckMask = smoothStep(-0.15f, 0.75f, ex * side) * roundedDome
-                val supineLateralShiftX = side * (0.055f + 0.130f * gravityMobility) * roundedDome * (0.48f + 0.52f * smoothStep(-0.25f, 0.55f, ex * side))
-                val armTuckX = -side * (0.205f * armSqueeze * lateralTuckMask + 0.090f * armSqueeze * roundedDome)
-                val lowerGravityY = -(0.065f + 0.016f * largeT) * (0.4f + 0.6f * sizeNorm) * roundedDome * (0.45f + 0.55f * smoothStep(0.15f, -0.75f, ey))
+                val supineLateralShiftX = side * (0.006f + 0.076f * gravityMobility) * roundedDome * (0.45f + 0.55f * smoothStep(-0.25f, 0.55f, ex * side))
+                val armTuckX = -side * (0.145f * armSqueeze * lateralTuckMask + 0.065f * armSqueeze * roundedDome)
+                val lowerGravityY = -(0.018f + 0.026f * sizeNorm) * roundedDome * (0.45f + 0.55f * smoothStep(0.15f, -0.70f, ey))
 
-                // Follow local curved ribcage normal blended gently outward under supine gravity
-                val latDrapeNorm = (0.12f + 0.16f * gravityMobility - 0.14f * armSqueeze - 0.10f * manualMedialT).coerceIn(-0.04f, 0.30f)
-                val nxB = sideCache.baseNx[i] * 0.36f + side * latDrapeNorm * softShiftW
-                val nyB = sideCache.baseNy[i] * 0.24f - (0.032f + 0.028f * sizeNorm) * softShiftW
-                val nzB = (sideCache.baseNz[i] * 0.56f + 0.44f).coerceAtLeast(0.50f)
+                // Follow local curved ribcage normal cleanly with subtle natural outward orientation
+                val latDrapeNorm = (0.035f + 0.085f * gravityMobility - 0.075f * armSqueeze - 0.07f * manualMedialT).coerceIn(-0.04f, 0.15f)
+                val nxB = sideCache.baseNx[i] * 0.42f + side * latDrapeNorm * softShiftW
+                val nyB = sideCache.baseNy[i] * 0.28f - (0.006f + 0.014f * sizeNorm) * softShiftW
+                val nzB = (sideCache.baseNz[i] * 0.58f + 0.42f).coerceAtLeast(0.52f)
                 val dirLen = sqrt(nxB * nxB + nyB * nyB + nzB * nzB).coerceAtLeast(1e-5f)
 
-                var px = sideCache.baseX[i] + (nxB / dirLen) * totalLift + sx * softShiftW + supineLateralShiftX + armTuckX
-                val py = sideCache.baseY[i] + (nyB / dirLen) * totalLift + sy * softShiftW + lowerGravityY
+                var px = sideCache.baseX[i] + (nxB / dirLen) * totalLift + sx * softShiftW + bloomX + supineLateralShiftX + armTuckX
+                val py = sideCache.baseY[i] + (nyB / dirLen) * totalLift + sy * softShiftW + bloomY + lowerGravityY
                 var pz = sideCache.baseZ[i] + (nzB / dirLen) * totalLift +
-                    (medialGather * 0.07f - abs(sx) * 0.03f) * softShiftW +
-                    0.052f * armSqueeze * lateralTuckMask
+                    (medialGather * 0.06f - abs(sx) * 0.025f) * softShiftW +
+                    0.038f * armSqueeze * lateralTuckMask
 
-                // Smooth C1 midline sternum soft-tissue contact guard (prevents intersection if pushed inward by arms or drag!)
+                // Preserve clean non-crossing midline valley even when fuller or pushed inward manually / by arm-spread
                 val signedPx = px * side
-                val minMidGap = 0.005f
-                var cleavageContact = 0f
-                if (signedPx < 0.14f && roundedDome > 0.01f) {
-                    val pressDepth = (0.14f - signedPx).coerceAtLeast(0f)
-                    cleavageContact = smoothStep(0.14f, 0.008f, signedPx) * roundedDome
-                    if (signedPx < 0.06f) {
-                        val delta = signedPx - minMidGap
-                        val clamped = minMidGap + 0.5f * (delta + sqrt(delta * delta + 0.0012f))
-                        px = side * clamped
-                    }
-                    pz += 0.032f * cleavageContact * (0.5f + 0.5f * largeT) + pressDepth * 0.07f * roundedDome
+                val minMidGap = 0.052f
+                if (signedPx < 0.115f && roundedDome > 0.01f) {
+                    val delta = signedPx - minMidGap
+                    val clamped = minMidGap + 0.5f * (delta + sqrt(delta * delta + 0.0014f))
+                    px = side * clamped
+                    val pressDepth = (0.115f - signedPx).coerceAtLeast(0f)
+                    pz += pressDepth * 0.048f * roundedDome
                 }
 
-                // Soft organic inframammary crease AO + subtle sternal & lateral axillary shadow (NO harsh circular patch ring!)
-                val infraCurveY = (-0.64f - 0.12f * sizeNorm) + 0.16f * ex * ex
-                val infraMask = exp(-(((ey - infraCurveY) / 0.19f).let { it * it } + (ex / 0.78f).let { it * it })) * collarFade
-                val sternalSoftAo = exp(-(((ex * side + 0.72f) / 0.30f).let { it * it } + ((ey + 0.06f) / 0.54f).let { it * it })) * collarFade
-                val cleavageCreaseAo = cleavageContact * (0.16f + 0.14f * largeT) * smoothStep(0.10f, 0.006f, abs(px))
-                val nippleRimAo = exp(-((distApexWorld - 0.074f) / 0.018f).let { it * it }) * 0.19f * collarFade
-                val areolaRimSoft = (0.042f * montRing * (1f - montA * 0.7f)) * collarFade
-                val ao = (sideCache.baseAo[i] * (1f - (0.11f + 0.12f * sizeNorm) * infraMask -
-                    (0.03f + 0.04f * largeT) * sternalSoftAo - cleavageCreaseAo - nippleRimAo - areolaRimSoft)).coerceIn(0.24f, 1f)
+                // Pure torso-matched AO across the breast & chest-wall boundary (zero dark smeared under-breast band!)
+                val nippleRimAo = exp(-((distApexWorld - 0.042f) / 0.014f).let { it * it }) * 0.13f * collarFade
+                val ao = (sideCache.baseAo[i] * (1f - nippleRimAo)).coerceIn(0.24f, 1f)
 
-                // Realistic velvety-matte warm dusty-rose / cocoa-rose areola & deeper papilla (ZERO plastic gloss!)
-                val mucosa = (areolaMask * 0.44f + nippleMask * 0.22f).coerceIn(0f, 0.68f)
-                val wetness = (0.040f - areolaMask * 0.008f + nippleMask * 0.020f).coerceIn(0.024f, 0.075f)
-                val pigment = (sideCache.basePigment[i] + areolaMask * 0.56f + nippleMask * 0.28f).coerceIn(0f, 0.96f)
+                // Exact torso skin wetness match (0.055f) at outer collar, darker matte natural v6.3 areola & nipple finish
+                val mucosa = (areolaMask * 0.14f + nippleMask * 0.10f).coerceIn(0f, 0.26f)
+                val wetness = (0.055f - areolaMask * 0.028f - nippleMask * 0.006f).coerceIn(0.020f, 0.055f)
+                val pigment = (sideCache.basePigment[i] + areolaMask * 0.56f + nippleMask * 0.34f).coerceIn(0f, 0.94f)
 
                 val idx = i * stride
                 sideBuf[idx] = px; sideBuf[idx + 1] = py; sideBuf[idx + 2] = pz
@@ -1301,10 +1294,10 @@ internal object BlossomUpperBodyBuilder {
 
             computeNormals(sideBuf, sideCache.cols, sideCache.rows, false, false)
 
-            // Exact outer-collar normal fusion into unified SDF ribcage -> ZERO seam!
+            // Smooth normal convergence into the analytical ribcage normals BEFORE the outer skirt tucks in (0.60..0.88)
             for (i in 0 until sideCache.count) {
                 val edgeR = sideCache.edgeR[i]
-                val nBlend = smoothStep(0.72f, 0.95f, edgeR)
+                val nBlend = smoothStep(0.60f, 0.88f, edgeR)
                 val idx = i * stride
                 if (nBlend > 0.001f) {
                     val mx = sideBuf[idx + 3] * (1f - nBlend) + sideCache.baseNx[i] * nBlend
@@ -1384,23 +1377,23 @@ internal object BlossomUpperBodyBuilder {
                     val foreheadPlane = -0.016f * smoothStep(0.28f, 0.72f, ly) * cosP * cosP
                     // Structural maxillary/dental arch supporting upper & lower lips smoothly
                     val maxillaArchZ = 0.036f * exp(-((axPre / 0.32f).let { it * it } + ((ly + 0.40f) / 0.21f).let { it * it })) * antPlaneW
-                    // Orthognathic mandibular/chin forward carrier (eliminates weak/recessed chin in 3/4 and profile views!)
-                    val chinOrthoZ = 0.168f * smoothStep(-0.24f, -0.68f, rawY) *
-                        (1f - smoothStep(-0.73f, -0.84f, rawY)) * exp(-((axPre / 0.40f).let { it * it })) * antPlaneW
+                    // Orthognathic mandibular/chin forward carrier with smooth submental underside fade (zero cliff from low views!)
+                    val chinOrthoZ = 0.156f * smoothStep(-0.24f, -0.66f, rawY) *
+                        (1f - smoothStep(-0.68f, -0.87f, rawY)) * exp(-((axPre / 0.42f).let { it * it })) * antPlaneW
                     // Sculpted mandibular body border curving smoothly from gonial corner forward into the chin
-                    val jawLineY = -0.69f + 0.25f * smoothStep(0.08f, 0.46f, axPre)
-                    val mandibleBody = 0.024f * exp(-((ly - jawLineY) / 0.068f).let { it * it }) *
+                    val jawLineY = -0.68f + 0.24f * smoothStep(0.08f, 0.46f, axPre)
+                    val mandibleBody = 0.022f * exp(-((ly - jawLineY) / 0.075f).let { it * it }) *
                         smoothStep(0.56f, 0.14f, axPre) * smoothStep(-0.08f, 0.44f, cosP)
                     // 3D malar/zygomatic arch support wrapping naturally onto the oblique 3/4 cheek plane (preserves soft cheek fullness!)
                     val malarArch = 0.026f * exp(-(((axPre - 0.375f) / 0.165f).let { it * it } + ((ly + 0.055f) / 0.140f).let { it * it })) *
                         smoothStep(0.04f, 0.50f, cosP)
-                    lx += (if (sinP >= 0f) 1f else -1f) * (mandibleBody * 0.42f + malarArch * 0.65f)
-                    lz += foreheadPlane + maxillaArchZ + chinOrthoZ + mandibleBody * 0.85f + malarArch * 0.78f
+                    lx += (if (sinP >= 0f) 1f else -1f) * (mandibleBody * 0.40f + malarArch * 0.65f)
+                    lz += foreheadPlane + maxillaArchZ + chinOrthoZ + mandibleBody * 0.80f + malarArch * 0.78f
                 }
 
-                // Submental underside mask starting cleanly below chin pogonion; exact world-space SDF neck socket
-                // is applied right after headLocalToWorld so ZERO hollow skin collar ever protrudes ahead of the neck!
-                val submentalT = smoothStep(0.855f * PI.toFloat(), 0.975f * PI.toFloat(), theta)
+                // Smooth C2 submental floor mask easing gradually beneath chin pogonion into the neck cylinder (zero pinched jaw shelf!)
+                val submentalLin = smoothStep(0.835f * PI.toFloat(), 0.985f * PI.toFloat(), theta)
+                val submentalT = submentalLin * submentalLin
 
                 val ax = abs(lx)
                 var dzFace = 0f
@@ -1549,15 +1542,15 @@ internal object BlossomUpperBodyBuilder {
                 lz += dzFace
 
                 val worldPt = headLocalToWorld(lx, ly, lz)
-                // Tuck submental underside directly into Blossom's exact world-space SDF neck axis (tapering strictly
-                // inside the 0.335 SDF neck cylinder so there is ZERO hollow floating collar from any viewing angle!)
+                // Smoothly curve submental underside directly into Blossom's exact world-space SDF neck cylinder
+                // (continuous gentle chin-to-neck sweep from low/extreme angles while tucking row 0 strictly inside neck R < 0.24!)
                 if (submentalT > 0.001f) {
                     val zNeckBase = BlossomBodyBuilder.mattressSurfaceZ(4.86f) + 0.58f
                     val zNeckTop = BlossomBodyBuilder.mattressSurfaceZ(5.78f) + 0.80f
-                    val targetWy = 5.62f - 0.24f * smoothStep(0.88f * PI.toFloat(), 0.996f * PI.toFloat(), theta)
+                    val targetWy = 5.66f - 0.26f * smoothStep(0.86f * PI.toFloat(), 0.996f * PI.toFloat(), theta)
                     val neckT = ((targetWy - 4.84f) / 0.94f).coerceIn(0f, 1f)
                     val neckAxisZ = zNeckBase + (zNeckTop - zNeckBase) * neckT + 0.018f * sin(neckT * PI.toFloat())
-                    val targetRad = 0.295f - 0.110f * smoothStep(0.89f * PI.toFloat(), 0.996f * PI.toFloat(), theta)
+                    val targetRad = 0.305f - 0.120f * smoothStep(0.875f * PI.toFloat(), 0.996f * PI.toFloat(), theta)
                     val targetWx = sinP * targetRad
                     val targetWz = neckAxisZ + cosP * targetRad
                     worldPt[0] = worldPt[0] * (1f - submentalT) + targetWx * submentalT
@@ -1579,13 +1572,13 @@ internal object BlossomUpperBodyBuilder {
         // Bottom-to-top v parameterization means tx x bx = (+X) x (+Y) = +Z OUTWARD!
         computeNormals(data, cols, rows, false, true)
 
-        // Blend ONLY the tucked hidden neck-socket collar (theta > 0.92*PI) into SDF neck normals so jawline stays crisp & smooth!
+        // Smoothly blend the tucked submental/neck-socket collar into SDF neck normals so low-angle shading stays clean & crease-free
         for (r in 0 until rows) {
             val vRaw = 1f - (r.toFloat() / (rows - 1))
             val vCentered = vRaw * 2f - 1f
             val vCluster = 0.66f * vCentered + 0.34f * vCentered * vCentered * vCentered
             val theta = ((vCluster + 1f) * 0.5f).coerceIn(0.004f, 0.996f) * PI.toFloat()
-            val nBlend = smoothStep(0.92f * PI.toFloat(), 0.99f * PI.toFloat(), theta)
+            val nBlend = smoothStep(0.89f * PI.toFloat(), 0.985f * PI.toFloat(), theta)
             if (nBlend > 0.001f) {
                 for (c in 0 until cols) {
                     val idx = (r * cols + c) * stride
@@ -1690,8 +1683,8 @@ internal object BlossomUpperBodyBuilder {
     // 5. SOFT CHIN-TO-COLLARBONE LAYERED DARK-BROWN / SOFT-BLACK BOB (CAP + 34 LOCKS)
     // -------------------------------------------------------------------------
     fun buildBlossomHairMesh(): DynamicGlMesh {
-        val capCols = 60
-        val capRows = 42
+        val capCols = 72
+        val capRows = 48
         val capVerts = capCols * capRows
         val capIndices = (capCols - 1) * (capRows - 1) * 6
 
@@ -1705,49 +1698,49 @@ internal object BlossomUpperBodyBuilder {
         )
 
         val locks = listOf(
-            // 4 Sleek close-hugging curtain-bang ribbons framing forehead & temples smoothly without obscuring brows
-            LockSpec(floatArrayOf(0.24f, 0.85f, 0.38f), floatArrayOf(-0.14f, 0.68f, 0.63f), floatArrayOf(-0.58f, 0.24f, 0.44f), 0.185f, 0.025f, 0.18f),
-            LockSpec(floatArrayOf(0.18f, 0.87f, 0.40f), floatArrayOf(-0.28f, 0.60f, 0.58f), floatArrayOf(-0.67f, 0.06f, 0.32f), 0.170f, 0.024f, 0.14f),
-            LockSpec(floatArrayOf(0.28f, 0.84f, 0.37f), floatArrayOf(0.54f, 0.54f, 0.47f), floatArrayOf(0.68f, 0.06f, 0.31f), 0.165f, 0.024f, 0.16f),
-            LockSpec(floatArrayOf(0.12f, 0.92f, 0.32f), floatArrayOf(-0.34f, 0.72f, 0.52f), floatArrayOf(-0.70f, 0.20f, 0.30f), 0.170f, 0.026f, 0.22f),
+            // 4 Sleek close-hugging feathered temple & curtain-bang strands curving cleanly along hairline (zero slab edges!)
+            LockSpec(floatArrayOf(0.22f, 0.86f, 0.36f), floatArrayOf(-0.16f, 0.69f, 0.60f), floatArrayOf(-0.62f, 0.22f, 0.38f), 0.145f, 0.018f, 0.18f),
+            LockSpec(floatArrayOf(0.16f, 0.88f, 0.38f), floatArrayOf(-0.32f, 0.58f, 0.54f), floatArrayOf(-0.68f, 0.02f, 0.28f), 0.140f, 0.018f, 0.14f),
+            LockSpec(floatArrayOf(0.26f, 0.85f, 0.36f), floatArrayOf(0.52f, 0.54f, 0.45f), floatArrayOf(0.68f, 0.02f, 0.28f), 0.140f, 0.018f, 0.16f),
+            LockSpec(floatArrayOf(0.10f, 0.92f, 0.30f), floatArrayOf(-0.36f, 0.72f, 0.49f), floatArrayOf(-0.70f, 0.14f, 0.26f), 0.142f, 0.019f, 0.22f),
 
-            // 10 Longer face-framing layered bob side locks hugging cheekbones & defined jawline cleanly (left & right)
-            LockSpec(floatArrayOf(-0.34f, 0.78f, 0.32f), floatArrayOf(-0.74f, 0.16f, 0.31f), floatArrayOf(-0.70f, -0.80f, 0.17f), 0.140f, 0.038f, 0.16f),
-            LockSpec(floatArrayOf(-0.42f, 0.72f, 0.16f), floatArrayOf(-0.79f, 0.02f, 0.15f), floatArrayOf(-0.77f, -1.00f, 0.00f), 0.150f, 0.040f, 0.12f),
-            LockSpec(floatArrayOf(-0.38f, 0.76f, 0.24f), floatArrayOf(-0.76f, 0.06f, 0.23f), floatArrayOf(-0.67f, -0.88f, 0.11f), 0.128f, 0.035f, 0.22f),
-            LockSpec(floatArrayOf(-0.26f, 0.86f, 0.12f), floatArrayOf(-0.76f, 0.24f, 0.16f), floatArrayOf(-0.80f, -0.76f, -0.09f), 0.145f, 0.040f, 0.18f),
-            LockSpec(floatArrayOf(-0.46f, 0.60f, 0.02f), floatArrayOf(-0.80f, -0.14f, -0.04f), floatArrayOf(-0.82f, -1.12f, -0.22f), 0.155f, 0.042f, 0.10f),
+            // 10 Smooth face-framing layered bob side locks hugging temples, cheekbones & jawline along a cohesive curved cut line
+            LockSpec(floatArrayOf(-0.34f, 0.78f, 0.30f), floatArrayOf(-0.72f, 0.16f, 0.29f), floatArrayOf(-0.70f, -0.92f, 0.15f), 0.132f, 0.028f, 0.16f),
+            LockSpec(floatArrayOf(-0.42f, 0.72f, 0.16f), floatArrayOf(-0.77f, 0.02f, 0.14f), floatArrayOf(-0.76f, -1.04f, -0.02f), 0.142f, 0.030f, 0.12f),
+            LockSpec(floatArrayOf(-0.38f, 0.76f, 0.23f), floatArrayOf(-0.74f, 0.08f, 0.22f), floatArrayOf(-0.68f, -0.96f, 0.09f), 0.124f, 0.026f, 0.22f),
+            LockSpec(floatArrayOf(-0.26f, 0.86f, 0.12f), floatArrayOf(-0.75f, 0.22f, 0.15f), floatArrayOf(-0.79f, -1.08f, -0.10f), 0.138f, 0.030f, 0.18f),
+            LockSpec(floatArrayOf(-0.46f, 0.60f, 0.02f), floatArrayOf(-0.79f, -0.14f, -0.04f), floatArrayOf(-0.82f, -1.18f, -0.22f), 0.146f, 0.032f, 0.10f),
 
-            LockSpec(floatArrayOf(0.32f, 0.78f, 0.34f), floatArrayOf(0.74f, 0.18f, 0.33f), floatArrayOf(0.70f, -0.80f, 0.17f), 0.140f, 0.038f, 0.16f),
-            LockSpec(floatArrayOf(0.40f, 0.72f, 0.18f), floatArrayOf(0.79f, 0.02f, 0.15f), floatArrayOf(0.77f, -1.00f, 0.00f), 0.150f, 0.040f, 0.12f),
-            LockSpec(floatArrayOf(0.28f, 0.76f, 0.40f), floatArrayOf(0.68f, 0.24f, 0.42f), floatArrayOf(0.67f, -0.74f, 0.23f), 0.128f, 0.035f, 0.22f),
-            LockSpec(floatArrayOf(0.26f, 0.88f, 0.16f), floatArrayOf(0.76f, 0.24f, 0.18f), floatArrayOf(0.80f, -0.76f, -0.07f), 0.145f, 0.040f, 0.18f),
-            LockSpec(floatArrayOf(0.46f, 0.60f, 0.02f), floatArrayOf(0.80f, -0.14f, -0.04f), floatArrayOf(0.82f, -1.12f, -0.22f), 0.155f, 0.042f, 0.10f),
+            LockSpec(floatArrayOf(0.32f, 0.78f, 0.30f), floatArrayOf(0.72f, 0.16f, 0.29f), floatArrayOf(0.70f, -0.92f, 0.15f), 0.132f, 0.028f, 0.16f),
+            LockSpec(floatArrayOf(0.40f, 0.72f, 0.16f), floatArrayOf(0.77f, 0.02f, 0.14f), floatArrayOf(0.76f, -1.04f, -0.02f), 0.142f, 0.030f, 0.12f),
+            LockSpec(floatArrayOf(0.30f, 0.76f, 0.34f), floatArrayOf(0.68f, 0.20f, 0.34f), floatArrayOf(0.68f, -0.94f, 0.18f), 0.124f, 0.026f, 0.22f),
+            LockSpec(floatArrayOf(0.26f, 0.86f, 0.14f), floatArrayOf(0.75f, 0.22f, 0.16f), floatArrayOf(0.79f, -1.08f, -0.08f), 0.138f, 0.030f, 0.18f),
+            LockSpec(floatArrayOf(0.46f, 0.60f, 0.02f), floatArrayOf(0.79f, -0.14f, -0.04f), floatArrayOf(0.82f, -1.18f, -0.22f), 0.146f, 0.032f, 0.10f),
 
-            // 10 Lush pillow-draping & shoulder-grazing lower bob locks fanning softly beside her neck & upper shoulders
-            LockSpec(floatArrayOf(-0.56f, 0.26f, -0.18f), floatArrayOf(-0.90f, -0.46f, -0.26f), floatArrayOf(-1.02f, -1.36f, -0.34f), 0.175f, 0.046f, 0.14f),
-            LockSpec(floatArrayOf(-0.48f, 0.14f, -0.34f), floatArrayOf(-0.84f, -0.62f, -0.42f), floatArrayOf(-1.08f, -1.52f, -0.46f), 0.185f, 0.046f, 0.08f),
-            LockSpec(floatArrayOf(-0.36f, 0.02f, -0.48f), floatArrayOf(-0.72f, -0.74f, -0.54f), floatArrayOf(-0.96f, -1.62f, -0.54f), 0.180f, 0.044f, 0.12f),
-            LockSpec(floatArrayOf(-0.54f, 0.42f, -0.08f), floatArrayOf(-0.88f, -0.26f, -0.18f), floatArrayOf(-0.98f, -1.24f, -0.28f), 0.165f, 0.044f, 0.20f),
-            LockSpec(floatArrayOf(-0.62f, 0.04f, 0.04f), floatArrayOf(-0.80f, -0.58f, 0.04f), floatArrayOf(-0.84f, -1.32f, -0.12f), 0.145f, 0.040f, 0.18f),
+            // 10 Cleanly aligned nape & pillow-draping lower bob locks tapering along an even, softly layered chin-to-nape arc
+            LockSpec(floatArrayOf(-0.56f, 0.26f, -0.18f), floatArrayOf(-0.88f, -0.44f, -0.26f), floatArrayOf(-0.96f, -1.28f, -0.34f), 0.162f, 0.034f, 0.14f),
+            LockSpec(floatArrayOf(-0.48f, 0.14f, -0.34f), floatArrayOf(-0.82f, -0.58f, -0.42f), floatArrayOf(-0.98f, -1.34f, -0.46f), 0.168f, 0.034f, 0.08f),
+            LockSpec(floatArrayOf(-0.34f, 0.02f, -0.48f), floatArrayOf(-0.68f, -0.68f, -0.54f), floatArrayOf(-0.86f, -1.38f, -0.54f), 0.164f, 0.032f, 0.12f),
+            LockSpec(floatArrayOf(-0.54f, 0.42f, -0.08f), floatArrayOf(-0.86f, -0.26f, -0.18f), floatArrayOf(-0.92f, -1.24f, -0.28f), 0.154f, 0.032f, 0.20f),
+            LockSpec(floatArrayOf(-0.62f, 0.04f, 0.04f), floatArrayOf(-0.79f, -0.56f, 0.02f), floatArrayOf(-0.82f, -1.22f, -0.14f), 0.138f, 0.030f, 0.18f),
 
-            LockSpec(floatArrayOf(0.56f, 0.26f, -0.18f), floatArrayOf(0.90f, -0.46f, -0.26f), floatArrayOf(1.02f, -1.36f, -0.34f), 0.175f, 0.046f, 0.14f),
-            LockSpec(floatArrayOf(0.48f, 0.14f, -0.34f), floatArrayOf(0.84f, -0.62f, -0.42f), floatArrayOf(1.08f, -1.52f, -0.46f), 0.185f, 0.046f, 0.08f),
-            LockSpec(floatArrayOf(0.36f, 0.02f, -0.48f), floatArrayOf(0.72f, -0.74f, -0.54f), floatArrayOf(0.96f, -1.62f, -0.54f), 0.180f, 0.044f, 0.12f),
-            LockSpec(floatArrayOf(0.54f, 0.42f, -0.08f), floatArrayOf(0.88f, -0.26f, -0.18f), floatArrayOf(0.98f, -1.24f, -0.28f), 0.165f, 0.044f, 0.20f),
-            LockSpec(floatArrayOf(0.62f, 0.04f, 0.04f), floatArrayOf(0.80f, -0.58f, 0.04f), floatArrayOf(0.84f, -1.32f, -0.12f), 0.145f, 0.040f, 0.18f),
+            LockSpec(floatArrayOf(0.56f, 0.26f, -0.18f), floatArrayOf(0.88f, -0.44f, -0.26f), floatArrayOf(0.96f, -1.28f, -0.34f), 0.162f, 0.034f, 0.14f),
+            LockSpec(floatArrayOf(0.48f, 0.14f, -0.34f), floatArrayOf(0.82f, -0.58f, -0.42f), floatArrayOf(0.98f, -1.34f, -0.46f), 0.168f, 0.034f, 0.08f),
+            LockSpec(floatArrayOf(0.34f, 0.02f, -0.48f), floatArrayOf(0.68f, -0.68f, -0.54f), floatArrayOf(0.86f, -1.38f, -0.54f), 0.164f, 0.032f, 0.12f),
+            LockSpec(floatArrayOf(0.54f, 0.42f, -0.08f), floatArrayOf(0.86f, -0.26f, -0.18f), floatArrayOf(0.92f, -1.24f, -0.28f), 0.154f, 0.032f, 0.20f),
+            LockSpec(floatArrayOf(0.62f, 0.04f, 0.04f), floatArrayOf(0.79f, -0.56f, 0.02f), floatArrayOf(0.82f, -1.22f, -0.14f), 0.138f, 0.030f, 0.18f),
 
             // 6 Layered dimensional crown volume locks (gives natural glossy silhouette from every angle)
-            LockSpec(floatArrayOf(0.14f, 1.01f, 0.08f), floatArrayOf(-0.22f, 0.92f, 0.40f), floatArrayOf(-0.58f, 0.54f, 0.44f), 0.165f, 0.050f, 0.24f),
-            LockSpec(floatArrayOf(0.24f, 0.99f, 0.02f), floatArrayOf(0.56f, 0.78f, 0.24f), floatArrayOf(0.78f, 0.30f, 0.20f), 0.160f, 0.048f, 0.18f),
-            LockSpec(floatArrayOf(-0.08f, 1.01f, -0.08f), floatArrayOf(-0.52f, 0.76f, 0.16f), floatArrayOf(-0.78f, 0.20f, 0.10f), 0.160f, 0.048f, 0.14f),
-            LockSpec(floatArrayOf(0.06f, 1.04f, -0.14f), floatArrayOf(-0.36f, 0.90f, -0.04f), floatArrayOf(-0.72f, 0.40f, -0.12f), 0.165f, 0.048f, 0.20f),
-            LockSpec(floatArrayOf(0.12f, 1.02f, -0.16f), floatArrayOf(0.48f, 0.84f, -0.04f), floatArrayOf(0.76f, 0.34f, -0.12f), 0.160f, 0.046f, 0.16f),
-            LockSpec(floatArrayOf(-0.02f, 1.04f, 0.14f), floatArrayOf(0.28f, 0.94f, 0.38f), floatArrayOf(0.62f, 0.56f, 0.42f), 0.155f, 0.046f, 0.22f)
+            LockSpec(floatArrayOf(0.14f, 1.01f, 0.08f), floatArrayOf(-0.22f, 0.92f, 0.40f), floatArrayOf(-0.58f, 0.54f, 0.44f), 0.155f, 0.038f, 0.24f),
+            LockSpec(floatArrayOf(0.24f, 0.99f, 0.02f), floatArrayOf(0.56f, 0.78f, 0.24f), floatArrayOf(0.76f, 0.30f, 0.20f), 0.152f, 0.036f, 0.18f),
+            LockSpec(floatArrayOf(-0.08f, 1.01f, -0.08f), floatArrayOf(-0.52f, 0.76f, 0.16f), floatArrayOf(-0.76f, 0.20f, 0.10f), 0.152f, 0.036f, 0.14f),
+            LockSpec(floatArrayOf(0.06f, 1.04f, -0.14f), floatArrayOf(-0.36f, 0.90f, -0.04f), floatArrayOf(-0.72f, 0.40f, -0.12f), 0.155f, 0.036f, 0.20f),
+            LockSpec(floatArrayOf(0.12f, 1.02f, -0.16f), floatArrayOf(0.48f, 0.84f, -0.04f), floatArrayOf(0.75f, 0.34f, -0.12f), 0.152f, 0.035f, 0.16f),
+            LockSpec(floatArrayOf(-0.02f, 1.04f, 0.14f), floatArrayOf(0.28f, 0.94f, 0.38f), floatArrayOf(0.60f, 0.56f, 0.40f), 0.148f, 0.035f, 0.22f)
         )
 
-        val lockCols = 9
-        val lockRows = 15
+        val lockCols = 11
+        val lockRows = 18
         val vertsPerLock = lockCols * lockRows
         val trisPerLock = (lockCols - 1) * (lockRows - 1) * 6
 
@@ -1770,7 +1763,7 @@ internal object BlossomUpperBodyBuilder {
             }
         }
 
-        // Part A: Layered Bob Crown & Pillow-Draping Nape Volume Cap
+        // Part A: Layered Bob Crown & Clean Smooth-Hem Nape Volume Cap
         for (r in 0 until capRows) {
             val v = r.toFloat() / (capRows - 1)
             for (c in 0 until capCols) {
@@ -1779,37 +1772,38 @@ internal object BlossomUpperBodyBuilder {
                 val sinP = sin(phi)
                 val cosP = cos(phi)
 
-                val frontMask = smoothStep(-0.15f, 0.65f, cosP)
-                val backMask = smoothStep(0.10f, 0.80f, -cosP)
-                val sideMask = smoothStep(0.32f, 0.88f, abs(sinP))
-                // Soft asymmetrical side-part curve across forehead so front bangs look feathered instead of straight-across blunt
-                val partLift = 0.075f * smoothStep(-0.18f, 0.58f, sinP) * frontMask
-                val maxTheta = 0.62f * PI.toFloat() -
-                    (0.285f + partLift) * PI.toFloat() * frontMask +
-                    0.24f * PI.toFloat() * backMask +
-                    0.16f * PI.toFloat() * sideMask * (1f - frontMask)
+                // Continuous cosine-blended temple-to-nape hemline (eliminates jagged temple step & ragged nape cut!)
+                val frontMask = smoothStep(-0.25f, 0.72f, cosP)
+                val backMask = smoothStep(0.05f, 0.85f, -cosP)
+                val sideMask = smoothStep(0.28f, 0.88f, abs(sinP))
+                val partLift = 0.052f * smoothStep(-0.20f, 0.56f, sinP) * frontMask
+                val maxTheta = 0.63f * PI.toFloat() -
+                    (0.265f + partLift) * PI.toFloat() * frontMask +
+                    0.22f * PI.toFloat() * backMask +
+                    0.12f * PI.toFloat() * sideMask * (1f - frontMask)
 
-                val theta = (0.008f + v * (maxTheta / PI.toFloat())).coerceAtMost(0.86f) * PI.toFloat()
+                val theta = (0.008f + v * (maxTheta / PI.toFloat())).coerceAtMost(0.85f) * PI.toFloat()
                 val sinT = sin(theta)
                 val cosT = cos(theta)
 
-                val crownVolume = 0.120f * (1f - smoothStep(0.28f, 0.92f, v)) + 0.048f * smoothStep(0.20f, 0.85f, v)
-                val edgeTaper = 1f - 0.72f * smoothStep(0.80f, 1.0f, v)
-                // Fine silky subtle hair-cap contour (eliminates chunky clay ridges along the forehead hairline!)
-                val strandRib = 0.0060f * sin(phi * 20f + v * 4.5f) + 0.0035f * cos(phi * 36f - v * 6.2f)
-                val loft = (crownVolume * edgeTaper + strandRib * (1f - smoothStep(0.84f, 1.0f, v))).coerceAtLeast(0.012f)
+                val crownVolume = 0.112f * (1f - smoothStep(0.26f, 0.90f, v)) + 0.042f * smoothStep(0.18f, 0.82f, v)
+                // Clean flush scalp/nape edge taper so temple & nape rims never stick out like a thick helmet edge
+                val edgeTaper = 1f - 0.94f * smoothStep(0.74f, 1.0f, v)
+                val strandRib = 0.0042f * sin(phi * 20f + v * 4.0f) + 0.0024f * cos(phi * 36f - v * 5.6f)
+                val loft = (crownVolume * edgeTaper + strandRib * (1f - smoothStep(0.78f, 1.0f, v))).coerceAtLeast(0.003f)
 
-                val craniumBack = 1f + 0.10f * backMask * sinT
-                // Gentle lateral fan-out at lower nape so longer back hair rests softly onto the headrest pillow
-                val pillowFan = 0.18f * smoothStep(0.58f, 0.96f, v) * (backMask * 0.7f + sideMask * 0.5f) * (1f - frontMask)
-                val lx = sinT * sinP * (0.69f + loft + pillowFan)
-                val ly = cosT * (0.98f + loft * 0.92f) - 0.24f * smoothStep(0.65f, 1.0f, v) * (backMask + sideMask * 0.6f) * (1f - frontMask)
-                val lz = sinT * cosP * (0.785f * craniumBack + loft)
+                val craniumBack = 1f + 0.09f * backMask * sinT
+                // Smooth even rear nape drape onto headrest pillow (no jagged side/back jump)
+                val napeBlend = smoothStep(-0.12f, 0.65f, -cosP)
+                val pillowFan = 0.135f * smoothStep(0.60f, 0.96f, v) * napeBlend * (1f - 0.25f * smoothStep(0.88f, 1.0f, v))
+                val lx = sinT * sinP * (0.682f + loft + pillowFan)
+                val ly = cosT * (0.975f + loft * 0.90f) - 0.18f * smoothStep(0.66f, 1.0f, v) * napeBlend
+                val lz = sinT * cosP * (0.778f * craniumBack + loft)
 
                 val wPt = headLocalToWorld(lx, ly, lz)
-                val lnx = sinT * sinP + 0.055f * cos(phi * 20f + v * 4.5f) * cosP
+                val lnx = sinT * sinP + 0.042f * cos(phi * 20f + v * 4.0f) * cosP
                 val lny = cosT
-                val lnz = sinT * cosP - 0.055f * cos(phi * 20f + v * 4.5f) * sinP
+                val lnz = sinT * cosP - 0.042f * cos(phi * 20f + v * 4.0f) * sinP
                 val wN = headNormalToWorld(lnx, lny, lnz)
 
                 val strandShade = 0.5f + 0.5f * sin(phi * 26f + v * 5.0f)
@@ -1825,7 +1819,7 @@ internal object BlossomUpperBodyBuilder {
             }
         }
 
-        // Part B: 24 Layered Curved Pixie Hair Locks (verified outward CCW winding!)
+        // Part B: 30 Sleek Feathered Layered Bob Hair Locks (verified outward CCW winding!)
         for ((lockIdx, lock) in locks.withIndex()) {
             val baseVert = capVerts + lockIdx * vertsPerLock
             for (r in 0 until lockRows - 1) {
@@ -1866,11 +1860,12 @@ internal object BlossomUpperBodyBuilder {
                 val by = tz * ox - tx * oz
                 val bz = tx * oy - ty * ox
 
-                // Sleek silky overlapping layered bob ribbons (half-thickness eliminates chunky clay-slab edges!)
-                val widthEnv = (0.74f + 0.36f * sin(t * PI.toFloat())).coerceIn(0.28f, 1.12f) *
-                    (1f - 0.60f * smoothStep(0.76f, 1.0f, t))
-                val curW = lock.halfW * 1.10f * widthEnv
-                val curThick = lock.thick * 0.48f * (0.48f + 0.52f * sin(t * PI.toFloat())) * (1f - 0.55f * smoothStep(0.76f, 1.0f, t))
+                // Fine silky feathered width & thickness tapering smoothly to soft points (zero blunt squared slabs!)
+                val rootEnv = 0.62f + 0.38f * smoothStep(0.0f, 0.18f, t)
+                val tipWidthFade = 1f - 0.86f * smoothStep(0.62f, 1.0f, t)
+                val curW = lock.halfW * 1.06f * rootEnv * (0.86f + 0.16f * sin(t * PI.toFloat())) * tipWidthFade
+                val tipThickFade = 1f - 0.85f * smoothStep(0.58f, 1.0f, t)
+                val curThick = lock.thick * 0.40f * rootEnv * (0.45f + 0.55f * sin(t * PI.toFloat())) * tipThickFade
 
                 for (c in 0 until lockCols) {
                     val u = (c.toFloat() / (lockCols - 1)) * 2f - 1f

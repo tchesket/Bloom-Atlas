@@ -300,9 +300,9 @@ internal object BlossomArmIkRig {
         // 2. Cubic Bezier wrist trajectory calibrated for lengthened anatomical feminine arms & hands
         val uArc = smoothStep(0.0f, 0.68f, p)
         val b0 = w0
-        val b1 = Vec3(side * 2.42f, 0.82f, 0.16f)
-        val b2 = Vec3(side * 1.66f, 1.48f, 1.04f)
-        val b3 = Vec3(side * 0.80f, 1.24f, 1.00f)
+        val b1 = Vec3(side * 2.42f, 0.82f, 0.18f)
+        val b2 = Vec3(side * 1.66f, 1.48f, 1.10f)
+        val b3 = Vec3(side * 0.80f, 1.24f, 1.07f)
         val wristArc = cubicBezier(b0, b1, b2, b3, uArc)
 
         // 3. Synchronized lateral spread glide (Phase 3: 0.68 -> 1.00) riding gently up the inguinal contour
@@ -356,7 +356,7 @@ internal object BlossomArmIkRig {
         val labialTarget = Vec3(
             side * (0.28f + lateralGlide),
             -0.06f,
-            0.415f + 0.060f * spreadT
+            0.445f + 0.055f * spreadT
         )
         val orientT = smoothStep(0.12f, 0.64f, p)
         val targetHandY = (labialTarget - wrist).normalized()
@@ -365,7 +365,7 @@ internal object BlossomArmIkRig {
         // while aligning index & middle pads flush onto the outer labia majora and resting the thumb softly on upper groin
         val dorsalHint = lerpVec(
             Vec3(0f, 0f, 1f),
-            Vec3(-side * (0.65f + 0.05f * spreadT), 0.18f, 0.74f).normalized(),
+            Vec3(-side * (0.72f + 0.05f * spreadT), 0.18f, 0.67f).normalized(),
             orientT
         ).normalized()
         val poseHand = buildFrameFromYAndZHint(wrist, poseHandY, dorsalHint)
@@ -414,8 +414,8 @@ internal object BlossomArmIkRig {
             )
             1 -> FingerFlexPose(mcpFlexRad = 0.08f * w, pipFlexRad = 0.18f * w, dipFlexRad = 0.10f * w, splayRad = 0.01f * w)
             2 -> FingerFlexPose(mcpFlexRad = 0.06f * w, pipFlexRad = 0.16f * w, dipFlexRad = 0.10f * w, splayRad = -0.02f * w)
-            3 -> FingerFlexPose(mcpFlexRad = 1.12f * w, pipFlexRad = 1.30f * w, dipFlexRad = 0.34f * w, splayRad = -0.05f * w)
-            else -> FingerFlexPose(mcpFlexRad = 1.18f * w, pipFlexRad = 1.34f * w, dipFlexRad = 0.36f * w, splayRad = -0.07f * w)
+            3 -> FingerFlexPose(mcpFlexRad = 1.18f * w, pipFlexRad = 1.35f * w, dipFlexRad = 0.36f * w, splayRad = -0.05f * w)
+            else -> FingerFlexPose(mcpFlexRad = 1.24f * w, pipFlexRad = 1.38f * w, dipFlexRad = 0.38f * w, splayRad = -0.07f * w)
         }
     }
 
