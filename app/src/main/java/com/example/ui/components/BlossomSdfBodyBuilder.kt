@@ -1522,10 +1522,48 @@ internal object BlossomSdfBodyBuilder {
         BlossomToeSpec(rootAx = 2.114f, rootY = -5.01f, rootZ = -1.052f, length = 0.215f, rLat = 0.040f, rZ = 0.039f, yawOut = 0.045f, archLift = 0.017f)
     )
 
+    internal fun toeTipStartS(spec: BlossomToeSpec, isHallux: Boolean): Float {
+        val totalLen = spec.length + 0.095f
+        // Slightly oblate blunt-hemispherical human toe pad (never pointy!)
+        val tipCapLen = spec.rLat * (if (isHallux) 0.90f else 0.95f)
+        return (1f - tipCapLen / totalLen).coerceIn(0.80f, 0.90f)
+    }
+
+    internal fun toeRowParameterS(r: Int, rows: Int, spec: BlossomToeSpec, isHallux: Boolean): Float {
+        val tipStart = toeTipStartS(spec, isHallux)
+        val shaftLastRow = rows - 6 // 5 smooth hemisphere cap rings across the rounded tip
+        if (r <= shaftLastRow) {
+            return (r.toFloat() / shaftLastRow) * tipStart
+        }
+        val capAnglesDeg = floatArrayOf(20f, 40f, 60f, 78f, 90f)
+        val deg = capAnglesDeg[(r - shaftLastRow - 1).coerceIn(0, capAnglesDeg.lastIndex)]
+        val rad = deg * (PI.toFloat() / 180f)
+        return tipStart + sin(rad) * (1f - tipStart)
+    }
+
+    internal fun toeRadiusProfile(s: Float, spec: BlossomToeSpec, isHallux: Boolean): Pair<Float, Float> {
+        val tipStart = toeTipStartS(spec, isHallux)
+        val tipAngle: Float
+        val tipScale: Float
+        if (s <= tipStart) {
+            tipAngle = 0f
+            tipScale = 1f
+        } else {
+            val uCap = ((s - tipStart) / (1f - tipStart)).coerceIn(0f, 1f)
+            tipAngle = asin(uCap)
+            tipScale = sqrt((1f - uCap * uCap).coerceAtLeast(0f)).coerceAtLeast(0.015f)
+        }
+        val rootFlare = 1f + (if (isHallux) 0.16f else 0.12f) * (1f - smoothStep(0.0f, 0.22f, s))
+        val phalanxNeck = 1f - 0.085f * exp(-((s - 0.34f) / 0.15f).let { it * it })
+        val ipKnuckle = 1f + (if (isHallux) 0.055f else 0.072f) * exp(-((s - 0.50f) / 0.09f).let { it * it })
+        val distalPad = 1f + (if (isHallux) 0.085f else 0.115f) * exp(-((s - 0.76f) / 0.14f).let { it * it })
+        return Pair(rootFlare * phalanxNeck * ipKnuckle * distalPad * tipScale, tipAngle)
+    }
+
     /**
      * Builds all 10 individually sculpted anatomical 3D toes (5 per foot: Hallux through 5th toe)
      * in a single lightweight [DynamicGlMesh], seamlessly rooted along the oblique metatarsal line
-     * with realistic interphalangeal knuckles, plump toe pads, and recessed dorsal nailbeds.
+     * with realistic interphalangeal knuckles, plump rounded toe tips, and recessed dorsal nailbeds.
      */
     fun buildBlossomToesMesh(): DynamicGlMesh {
         val toeSpecs = BLOSSOM_TOE_SPECS
@@ -1575,17 +1613,10 @@ internal object BlossomSdfBodyBuilder {
                 val latY = sin(spec.yawOut)
 
                 for (r in 0 until rows) {
-                    val s = r.toFloat() / (rows - 1)
+                    val s = toeRowParameterS(r, rows, spec, isHallux)
 
-                    // Plump, softly rounded human toe tip dome (starts at s=0.84 -> never pointy!) + sculpted IP knuckle & toe pad
-                    val tipT = smoothStep(0.84f, 1.0f, s)
-                    val tipAngle = tipT * (PI.toFloat() * 0.5f)
-                    val tipScale = cos(tipAngle).coerceAtLeast(0.03f)
-                    val rootFlare = 1f + (if (isHallux) 0.16f else 0.12f) * (1f - smoothStep(0.0f, 0.22f, s))
-                    val phalanxNeck = 1f - 0.085f * exp(-((s - 0.34f) / 0.15f).let { it * it })
-                    val ipKnuckle = 1f + (if (isHallux) 0.055f else 0.072f) * exp(-((s - 0.50f) / 0.09f).let { it * it })
-                    val distalPad = 1f + (if (isHallux) 0.085f else 0.115f) * exp(-((s - 0.76f) / 0.14f).let { it * it })
-                    val radScale = rootFlare * phalanxNeck * ipKnuckle * distalPad * tipScale
+                    // True plump hemispherical rounded toe tip dome + sculpted IP knuckle & toe pad
+                    val (radScale, tipAngle) = toeRadiusProfile(s, spec, isHallux)
 
                     val along = -0.095f + s * (spec.length + 0.095f)
                     // Natural gentle plantar toe arch: lesser toes curve slightly downward at the IP joint onto plump soft toe pads
@@ -1618,7 +1649,7 @@ internal object BlossomSdfBodyBuilder {
                         val knuckleBump = (if (isHallux) 0.0034f else 0.0046f) * ipBand * smoothStep(0.20f, 0.90f, sinP)
 
                         // Anatomical toe cross-section: broader, gently flatter hallux & subtly side-flattened lesser toes (matches toenails!)
-                        val toeSectionW = smoothStep(0.10f, 0.28f, s) * (1f - smoothStep(0.84f, 0.96f, s))
+                        val toeSectionW = smoothStep(0.10f, 0.28f, s) * (1f - smoothStep(0.82f, 0.94f, s))
                         val cSignT = if (cosP >= 0f) 1f else -1f
                         val sqCosT = cSignT * Math.pow(abs(cosP).toDouble().coerceAtLeast(1e-5), 0.90).toFloat()
                         val shapedCosT = cosP * (1f - 0.34f * toeSectionW) + sqCosT * (0.34f * toeSectionW)
@@ -1640,7 +1671,7 @@ internal object BlossomSdfBodyBuilder {
                         val py = cy + latY * localLat
                         val pz = (cz + localZ).coerceAtLeast(floorZ)
 
-                        // Exact analytic outward dome normal (smoothly rotates to pure forward at tip apex — zero pinch!)
+                        // Exact analytic outward hemispherical dome normal (smoothly rotates to pure forward at tip apex — zero pinch!)
                         val radialW = cos(tipAngle)
                         val fwdW = sin(tipAngle)
                         var nx = latX * (cosP * radialW / spec.rLat) + fwdX * (fwdW / spec.rLat)

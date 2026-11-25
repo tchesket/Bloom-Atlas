@@ -226,28 +226,50 @@ internal object BlossomUpperBodyBuilder {
         )
     }
 
-    private fun fingerRadiusProfile(s: Float, isThumb: Boolean = false): Pair<Float, Float> {
-        // Plump, softly rounded human fingertip dome starting only at s=0.89 (never pointy/spiky!)
-        val tipT = smoothStep(0.89f, 1.0f, s)
-        val tipAngle = tipT * (PI.toFloat() * 0.5f)
-        val tipScale = cos(tipAngle).coerceAtLeast(0.03f)
+    private fun fingerTipStartS(isThumb: Boolean): Float = if (isThumb) 0.905f else 0.915f
+
+    internal fun fingerRowParameterS(r: Int, rows: Int, isThumb: Boolean): Float {
+        val tipStart = fingerTipStartS(isThumb)
+        val shaftLastRow = rows - 6 // 5 smooth hemisphere cap rings across the rounded fingertip
+        if (r <= shaftLastRow) {
+            return (r.toFloat() / shaftLastRow) * tipStart
+        }
+        val capAnglesDeg = floatArrayOf(20f, 40f, 60f, 78f, 90f)
+        val deg = capAnglesDeg[(r - shaftLastRow - 1).coerceIn(0, capAnglesDeg.lastIndex)]
+        val rad = deg * (PI.toFloat() / 180f)
+        return tipStart + sin(rad) * (1f - tipStart)
+    }
+
+    internal fun fingerRadiusProfile(s: Float, isThumb: Boolean = false): Pair<Float, Float> {
+        // True plump hemispherical rounded human fingertip dome (never pointy/cone-tipped!)
+        val tipStart = fingerTipStartS(isThumb)
+        val tipAngle: Float
+        val tipScale: Float
+        if (s <= tipStart) {
+            tipAngle = 0f
+            tipScale = 1f
+        } else {
+            val uCap = ((s - tipStart) / (1f - tipStart)).coerceIn(0f, 1f)
+            tipAngle = kotlin.math.asin(uCap)
+            tipScale = sqrt((1f - uCap * uCap).coerceAtLeast(0f)).coerceAtLeast(0.012f)
+        }
 
         val rootFlare = if (isThumb) {
             1f + 0.24f * (1f - smoothStep(0f, 0.30f, s))
         } else {
             1f + 0.16f * (1f - smoothStep(0f, 0.22f, s))
         }
-        val distalTaper = 1f - (if (isThumb) 0.12f else 0.14f) * smoothStep(0.14f, 0.88f, s)
+        val distalTaper = 1f - (if (isThumb) 0.10f else 0.12f) * smoothStep(0.14f, 0.88f, s)
         val jointProfile = if (isThumb) {
             // Single sculpted thumb IP knuckle at s=0.58 + fleshy distal thumbpad
             val ipJoint = 1f + 0.082f * exp(-((s - 0.58f) / 0.068f).let { it * it })
-            val padFull = 1f + 0.055f * exp(-((s - 0.80f) / 0.11f).let { it * it })
+            val padFull = 1f + 0.060f * exp(-((s - 0.81f) / 0.11f).let { it * it })
             ipJoint * padFull
         } else {
-            // Distinct anatomical PIP (s=0.48) & DIP (s=0.75) knuckles + slight phalanx waisting between joints
+            // Distinct anatomical PIP (s=0.48) & DIP (s=0.75) knuckles + plump rounded distal fingertip pad
             val pipJoint = 1f + 0.092f * exp(-((s - 0.48f) / 0.058f).let { it * it })
             val dipJoint = 1f + 0.060f * exp(-((s - 0.75f) / 0.052f).let { it * it })
-            val padFull = 1f + 0.050f * exp(-((s - 0.86f) / 0.09f).let { it * it })
+            val padFull = 1f + 0.056f * exp(-((s - 0.86f) / 0.09f).let { it * it })
             pipJoint * dipJoint * padFull
         }
         return Pair(rootFlare * distalTaper * jointProfile * tipScale, tipAngle)
@@ -641,7 +663,7 @@ internal object BlossomUpperBodyBuilder {
                 val flex = BlossomArmIkRig.fingerFlexForIndex(specIdx, sol.fingerCurlWeight)
 
                 for (r in 0 until rows) {
-                    val s = r.toFloat() / (rows - 1)
+                    val s = fingerRowParameterS(r, rows, spec.isThumb)
                     val (radScale, tipAngle) = fingerRadiusProfile(s, spec.isThumb)
                     val spine = evaluateArticulatedFingerSpine(spec, side, s, flex)
                     val radialW = cos(tipAngle)
@@ -922,14 +944,8 @@ internal object BlossomUpperBodyBuilder {
                     // Natural short broad toenails sitting flush on distal toe dorsal bed
                     val s = if (isHallux) 0.61f + v * 0.29f else 0.64f + v * 0.25f
 
-                    val tipT = smoothStep(0.84f, 1.0f, s)
-                    val tipAngle = tipT * (PI.toFloat() * 0.5f)
-                    val tipScale = cos(tipAngle).coerceAtLeast(0.03f)
-                    val rootFlare = 1f + (if (isHallux) 0.16f else 0.12f) * (1f - smoothStep(0.0f, 0.22f, s))
-                    val phalanxNeck = 1f - 0.085f * exp(-((s - 0.34f) / 0.15f).let { it * it })
-                    val ipKnuckle = 1f + (if (isHallux) 0.055f else 0.072f) * exp(-((s - 0.50f) / 0.09f).let { it * it })
-                    val distalPad = 1f + (if (isHallux) 0.085f else 0.115f) * exp(-((s - 0.76f) / 0.14f).let { it * it })
-                    val radScale = rootFlare * phalanxNeck * ipKnuckle * distalPad * tipScale
+                    // Match shared hemispherical rounded toe profile so toenails stay 100% flush with distal tips
+                    val (radScale, tipAngle) = BlossomSdfBodyBuilder.toeRadiusProfile(s, spec, isHallux)
 
                     val along = -0.095f + s * (spec.length + 0.095f)
                     val curlZ = spec.archLift * sin(s * PI.toFloat()) -
@@ -966,7 +982,7 @@ internal object BlossomUpperBodyBuilder {
                         val nLen = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-5f)
                         nx /= nLen; ny /= nLen; nz /= nLen
 
-                        val toeSectionW = smoothStep(0.10f, 0.28f, s) * (1f - smoothStep(0.84f, 0.96f, s))
+                        val toeSectionW = smoothStep(0.10f, 0.28f, s) * (1f - smoothStep(0.82f, 0.94f, s))
                         val cSignT = if (cosP >= 0f) 1f else -1f
                         val sqCosT = cSignT * Math.pow(abs(cosP).toDouble().coerceAtLeast(1e-5), 0.90).toFloat()
                         val shapedCosT = cosP * (1f - 0.34f * toeSectionW) + sqCosT * (0.34f * toeSectionW)
@@ -1133,18 +1149,18 @@ internal object BlossomUpperBodyBuilder {
         val gravityMobility = supineCos * (0.22f + 0.78f * sizeNorm) * (1f - 0.65f * armSqueeze)
 
         // True 3D volume-proportional scaling: X/Y base footprint AND Z projection grow together harmoniously!
-        val supineFlattenZ = 1f - 0.11f * gravityMobility
+        val supineFlattenZ = 1f - 0.13f * gravityMobility
         val supineBroaden = 1f / sqrt(supineFlattenZ)
         val sizeBloom = ((sizeNorm - 0.45f) / 0.55f).coerceIn(0f, 1f)
         val footprintScaleX = (0.72f + sizeNorm * 0.48f) * (0.95f + 0.05f * supineBroaden)
         val footprintScaleY = (0.72f + sizeNorm * 0.48f) * (0.95f + 0.05f * supineBroaden)
         val moundZScale = (0.60f + sizeNorm * 0.52f) * supineFlattenZ
 
-        // Size-adaptive chest-wall collar envelope: Petite stays compact while Full fills out broadly across X/Y
-        // while ALWAYS converging smoothly to exact zero by edgeR = 0.90 (zero seam cliff!)
-        val collarStart = 0.34f + 0.30f * sizeNorm
-        val collarEnd = 0.78f + 0.12f * sizeNorm
-        val collarPow = (1.50f - 0.36f * sizeNorm).toDouble()
+        // Gentle outer seam-guarantee collar envelope (reaches exact zero cleanly by edgeR <= 0.90)
+        // while letting the continuous cos^p teardrop dome govern the entire organic side profile!
+        val collarStart = 0.50f + 0.18f * sizeNorm
+        val collarEnd = 0.84f + 0.06f * sizeNorm
+        val collarPow = (1.35f - 0.20f * sizeNorm).toDouble()
 
         fun updateSide(sideCache: BreastSideCache, shiftX: Float, shiftY: Float, sideOffsetVerts: Int) {
             val side = sideCache.side
@@ -1156,7 +1172,7 @@ internal object BlossomUpperBodyBuilder {
 
             // Natural closer-set sit with realistic lateral supine settle as size increases
             val apexEx = side * (-0.018f + 0.148f * gravityMobility - 0.062f * armSqueeze - 0.065f * manualMedialT)
-            val apexEy = -(0.090f + 0.055f * sizeNorm)
+            val apexEy = -(0.085f + 0.055f * sizeNorm)
             val latBlendApex = smoothStep(-0.35f, 0.35f, apexEx * side)
             val rxWorldAtApex = BREAST_MEDIAL_R * (1f - latBlendApex) + BREAST_LATERAL_R * latBlendApex
             val areolaLatComp = 1f / (1f + 0.06f * gravityMobility * largeT)
@@ -1166,7 +1182,7 @@ internal object BlossomUpperBodyBuilder {
                 val ey = sideCache.localEy[i]
                 val edgeR = sideCache.edgeR[i]
 
-                // Size-adaptive C2 zero-slope chest-wall collar falloff reaching exact zero cleanly before edgeR = 0.90
+                // Smooth C2 zero-slope chest-wall collar falloff reaching exact zero cleanly before edgeR = 0.90
                 val collarLinear = 1f - smoothStep(collarStart, collarEnd, edgeR)
                 val collarFade = Math.pow(collarLinear.toDouble(), collarPow).toFloat()
                 val softShiftW = (1f - smoothStep(0.0f, 0.86f, edgeR)).let { t -> t * t * (3f - 2f * t) }
@@ -1175,40 +1191,45 @@ internal object BlossomUpperBodyBuilder {
                 val dyRel = ey - apexEy
                 val dxLatBlend = smoothStep(-0.36f, 0.36f, dxRel * side)
                 val dyUpBlend = smoothStep(-0.38f, 0.38f, dyRel)
-                val medialSpread = (0.86f + 0.14f * sizeNorm + 0.14f * (armSqueeze + manualMedialT)) * footprintScaleX
-                val lateralSpread = (0.88f + 0.14f * gravityMobility - 0.09f * armSqueeze) * footprintScaleX
-                val upperSpread = (1.08f + 0.10f * sizeNorm) * footprintScaleY
-                val lowerSpread = (0.84f + 0.14f * sizeNorm) * footprintScaleY
+                val medialSpread = (0.88f + 0.14f * sizeNorm + 0.14f * (armSqueeze + manualMedialT)) * footprintScaleX
+                val lateralSpread = (0.90f + 0.14f * gravityMobility - 0.09f * armSqueeze) * footprintScaleX
+                val upperSpread = (1.14f + 0.10f * sizeNorm) * footprintScaleY
+                val lowerSpread = (0.86f + 0.14f * sizeNorm) * footprintScaleY
 
                 val spreadX = medialSpread * (1f - dxLatBlend) + lateralSpread * dxLatBlend
                 val spreadY = lowerSpread * (1f - dyUpBlend) + upperSpread * dyUpBlend
                 val dxA = dxRel / spreadX
                 val dyA = dyRel / spreadY
                 val rawRDome = sqrt(dxA * dxA + dyA * dyA)
-                val rDome = (rawRDome + 0.09f * smoothStep(0.66f, 0.90f, edgeR)).coerceIn(0f, 1f)
+                val rDome = (rawRDome + 0.07f * smoothStep(0.68f, 0.90f, edgeR)).coerceIn(0f, 1f)
 
-                // Soft natural teardrop with rounder side profile (broad blunt crown, long seamless upper pectoral slope,
-                // and gentle cushioned lower roll without a hard front edge or pointed cone!)
-                val u2 = (1f - rDome * rDome).coerceAtLeast(0f)
-                val upperRamp = Math.pow(u2.toDouble(), 1.14).toFloat() * smoothStep(1.0f, 0.16f, rDome)
-                val lowerFull = Math.pow(u2.toDouble(), 0.85).toFloat() * smoothStep(1.0f, 0.44f, rDome)
-                val lowerHalfT = smoothStep(0.36f, -0.32f, dyRel)
+                // Organic supine teardrop dome (cos^p has zero slope at both crown AND chest-wall base!):
+                //  - Upper pole (dyRel > 0): long graceful concave-to-convex pectoral sweep seamlessly out of chest wall
+                //  - Lower pole (dyRel < 0): fuller soft convex teardrop roll curving gently into inframammary crease
+                //  - Eliminates flat-topped cylinder plateau and steep vertical perimeter cliffs in side profile!
+                val cosDome = cos(rDome * (PI.toFloat() * 0.5f)).coerceAtLeast(0f)
+                val upperPow = (2.05f - 0.12f * sizeNorm).toDouble()
+                val lowerPow = (1.46f - 0.16f * sizeNorm).toDouble()
+                val upperRamp = Math.pow(cosDome.toDouble(), upperPow).toFloat()
+                val lowerFull = Math.pow(cosDome.toDouble(), lowerPow).toFloat()
+                val lowerHalfT = smoothStep(0.32f, -0.34f, dyRel)
                 val roundedDome = (upperRamp * (1f - lowerHalfT) + lowerFull * lowerHalfT) * collarFade
 
                 // Subtle anatomical upper-outer pectoral bridge (Tail of Spence) so breasts grow organically from the chest wall
-                val tailOfSpence = 0.036f * moundZScale *
+                val tailOfSpence = 0.034f * moundZScale *
                     smoothStep(-0.08f, 0.48f, ex * side) * smoothStep(0.02f, 0.52f, ey) *
                     (1f - smoothStep(0.60f, 0.87f, edgeR)) * collarFade
 
-                // Gentle upper-pole softness, fuller lower teardrop weight at large sizes, and realistic supine lateral fullness
-                val upperSlopeSoften = 1f - (0.12f + 0.05f * gravityMobility) * smoothStep(0.12f, 0.84f, ey)
-                val medialSupineSlope = 1f - (0.16f * gravityMobility * (1f - armSqueeze)) * smoothStep(0.10f, -0.55f, ex * side)
-                val lowerPlush = 1f + (0.06f + 0.10f * sizeNorm) * smoothStep(-0.04f, -0.56f, ey) * (1f - smoothStep(0.56f, 0.86f, edgeR))
-                val lateralGravityFull = 1f + (0.06f + 0.30f * gravityMobility) * smoothStep(-0.02f, 0.48f, ex * side) * (1f - smoothStep(0.56f, 0.87f, edgeR))
-                val medialCompressFull = 1f + (0.16f * (armSqueeze + manualMedialT)) *
-                    smoothStep(0.14f, -0.58f, ex * side) * (1f - smoothStep(0.58f, 0.86f, edgeR))
+                // Gentle upper-pole softness, natural lower teardrop cushion, and smooth supine lateral fullness
+                // (peaking smoothly inside the dome so outer walls never bulge into a cylindrical shelf)
+                val upperSlopeSoften = 1f - (0.08f + 0.05f * gravityMobility) * smoothStep(0.14f, 0.86f, ey)
+                val medialSupineSlope = 1f - (0.14f * gravityMobility * (1f - armSqueeze)) * smoothStep(0.12f, -0.56f, ex * side)
+                val lowerPlush = 1f + (0.04f + 0.07f * sizeNorm) * smoothStep(-0.02f, -0.44f, ey) * (1f - smoothStep(0.46f, 0.82f, edgeR))
+                val lateralGravityFull = 1f + (0.04f + 0.14f * gravityMobility) * smoothStep(0.00f, 0.42f, ex * side) * (1f - smoothStep(0.48f, 0.84f, edgeR))
+                val medialCompressFull = 1f + (0.14f * (armSqueeze + manualMedialT)) *
+                    smoothStep(0.14f, -0.58f, ex * side) * (1f - smoothStep(0.52f, 0.84f, edgeR))
 
-                val moundHeight = (0.515f * moundZScale + medialGather * 0.16f + liftFullness) *
+                val moundHeight = (0.485f * moundZScale + medialGather * 0.16f + liftFullness) *
                     roundedDome * upperSlopeSoften * medialSupineSlope * lowerPlush * lateralGravityFull * medialCompressFull + tailOfSpence
 
                 // Richer, more visible natural v6.3 areola & sculpted 3D nipple papilla on soft teardrop breasts (apex-centered circular coords)

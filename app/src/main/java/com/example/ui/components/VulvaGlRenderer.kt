@@ -1060,17 +1060,64 @@ class VulvaGlTextureView(
 
         /**
          * Computes subtle synchronized (chestRise, abdomenRise) world-space respiratory lift.
-         * Abdominal/diaphragmatic swell slightly leads upper thoracic/ribcage rise for lifelike supine breathing.
+         * Abdominal/diaphragmatic swell gently leads thoracic ribcage expansion in cohesive lockstep.
          */
         internal fun evaluateBreathingDisplacement(phaseCycles: Float, stimulus: Float): Pair<Float, Float> {
             val s = stimulus.coerceIn(0f, 1f)
             val depthScale = 1.0f + 0.24f * s
             val abdomenWave = evaluateBreathWave(phaseCycles)
-            val chestWave = evaluateBreathWave(phaseCycles - 0.07f)
-            // Gently noticeable calm supine chest & diaphragmatic rise-and-fall
-            val chestRise = chestWave * 0.080f * depthScale
+            val chestWave = evaluateBreathWave(phaseCycles - 0.04f)
+            // Gently noticeable calm supine ribcage & diaphragmatic expansion in lockstep
+            val chestRise = chestWave * 0.072f * depthScale
             val abdomenRise = abdomenWave * 0.096f * depthScale
             return Pair(chestRise, abdomenRise)
+        }
+
+        /**
+         * Exact CPU mirror of the VERTEX_SHADER respiratory displacement used by unit tests
+         * to verify thoracic ribcage expansion and zero differential breast Z-stretching.
+         */
+        internal fun evaluateVertexBreathingOffset(
+            x: Float,
+            y: Float,
+            z: Float,
+            nx: Float,
+            ny: Float,
+            nz: Float,
+            breathChest: Float,
+            breathAbdomen: Float
+        ): FloatArray {
+            fun glSmoothStep(e0: Float, e1: Float, v: Float): Float {
+                val t = ((v - e0) / (e1 - e0)).coerceIn(0f, 1f)
+                return t * t * (3f - 2f * t)
+            }
+            val nLen = kotlin.math.sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-5f)
+            val nrmZ = nz / nLen
+            val ax = kotlin.math.abs(x)
+            val sgnX = when {
+                x > 0f -> 1f
+                x < 0f -> -1f
+                else -> 0f
+            }
+            val zAboveMat = z - BlossomBodyBuilder.mattressSurfaceZ(y)
+
+            val abdLatMask = 1f - glSmoothStep(0.96f, 1.48f, ax)
+            val abdFrontMask = glSmoothStep(-0.10f, 0.34f, nrmZ) * glSmoothStep(0.68f, 1.18f, zAboveMat)
+            val abdMask = abdLatMask * abdFrontMask
+            val abdEnv = glSmoothStep(0.86f, 1.58f, y) * (1f - glSmoothStep(2.42f, 3.02f, y))
+
+            val chestLatMask = 1f - glSmoothStep(1.26f, 1.52f, ax)
+            val chestDepthMask = glSmoothStep(0.18f, 0.96f, zAboveMat)
+            val chestMask = chestLatMask * chestDepthMask
+            val chestEnv = glSmoothStep(2.15f, 3.05f, y) * (1f - glSmoothStep(4.32f, 4.92f, y))
+            val ribLatMask = glSmoothStep(0.22f, 0.98f, ax) * (1f - glSmoothStep(1.30f, 1.52f, ax)) *
+                glSmoothStep(0.20f, 0.72f, zAboveMat)
+
+            val liftZ = breathAbdomen * abdEnv * abdMask + breathChest * chestEnv * chestMask
+            val liftY = breathChest * chestEnv * chestMask * 0.24f - breathAbdomen * abdEnv * abdMask * 0.08f
+            val latRib = (breathChest * chestEnv * ribLatMask * 0.36f +
+                breathAbdomen * abdEnv * abdMask * glSmoothStep(0.14f, 0.78f, ax) * 0.18f) * sgnX
+            return floatArrayOf(latRib, liftY, liftZ)
         }
 
         private const val VERTEX_SHADER = """
@@ -1091,31 +1138,55 @@ class VulvaGlTextureView(
             varying vec4 vMat;
             varying float vArchAlpha;
 
+            float mattressZ(float y) {
+                if (y <= 0.72) return -1.14;
+                float yRec = y - 0.72;
+                if (y <= 3.00) {
+                    return -1.14 - 0.16 * yRec - 0.014 * yRec * yRec;
+                }
+                float dy = y - 3.00;
+                return -1.577574 - 0.06 * dy - 0.390095 * (1.0 - exp(-0.42 * dy));
+            }
+
             void main() {
                 vec3 pos = aPos;
                 vec3 nrm = normalize(aNormal);
 
                 if (uAllowBreathing > 0.5) {
-                    // Strictly isolate natural breathing lift to anterior torso, ribcage, breasts & abdomen
+                    // Strictly isolate natural breathing expansion to torso, ribcage, breasts & abdomen
                     // (back remains pinned to exam cushion; arms, hands, head & vulva stay 100% undisturbed)
                     float ax = abs(pos.x);
-                    float latMask = 1.0 - smoothstep(0.96, 1.48, ax);
-                    float frontMask = smoothstep(-0.10, 0.34, nrm.z) * smoothstep(-0.34, 0.14, pos.z);
-                    float torsoMask = latMask * frontMask;
+                    float zAboveMat = pos.z - mattressZ(pos.y);
 
-                    // Soft diaphragmatic abdominal rise (y ~ 0.9..3.4, centered near soft mid-abdomen)
-                    float abdEnv = smoothstep(0.86, 1.58, pos.y) * (1.0 - smoothstep(2.48, 3.46, pos.y));
-                    // Gentle thoracic & breast rise (y ~ 2.3..4.8, moving ribcage & breasts in exact lockstep)
-                    float chestEnv = smoothstep(2.26, 3.18, pos.y) * (1.0 - smoothstep(4.24, 4.86, pos.y));
+                    // 1. Soft diaphragmatic abdominal rise (y ~ 0.9..3.0, handing off cleanly to ribcage below breasts)
+                    float abdLatMask = 1.0 - smoothstep(0.96, 1.48, ax);
+                    float abdFrontMask = smoothstep(-0.10, 0.34, nrm.z) * smoothstep(0.68, 1.18, zAboveMat);
+                    float abdMask = abdLatMask * abdFrontMask;
+                    float abdEnv = smoothstep(0.86, 1.58, pos.y) * (1.0 - smoothstep(2.42, 3.02, pos.y));
 
-                    float liftZ = (uBreathAbdomen * abdEnv + uBreathChest * chestEnv) * torsoMask;
-                    float liftY = (uBreathChest * chestEnv * 0.34 - uBreathAbdomen * abdEnv * 0.08) * torsoMask;
-                    float latRib = (uBreathChest * chestEnv * 0.25 + uBreathAbdomen * abdEnv * 0.18) *
-                                   smoothstep(0.14, 0.78, ax) * torsoMask * sign(pos.x);
+                    // 2. True thoracic ribcage expansion (y ~ 2.2..4.9): depth mask saturates cleanly to 1.0
+                    //    AT the anterior chest wall beneath the breasts (zAboveMat >= 0.96, independent of nrm.z!)
+                    //    so the entire ribcage expands anteriorly (+Z), superiorly (+Y pump-handle) & laterally
+                    //    (±X bucket-handle) while the breasts ride rigidly on the chest with ZERO Z-stretching!
+                    float chestLatMask = 1.0 - smoothstep(1.26, 1.52, ax);
+                    float chestDepthMask = smoothstep(0.18, 0.96, zAboveMat);
+                    float chestMask = chestLatMask * chestDepthMask;
+                    float chestEnv = smoothstep(2.15, 3.05, pos.y) * (1.0 - smoothstep(4.32, 4.92, pos.y));
+                    float ribLatMask = smoothstep(0.22, 0.98, ax) * (1.0 - smoothstep(1.30, 1.52, ax)) *
+                                       smoothstep(0.20, 0.72, zAboveMat);
+
+                    float liftZ = uBreathAbdomen * abdEnv * abdMask + uBreathChest * chestEnv * chestMask;
+                    float liftY = uBreathChest * chestEnv * chestMask * 0.24 - uBreathAbdomen * abdEnv * abdMask * 0.08;
+                    float latRib = (uBreathChest * chestEnv * ribLatMask * 0.36 +
+                                    uBreathAbdomen * abdEnv * abdMask * smoothstep(0.14, 0.78, ax) * 0.18) * sign(pos.x);
 
                     pos += vec3(latRib, liftY, liftZ);
-                    // Matching subtle normal tilt so studio lighting visibly breathes across rising chest & belly
-                    nrm = normalize(nrm + vec3(latRib * 0.72, (uBreathAbdomen * abdEnv - uBreathChest * chestEnv) * torsoMask * 0.58, 0.0));
+                    // Subtle matching normal breath on abdomen & ribcage without warping breast specular shape
+                    nrm = normalize(nrm + vec3(
+                        latRib * 0.48,
+                        uBreathAbdomen * abdEnv * abdMask * 0.58 - uBreathChest * chestEnv * chestMask * 0.24,
+                        0.0
+                    ));
                 }
 
                 vec4 worldPos = uModel * vec4(pos, 1.0);

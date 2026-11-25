@@ -1552,6 +1552,154 @@ class BlossomGeometryUnitTest {
         assertTrue("Switching Legacy -> Beta v1 must restore exact Beta v1 meshes (< 1e-5), got $maxRestoreDiff", maxRestoreDiff < 1e-5f)
     }
 
+    @Test
+    fun roundedDigitTipsNaturalBreastProfileAndRibcageBreathingInvariantsHold() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        scene.update(VulvaDeformationState(breastSize = 0.50f), includeLithotomyBody = true)
+
+        // 1. Rounded finger & toe tips (true plump hemispherical domes, never pointy cones)
+        for (isThumb in listOf(false, true)) {
+            val (baseRad, _) = BlossomUpperBodyBuilder.fingerRadiusProfile(0.88f, isThumb)
+            val (r97, _) = BlossomUpperBodyBuilder.fingerRadiusProfile(0.97f, isThumb)
+            val (r99, _) = BlossomUpperBodyBuilder.fingerRadiusProfile(0.99f, isThumb)
+            assertTrue(
+                "Fingertip (isThumb=$isThumb) at s=0.97 must stay plump & rounded (> 0.65x shaft), got ${r97 / baseRad}",
+                r97 / baseRad > 0.65f
+            )
+            assertTrue(
+                "Fingertip (isThumb=$isThumb) at s=0.99 must curve bluntly (> 0.35x shaft), got ${r99 / baseRad}",
+                r99 / baseRad > 0.35f
+            )
+        }
+        BlossomSdfBodyBuilder.BLOSSOM_TOE_SPECS.forEachIndexed { idx, spec ->
+            val isHallux = idx == 0
+            val sShaft = BlossomSdfBodyBuilder.toeTipStartS(spec, isHallux)
+            val (baseRad, _) = BlossomSdfBodyBuilder.toeRadiusProfile(sShaft, spec, isHallux)
+            val sDome40 = BlossomSdfBodyBuilder.toeRowParameterS(10, 14, spec, isHallux)
+            val sDome60 = BlossomSdfBodyBuilder.toeRowParameterS(11, 14, spec, isHallux)
+            val (rad40, _) = BlossomSdfBodyBuilder.toeRadiusProfile(sDome40, spec, isHallux)
+            val (rad60, _) = BlossomSdfBodyBuilder.toeRadiusProfile(sDome60, spec, isHallux)
+            assertTrue(
+                "Toe#$idx at 40-deg dome ring must stay plump (> 0.65x shaft), got ${rad40 / baseRad}",
+                rad40 / baseRad > 0.65f
+            )
+            assertTrue(
+                "Toe#$idx at 60-deg dome ring must round bluntly (> 0.40x shaft), got ${rad60 / baseRad}",
+                rad60 / baseRad > 0.40f
+            )
+        }
+        assertValidMesh(scene.blossomHandsMesh)
+        assertValidMesh(scene.blossomToesMesh)
+        assertValidMesh(scene.blossomNailsMesh)
+        assertOutwardWindingMatchesNormals("blossomHandsMesh(rounded)", scene.blossomHandsMesh)
+        assertOutwardWindingMatchesNormals("blossomToesMesh(rounded)", scene.blossomToesMesh)
+        assertOutwardWindingMatchesNormals("blossomNailsMesh(rounded)", scene.blossomNailsMesh)
+
+        // 2. Lifelike non-cylindrical supine breast side profile (continuous slope, no flat top + steep cliff)
+        val bCache = BlossomUpperBodyBuilder.buildBreastsCache()
+        val bData = scene.blossomBreastsMesh.vertexData
+        var peakLift = 0f
+        var upperSlopeLift = -1f
+        var lowerSlopeLift = -1f
+        var bestUpperDist = Float.POSITIVE_INFINITY
+        var bestLowerDist = Float.POSITIVE_INFINITY
+        for (i in 0 until bCache.left.count) {
+            val lift = bData[i * stride + 2] - bCache.left.baseZ[i]
+            if (lift > peakLift) peakLift = lift
+            val ex = bCache.left.localEx[i]
+            val ey = bCache.left.localEy[i]
+            val dUpper = abs(ex + 0.06f) + abs(ey - 0.45f)
+            if (dUpper < bestUpperDist) {
+                bestUpperDist = dUpper
+                upperSlopeLift = lift
+            }
+            val dLower = abs(ex + 0.06f) + abs(ey + 0.50f)
+            if (dLower < bestLowerDist) {
+                bestLowerDist = dLower
+                lowerSlopeLift = lift
+            }
+        }
+        val upperRatio = upperSlopeLift / peakLift
+        val lowerRatio = lowerSlopeLift / peakLift
+        assertTrue(
+            "Upper breast slope (ey=+0.45) must sweep gently out of chest (0.20..0.62 of peak), got $upperRatio",
+            upperRatio in 0.20f..0.62f
+        )
+        assertTrue(
+            "Lower breast slope (ey=-0.50) must curve naturally instead of forming a flat-topped cylinder (0.42..0.78 of peak), got $lowerRatio",
+            lowerRatio in 0.42f..0.78f
+        )
+        assertTrue(
+            "Lower pole ($lowerRatio) should remain naturally fuller than upper pectoral slope ($upperRatio)",
+            lowerRatio > upperRatio + 0.08f
+        )
+        for (sz in listOf(0.0f, 0.50f, 1.0f)) {
+            scene.update(VulvaDeformationState(breastSize = sz), includeLithotomyBody = true)
+            assertValidMesh(scene.blossomBreastsMesh)
+            assertOutwardWindingMatchesNormals("blossomBreastsMesh(size=$sz)", scene.blossomBreastsMesh)
+        }
+        scene.update(VulvaDeformationState(breastSize = 0.50f), includeLithotomyBody = true)
+
+        // 3. Thoracic ribcage breathing: chest expands in lockstep with abdomen & ZERO breast Z-telescoping!
+        val chestAmp = 0.072f
+        val abdAmp = 0.096f
+        val sternum = BlossomSdfBodyBuilder.sampleTorsoChestWallWrapped(0f, BlossomUpperBodyBuilder.BREAST_CENTER_Y)
+        val sternumOff = VulvaGlTextureView.evaluateVertexBreathingOffset(
+            sternum.x, BlossomUpperBodyBuilder.BREAST_CENTER_Y, sternum.z,
+            sternum.nx, sternum.ny, sternum.nz, chestAmp, abdAmp
+        )
+        assertTrue(
+            "Anterior sternum/chest wall must visibly rise with lungs (dZ >= 0.065), got ${sternumOff[2]}",
+            sternumOff[2] >= 0.065f
+        )
+        val latRib = BlossomSdfBodyBuilder.sampleTorsoChestWallWrapped(1.15f, BlossomUpperBodyBuilder.BREAST_CENTER_Y)
+        val latRibOff = VulvaGlTextureView.evaluateVertexBreathingOffset(
+            latRib.x, BlossomUpperBodyBuilder.BREAST_CENTER_Y, latRib.z,
+            latRib.nx, latRib.ny, latRib.nz, chestAmp, abdAmp
+        )
+        assertTrue(
+            "Lateral ribcage must expand outward (bucket-handle dX >= 0.015) and forward (dZ >= 0.055), got dX=${latRibOff[0]}, dZ=${latRibOff[2]}",
+            latRibOff[0] >= 0.015f && latRibOff[2] >= 0.055f
+        )
+        // Verify breast apex and underlying chest wall move in exact rigid lockstep in Z (zero telescoping!)
+        val breastBase = BlossomSdfBodyBuilder.sampleTorsoChestWallWrapped(
+            BlossomUpperBodyBuilder.BREAST_CENTER_AX,
+            BlossomUpperBodyBuilder.BREAST_CENTER_Y
+        )
+        val baseOff = VulvaGlTextureView.evaluateVertexBreathingOffset(
+            breastBase.x, BlossomUpperBodyBuilder.BREAST_CENTER_Y, breastBase.z,
+            breastBase.nx, breastBase.ny, breastBase.nz, chestAmp, abdAmp
+        )
+        val apexOff = VulvaGlTextureView.evaluateVertexBreathingOffset(
+            breastBase.x, BlossomUpperBodyBuilder.BREAST_CENTER_Y, breastBase.z + 0.38f,
+            0f, 0f, 1f, chestAmp, abdAmp
+        )
+        val flankOff = VulvaGlTextureView.evaluateVertexBreathingOffset(
+            breastBase.x, BlossomUpperBodyBuilder.BREAST_CENTER_Y, breastBase.z + 0.16f,
+            0.78f, 0.25f, 0.56f, chestAmp, abdAmp
+        )
+        assertTrue(
+            "Breast apex must ride rigidly with chest wall beneath it (|dZ_apex - dZ_base| < 0.002), got ${abs(apexOff[2] - baseOff[2])}",
+            abs(apexOff[2] - baseOff[2]) < 0.002f
+        )
+        assertTrue(
+            "Sloped breast flanks must lift identically to breast apex (|dZ_apex - dZ_flank| < 0.002), got ${abs(apexOff[2] - flankOff[2])}",
+            abs(apexOff[2] - flankOff[2]) < 0.002f
+        )
+        // Back pinned to exam table, arms/head/vulva undisturbed, stomach still rises cleanly
+        val backZ = BlossomBodyBuilder.mattressSurfaceZ(BlossomUpperBodyBuilder.BREAST_CENTER_Y) + 0.05f
+        val backOff = VulvaGlTextureView.evaluateVertexBreathingOffset(0f, BlossomUpperBodyBuilder.BREAST_CENTER_Y, backZ, 0f, 0f, -1f, chestAmp, abdAmp)
+        val armOff = VulvaGlTextureView.evaluateVertexBreathingOffset(1.75f, 3.50f, BlossomBodyBuilder.mattressSurfaceZ(3.50f) + 0.50f, 0f, 0f, 1f, chestAmp, abdAmp)
+        val vulvaOff = VulvaGlTextureView.evaluateVertexBreathingOffset(0f, 0f, 0.20f, 0f, 0f, 1f, chestAmp, abdAmp)
+        val stomach = BlossomSdfBodyBuilder.sampleBodySurfacePoint(0f, 1.90f)
+        val stomachOff = VulvaGlTextureView.evaluateVertexBreathingOffset(0f, 1.90f, stomach.z, 0f, 0f, 1f, chestAmp, abdAmp)
+        assertTrue("Back on cushion must stay pinned (dZ < 0.001), got ${backOff[2]}", abs(backOff[2]) < 0.001f)
+        assertTrue("Resting upper arm must remain undisturbed (< 0.001), got ${armOff[2]}", abs(armOff[2]) < 0.001f)
+        assertTrue("Vulva must remain undisturbed (< 0.001), got ${vulvaOff[2]}", abs(vulvaOff[2]) < 0.001f)
+        assertTrue("Stomach breathing must remain visibly smooth (dZ >= 0.085), got ${stomachOff[2]}", stomachOff[2] >= 0.085f)
+    }
+
     /**
      * Guards against reversed OpenGL triangle winding (which triggers `!gl_FrontFacing` normal flip
      * in the fragment shader and turns meshes dark/inverted). Verifies that > 95% of non-degenerate

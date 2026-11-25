@@ -70,3 +70,14 @@ gradle :app:testDebugUnitTest
 If you are modifying the 3D anatomy, tweaking colors/shading, or trying to figure out which mesh draws which pixel, start here:
 
 👉 **[`docs/3D_RENDERING_ARCHITECTURE.md`](docs/3D_RENDERING_ARCHITECTURE.md)**
+
+---
+
+## Version Checkpoints
+
+- **Beta v1.1 — Golden Baseline Checkpoint (2026-11-25)** *(Safe reversion point)*
+  - **Rounded finger & toe tips**: true 5-ring hemispherical rounded pads on all 10 fingers and 10 toes with flush fingernails/toenails.
+  - **Refined supine breast profile**: continuous teardrop curvature from upper chest wall through soft lower fold, eliminating cylindrical side walls while preserving front look, cleavage, areolae/nipples, and size scaling. *(Future optional note: largest breast-size settings could be fine-tuned slightly further later, if desired.)*
+  - **Realistic thoracic ribcage breathing**: full ribcage expansion (anterior, subtle pump-handle superior, and bucket-handle lateral) synchronized with abdominal breathing so breasts ride coherently on the expanding chest wall with zero Z-telescoping.
+  - **Includes all Beta v1 features & fixes**: promoted vulva/seam/neck/hair refinements (with buried *Advanced rendering → Legacy vulva* toggle) and GPU VBO/IBO caching + frustum culling to prevent HWUI fence timeouts.
+
