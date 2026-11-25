@@ -35,6 +35,39 @@ internal object BlossomSdfBodyBuilder {
     const val PATCH_RX = 0.64f
     const val PATCH_RY = 1.02f
 
+    // Seam A (Geometry) constants — betaSmoothVulvaSeam
+    const val SEAM_A_COLLAR_RECESS_START = 0.70f
+    const val SEAM_A_COLLAR_RECESS_END = 0.84f
+    const val SEAM_A_COLLAR_RECESS_DEPTH = 0.088f
+    const val SEAM_A_PERIANAL_RECESS_DEPTH = 0.042f
+    const val SEAM_A_BODY_SMOOTH_INNER = 0.84f
+    const val SEAM_A_BODY_SMOOTH_FADE_START = 1.12f
+    const val SEAM_A_BODY_SMOOTH_OUTER = 1.26f
+    const val SEAM_A_BODY_SMOOTH_PASSES = 2
+    const val SEAM_A_BODY_SMOOTH_LAMBDA = 0.42f
+    const val SEAM_A_POS_FEATHER_START = 0.58f
+    const val SEAM_A_POS_FEATHER_END = 0.84f
+    const val SEAM_A_ANUS_PROTECT_FADE_START = 0.84f
+    const val SEAM_A_ANUS_PROTECT_FADE_END = 0.95f
+    const val SEAM_A_MESH_POS_BLEND_START = 0.80f
+    const val SEAM_A_MESH_POS_BLEND_END = 0.96f
+    const val SEAM_A_NORMAL_BLEND_START = 0.56f
+    const val SEAM_A_NORMAL_BLEND_END = 0.84f
+    const val SEAM_A_MESH_NORMAL_BLEND_START = 0.80f
+    const val SEAM_A_MESH_NORMAL_BLEND_END = 0.96f
+    const val SEAM_TARGET_MIN_EDGE_R = 0.70f
+    const val SEAM_TRI_MIN_NZ_SUM = 0.02f
+    const val SEAM_RAY_MAX_DIST = 0.065f
+
+    // Seam B (Color) constants — betaBlendVulvaSeamColor (widens fade across outer ~40% of patch radius)
+    const val SEAM_B_MAT_FEATHER_START = 0.56f
+    const val SEAM_B_MAT_FEATHER_END = 0.96f
+    const val SEAM_B_ANUS_MAT_FADE_START = 0.84f
+    const val SEAM_B_ANUS_MAT_FADE_END = 0.95f
+    const val SEAM_B_BODY_MAT_BLEND_START = 0.72f
+    const val SEAM_B_BODY_MAT_BLEND_END = 0.96f
+    const val BODY_BASE_WETNESS = 0.055f
+
     private const val MIN_X = -2.96f
     private const val MAX_X = 2.96f
     private const val MIN_Y = -5.92f
@@ -51,9 +84,11 @@ internal object BlossomSdfBodyBuilder {
 
     class AnteriorSurfaceLut(
         val size: Int,
-        val zValues: FloatArray
+        val zValues: FloatArray,
+        val aoValues: FloatArray,
+        val pigmentValues: FloatArray
     ) {
-        fun sampleZ(x: Float, y: Float): Float {
+        private fun sampleBilinear(table: FloatArray, x: Float, y: Float): Float {
             val u = ((x - LUT_MIN_X) / (LUT_MAX_X - LUT_MIN_X)).coerceIn(0f, 1f) * (size - 1)
             val v = ((y - LUT_MIN_Y) / (LUT_MAX_Y - LUT_MIN_Y)).coerceIn(0f, 1f) * (size - 1)
             val ix0 = u.toInt().coerceIn(0, size - 2)
@@ -62,22 +97,65 @@ internal object BlossomSdfBodyBuilder {
             val fy = v - iy0
             val r0 = iy0 * size + ix0
             val r1 = (iy0 + 1) * size + ix0
-            val z0 = zValues[r0] + (zValues[r0 + 1] - zValues[r0]) * fx
-            val z1 = zValues[r1] + (zValues[r1 + 1] - zValues[r1]) * fx
-            return z0 + (z1 - z0) * fy
+            val v0 = table[r0] + (table[r0 + 1] - table[r0]) * fx
+            val v1 = table[r1] + (table[r1 + 1] - table[r1]) * fx
+            return v0 + (v1 - v0) * fy
         }
+
+        fun sampleZ(x: Float, y: Float): Float = sampleBilinear(zValues, x, y)
+        fun sampleAo(x: Float, y: Float): Float = sampleBilinear(aoValues, x, y)
+        fun samplePigment(x: Float, y: Float): Float = sampleBilinear(pigmentValues, x, y)
     }
 
-    fun buildAnteriorSurfaceLut(): AnteriorSurfaceLut {
-        val table = FloatArray(LUT_SIZE * LUT_SIZE)
+    fun buildAnteriorSurfaceLut(
+        betaShortPerineum: Boolean = false,
+        betaSoftButtockTable: Boolean = false
+    ): AnteriorSurfaceLut {
+        val count = LUT_SIZE * LUT_SIZE
+        val zTable = FloatArray(count)
+        val aoTable = FloatArray(count)
+        val pigmentTable = FloatArray(count)
         for (j in 0 until LUT_SIZE) {
             val y = LUT_MIN_Y + (j.toFloat() / (LUT_SIZE - 1)) * (LUT_MAX_Y - LUT_MIN_Y)
             for (i in 0 until LUT_SIZE) {
                 val x = LUT_MIN_X + (i.toFloat() / (LUT_SIZE - 1)) * (LUT_MAX_X - LUT_MIN_X)
-                table[j * LUT_SIZE + i] = sampleBodySurfacePoint(x, y).z
+                val s = sampleBodySurfacePoint(
+                    x = x,
+                    y = y,
+                    betaShortPerineum = betaShortPerineum,
+                    betaSoftButtockTable = betaSoftButtockTable
+                )
+                val idx = j * LUT_SIZE + i
+                zTable[idx] = s.z
+                aoTable[idx] = s.ao
+                pigmentTable[idx] = s.pigment
             }
         }
-        return AnteriorSurfaceLut(LUT_SIZE, table)
+        return AnteriorSurfaceLut(LUT_SIZE, zTable, aoTable, pigmentTable)
+    }
+
+    fun evaluateVulvaPatchMatMask(
+        x: Float,
+        y: Float,
+        betaShortPerineum: Boolean = false,
+        betaBlendVulvaSeamColor: Boolean = false
+    ): Float {
+        val ex = x / PATCH_RX
+        val ey = (y - PATCH_CENTER_Y) / PATCH_RY
+        val edgeR = sqrt(ex * ex + ey * ey).coerceIn(0f, 1f)
+        val anusCenterY = if (betaShortPerineum) -0.782f else -0.86f
+        val anusProtect = exp(-((x / 0.17f).let { it * it } + ((y - anusCenterY) / 0.16f).let { it * it }))
+        val matFeather = if (betaBlendVulvaSeamColor) {
+            1f - quinticStep(SEAM_B_MAT_FEATHER_START, SEAM_B_MAT_FEATHER_END, edgeR)
+        } else {
+            1f - smoothStep(0.62f, 0.90f, edgeR)
+        }
+        val anusMatProtect = if (betaBlendVulvaSeamColor) {
+            anusProtect * (1f - quinticStep(SEAM_B_ANUS_MAT_FADE_START, SEAM_B_ANUS_MAT_FADE_END, edgeR))
+        } else {
+            anusProtect
+        }
+        return (matFeather + (1f - matFeather) * anusMatProtect * 0.82f).coerceIn(0f, 1f)
     }
 
     class BlossomVulvaPatchCache(
@@ -94,6 +172,38 @@ internal object BlossomSdfBodyBuilder {
         val baseAo = FloatArray(count)
         val basePigment = FloatArray(count)
         val edgeR = FloatArray(count)
+
+        // Exact body-triangle 3D seam targets populated when Seam A (betaSmoothVulvaSeam) or Seam B (betaBlendVulvaSeamColor) is active
+        val seamMeshX = FloatArray(count)
+        val seamMeshY = FloatArray(count)
+        val seamMeshZ = FloatArray(count)
+        val seamMeshNx = FloatArray(count)
+        val seamMeshNy = FloatArray(count)
+        val seamMeshNz = FloatArray(count)
+        val seamMeshAo = FloatArray(count)
+        val seamMeshPigment = FloatArray(count)
+        val hasSeamMatch = BooleanArray(count)
+
+        fun copyFrom(src: BlossomVulvaPatchCache) {
+            System.arraycopy(src.baseX, 0, baseX, 0, count)
+            System.arraycopy(src.baseY, 0, baseY, 0, count)
+            System.arraycopy(src.baseZ, 0, baseZ, 0, count)
+            System.arraycopy(src.baseNx, 0, baseNx, 0, count)
+            System.arraycopy(src.baseNy, 0, baseNy, 0, count)
+            System.arraycopy(src.baseNz, 0, baseNz, 0, count)
+            System.arraycopy(src.baseAo, 0, baseAo, 0, count)
+            System.arraycopy(src.basePigment, 0, basePigment, 0, count)
+            System.arraycopy(src.edgeR, 0, edgeR, 0, count)
+            System.arraycopy(src.seamMeshX, 0, seamMeshX, 0, count)
+            System.arraycopy(src.seamMeshY, 0, seamMeshY, 0, count)
+            System.arraycopy(src.seamMeshZ, 0, seamMeshZ, 0, count)
+            System.arraycopy(src.seamMeshNx, 0, seamMeshNx, 0, count)
+            System.arraycopy(src.seamMeshNy, 0, seamMeshNy, 0, count)
+            System.arraycopy(src.seamMeshNz, 0, seamMeshNz, 0, count)
+            System.arraycopy(src.seamMeshAo, 0, seamMeshAo, 0, count)
+            System.arraycopy(src.seamMeshPigment, 0, seamMeshPigment, 0, count)
+            System.arraycopy(src.hasSeamMatch, 0, hasSeamMatch, 0, count)
+        }
     }
 
     data class SdfSurfaceSample(
@@ -112,7 +222,13 @@ internal object BlossomSdfBodyBuilder {
      * single unified reclining full body (feet, legs, buttocks, pelvis, abdomen, ribcage,
      * feminine shoulders, reclining arms & palms, and slender neck).
      */
-    fun evaluateBodySdf(x: Float, y: Float, z: Float): Float {
+    fun evaluateBodySdf(
+        x: Float,
+        y: Float,
+        z: Float,
+        betaShortPerineum: Boolean = false,
+        betaSoftButtockTable: Boolean = false
+    ): Float {
         val ax = abs(x)
 
         // ---------------------------------------------------------------------
@@ -194,10 +310,22 @@ internal object BlossomSdfBodyBuilder {
             ry = 0.66f,
             rz = 0.56f
         )
-        // Natural gluteal cleft cradling the lower anus (-0.86) and curving up the dorsal midline
-        val cleftMask = smoothStep(-0.42f, -0.88f, y) * (1f - smoothStep(0.16f, 0.42f, z + 0.42f))
+        // Natural gluteal cleft cradling the lower anus (-0.86 baseline, or -0.782 with betaShortPerineum: ~20% shorter)
+        val cleftShiftY = if (betaShortPerineum) 0.078f else 0f
+        val cleftMask = smoothStep(-0.42f + cleftShiftY, -0.88f + cleftShiftY, y) *
+            (1f - smoothStep(0.16f, 0.42f, z + 0.42f))
         val cleftIndent = 0.095f * exp(-((x / 0.105f).let { it * it })) * cleftMask
-        val dPelvis = smin(dTorso, dGlute, 0.38f) + cleftIndent
+        var dPelvis = smin(dTorso, dGlute, 0.38f) + cleftIndent
+
+        // Beta 2: Subtle anatomical infragluteal fold under each buttock cheek (posterior-inferior only)
+        if (betaSoftButtockTable && y in -1.34f..-0.64f && ax in 0.16f..1.38f && z < -0.10f) {
+            val foldY = -1.03f + 0.11f * smoothStep(0.28f, 1.18f, ax)
+            val foldBand = exp(-((y - foldY) / 0.082f).let { it * it })
+            val foldLat = smoothBell(ax, 0.30f, 1.14f, 0.16f)
+            val foldPost = 1f - smoothStep(-0.48f, -0.12f, z)
+            val foldAboveMat = smoothStep(mattressSurfaceZ(y) + 0.03f, mattressSurfaceZ(y) + 0.15f, z)
+            dPelvis += 0.039f * foldBand * foldLat * foldPost * foldAboveMat
+        }
 
         // ---------------------------------------------------------------------
         // 3. TWO-BONE SCULPTED LEGS (SYMMETRICALLY EVALUATED IN +X HALF-SPACE)
@@ -515,7 +643,13 @@ internal object BlossomSdfBodyBuilder {
 
         // Softly flatten posterior torso, buttocks, arms, palms & foot soles onto the reclined exam mattress
         val matPlane = (mattressSurfaceZ(y) + 0.005f) - z
-        dBody = smax(dBody, matPlane, 0.12f)
+        val matBlendK = if (betaSoftButtockTable && y in -1.42f..0.24f && ax < 1.72f) {
+            val buttockTableZone = smoothBell(y, -1.06f, -0.08f, 0.34f) * (1f - smoothStep(1.22f, 1.72f, ax))
+            0.12f + 0.18f * buttockTableZone
+        } else {
+            0.12f
+        }
+        dBody = smax(dBody, matPlane, matBlendK)
 
         return dBody
     }
@@ -741,10 +875,20 @@ internal object BlossomSdfBodyBuilder {
     /**
      * Exact central-difference gradient normal on the SDF surface.
      */
-    fun evaluateBodyNormal(x: Float, y: Float, z: Float, eps: Float = 0.014f): FloatArray {
-        val dx = evaluateBodySdf(x + eps, y, z) - evaluateBodySdf(x - eps, y, z)
-        val dy = evaluateBodySdf(x, y + eps, z) - evaluateBodySdf(x, y - eps, z)
-        val dz = evaluateBodySdf(x, y, z + eps) - evaluateBodySdf(x, y, z - eps)
+    fun evaluateBodyNormal(
+        x: Float,
+        y: Float,
+        z: Float,
+        eps: Float = 0.014f,
+        betaShortPerineum: Boolean = false,
+        betaSoftButtockTable: Boolean = false
+    ): FloatArray {
+        val dx = evaluateBodySdf(x + eps, y, z, betaShortPerineum, betaSoftButtockTable) -
+            evaluateBodySdf(x - eps, y, z, betaShortPerineum, betaSoftButtockTable)
+        val dy = evaluateBodySdf(x, y + eps, z, betaShortPerineum, betaSoftButtockTable) -
+            evaluateBodySdf(x, y - eps, z, betaShortPerineum, betaSoftButtockTable)
+        val dz = evaluateBodySdf(x, y, z + eps, betaShortPerineum, betaSoftButtockTable) -
+            evaluateBodySdf(x, y, z - eps, betaShortPerineum, betaSoftButtockTable)
         val len = sqrt(dx * dx + dy * dy + dz * dz)
         return if (len > 1e-6f) {
             floatArrayOf(dx / len, dy / len, dz / len)
@@ -757,13 +901,26 @@ internal object BlossomSdfBodyBuilder {
      * Evaluates consistent anatomical ambient occlusion and subtle skin pigment across the
      * unified SDF body so BOTH the Surface Nets mesh and the Ultra-HD vulva patch match 100%.
      */
-    fun evaluateBodyMaterial(x: Float, y: Float, z: Float, nx: Float, ny: Float, nz: Float): Pair<Float, Float> {
+    fun evaluateBodyMaterial(
+        x: Float,
+        y: Float,
+        z: Float,
+        nx: Float,
+        ny: Float,
+        nz: Float,
+        betaShortPerineum: Boolean = false,
+        betaSoftButtockTable: Boolean = false
+    ): Pair<Float, Float> {
         val ax = abs(x)
         val matZ = mattressSurfaceZ(y)
 
         // Contact AO where dorsal torso, buttocks & feet rest on the dark clinical exam mattress
-        val matContact = (1f - smoothStep(0.02f, 0.24f, z - matZ)) * smoothStep(0.10f, 0.72f, -nz)
-        val cushionAo = 1f - 0.34f * matContact
+        val buttockTableZone = if (betaSoftButtockTable && y in -1.42f..0.24f && ax < 1.72f) {
+            smoothBell(y, -1.06f, -0.08f, 0.34f) * (1f - smoothStep(1.22f, 1.72f, ax))
+        } else 0f
+        val matAoSpan = 0.24f + 0.10f * buttockTableZone
+        val matContact = (1f - smoothStep(0.02f, matAoSpan, z - matZ)) * smoothStep(0.10f, 0.72f, -nz)
+        val cushionAo = 1f - (0.34f - 0.05f * buttockTableZone) * matContact
 
         // Navel cavity AO & subtle pigment
         val navelDx = x / 0.072f
@@ -773,8 +930,20 @@ internal object BlossomSdfBodyBuilder {
         val navelAo = 1f - 0.44f * exp(-navelR2 * 2.4f) * frontW
 
         // Gluteal cleft AO
-        val cleftMask = smoothStep(-0.34f, -0.82f, y) * (1f - smoothStep(0.05f, 0.45f, z + 0.35f))
+        val cleftShiftY = if (betaShortPerineum) 0.078f else 0f
+        val cleftMask = smoothStep(-0.34f + cleftShiftY, -0.82f + cleftShiftY, y) *
+            (1f - smoothStep(0.05f, 0.45f, z + 0.35f))
         val cleftAo = 1f - 0.44f * exp(-((x / 0.11f).let { it * it })) * cleftMask
+
+        // Beta 2: Subtle soft AO along the infragluteal fold under each buttock
+        val infraglutealAo = if (betaSoftButtockTable && y in -1.34f..-0.64f && ax in 0.16f..1.38f && z < -0.10f) {
+            val foldY = -1.03f + 0.11f * smoothStep(0.28f, 1.18f, ax)
+            val foldBand = exp(-((y - foldY) / 0.088f).let { it * it })
+            val foldLat = smoothBell(ax, 0.30f, 1.14f, 0.16f)
+            val foldPost = 1f - smoothStep(-0.48f, -0.12f, z)
+            val foldAboveMat = smoothStep(matZ + 0.03f, matZ + 0.15f, z)
+            1f - 0.17f * foldBand * foldLat * foldPost * foldAboveMat
+        } else 1f
 
         // Subtle oblique inguinal crease tint & AO
         val ingLineY = 0.36f + (ax - 0.40f) * 0.74f
@@ -806,7 +975,7 @@ internal object BlossomSdfBodyBuilder {
                 exp(-(((ax - 1.825f) / 0.13f).let { it * it } + ((y + 3.98f) / 0.22f).let { it * it }))
             ) * (1f - smoothStep(-0.92f, -0.56f, z))
 
-        val ao = (cushionAo * navelAo * cleftAo * ingAo * popAo * axillaAo * notchAo * supraClavAo *
+        val ao = (cushionAo * navelAo * cleftAo * infraglutealAo * ingAo * popAo * axillaAo * notchAo * supraClavAo *
             underChinAo * elbowAo * paraKneeAo * ankleHollowAo).coerceIn(0.14f, 1f)
 
         val kneeWarm = exp(-(((ax - 1.80f) / 0.42f).let { it * it } + ((y + 1.86f) / 0.42f).let { it * it } + ((z - 1.78f) / 0.42f).let { it * it })) * 0.09f
@@ -824,11 +993,16 @@ internal object BlossomSdfBodyBuilder {
      * Exact ray-march + Newton-Raphson front-surface sampler on the unified SDF body
      * for any (x, y) inside the anterior vulva/perineum/anus region.
      */
-    fun sampleBodySurfacePoint(x: Float, y: Float): SdfSurfaceSample {
+    fun sampleBodySurfacePoint(
+        x: Float,
+        y: Float,
+        betaShortPerineum: Boolean = false,
+        betaSoftButtockTable: Boolean = false
+    ): SdfSurfaceSample {
         // Start comfortably in front of the anterior pelvis & inner thighs and sphere-trace backward along -Z
         var z = 1.40f
         for (step in 0 until 40) {
-            val d = evaluateBodySdf(x, y, z)
+            val d = evaluateBodySdf(x, y, z, betaShortPerineum, betaSoftButtockTable)
             if (abs(d) < 0.0006f) break
             z -= d.coerceIn(-0.22f, 0.38f)
             if (z < -1.30f) {
@@ -838,17 +1012,33 @@ internal object BlossomSdfBodyBuilder {
         }
         // 5 Newton-Raphson polish iterations along Z for < 0.0001mm surface precision
         for (it in 0 until 5) {
-            val d = evaluateBodySdf(x, y, z)
+            val d = evaluateBodySdf(x, y, z, betaShortPerineum, betaSoftButtockTable)
             if (abs(d) < 0.0001f) break
-            val dz = (evaluateBodySdf(x, y, z + 0.006f) - evaluateBodySdf(x, y, z - 0.006f)) / 0.012f
+            val dz = (evaluateBodySdf(x, y, z + 0.006f, betaShortPerineum, betaSoftButtockTable) -
+                evaluateBodySdf(x, y, z - 0.006f, betaShortPerineum, betaSoftButtockTable)) / 0.012f
             if (abs(dz) > 0.10f) {
                 z -= (d / dz).coerceIn(-0.08f, 0.08f)
             } else {
                 z -= d * 0.5f
             }
         }
-        val n = evaluateBodyNormal(x, y, z)
-        val (ao, pigment) = evaluateBodyMaterial(x, y, z, n[0], n[1], n[2])
+        val n = evaluateBodyNormal(
+            x = x,
+            y = y,
+            z = z,
+            betaShortPerineum = betaShortPerineum,
+            betaSoftButtockTable = betaSoftButtockTable
+        )
+        val (ao, pigment) = evaluateBodyMaterial(
+            x = x,
+            y = y,
+            z = z,
+            nx = n[0],
+            ny = n[1],
+            nz = n[2],
+            betaShortPerineum = betaShortPerineum,
+            betaSoftButtockTable = betaSoftButtockTable
+        )
         return SdfSurfaceSample(z, n[0], n[1], n[2], ao, pigment)
     }
 
@@ -1553,7 +1743,10 @@ internal object BlossomSdfBodyBuilder {
         leftGluteX: Float = 0f,
         leftGluteY: Float = 0f,
         rightGluteX: Float = 0f,
-        rightGluteY: Float = 0f
+        rightGluteY: Float = 0f,
+        betaShortPerineum: Boolean = false,
+        betaSmoothVulvaSeam: Boolean = false,
+        betaBlendVulvaSeamColor: Boolean = false
     ) {
         val data = mesh.vertexData
         val cols = cache.cols
@@ -1564,6 +1757,7 @@ internal object BlossomSdfBodyBuilder {
         val rx = rightGluteX.coerceIn(-1f, 1f)
         val ry = rightGluteY.coerceIn(-1f, 1f)
         val hasGluteShift = abs(lx) > 1e-4f || abs(ly) > 1e-4f || abs(rx) > 1e-4f || abs(ry) > 1e-4f
+        val anusCenterY = if (betaShortPerineum) -0.782f else -0.86f
 
         for (r in 0 until rows) {
             for (c in 0 until cols) {
@@ -1572,26 +1766,71 @@ internal object BlossomSdfBodyBuilder {
                 val y = cache.baseY[i]
                 val edgeR = cache.edgeR[i]
 
-                // Protect crisp perianal detail at (0, -0.86) while widening the outer perimeter feather across position, AO & color
-                val anusProtect = exp(-((x / 0.17f).let { it * it } + ((y + 0.86f) / 0.16f).let { it * it }))
-                val posFeather = 1f - smoothStep(0.68f, 0.92f, edgeR)
-                val vMask = (posFeather + (1f - posFeather) * anusProtect * 0.75f).coerceIn(0f, 1f)
-                val matFeather = 1f - smoothStep(0.62f, 0.90f, edgeR)
-                val matMask = (matFeather + (1f - matFeather) * anusProtect * 0.82f).coerceIn(0f, 1f)
-                val d = if (vMask > 0.0005f || matMask > 0.0005f) detailEvaluator(x, y) else null
+                // Protect crisp perianal detail at (0, anusCenterY) while feathering outer perimeter cleanly
+                val anusProtect = exp(-((x / 0.17f).let { it * it } + ((y - anusCenterY) / 0.16f).let { it * it }))
+                val posFeather = if (betaSmoothVulvaSeam) {
+                    1f - quinticStep(SEAM_A_POS_FEATHER_START, SEAM_A_POS_FEATHER_END, edgeR)
+                } else {
+                    1f - smoothStep(0.68f, 0.92f, edgeR)
+                }
+                val anusPosProtect = if (betaSmoothVulvaSeam) {
+                    anusProtect * (1f - quinticStep(SEAM_A_ANUS_PROTECT_FADE_START, SEAM_A_ANUS_PROTECT_FADE_END, edgeR))
+                } else {
+                    anusProtect
+                }
+                val vMask = (posFeather + (1f - posFeather) * anusPosProtect * 0.75f).coerceIn(0f, 1f)
 
-                // Ultra-subtle flush clearance over recessed SDF collar with zero visible ridge, tucking gently at [0.95..1.00]
-                val overlapBias = 0.0012f * smoothStep(0.82f, 0.90f, edgeR) * (1f - smoothStep(0.93f, 0.96f, edgeR)) -
-                    0.0024f * smoothStep(0.95f, 1.00f, edgeR)
+                // Seam B (Color) is completely decoupled from Seam A (Geometry):
+                // Widens pigment, mucosa, AO & wetness fade across outer ~40% of patch radius [0.56..0.96]
+                val matFeather = if (betaBlendVulvaSeamColor) {
+                    1f - quinticStep(SEAM_B_MAT_FEATHER_START, SEAM_B_MAT_FEATHER_END, edgeR)
+                } else {
+                    1f - smoothStep(0.62f, 0.90f, edgeR)
+                }
+                val anusMatProtect = if (betaBlendVulvaSeamColor) {
+                    anusProtect * (1f - quinticStep(SEAM_B_ANUS_MAT_FADE_START, SEAM_B_ANUS_MAT_FADE_END, edgeR))
+                } else {
+                    anusProtect
+                }
+                val matMask = (matFeather + (1f - matFeather) * anusMatProtect * 0.82f).coerceIn(0f, 1f)
+                val d = if (vMask > 1e-6f || matMask > 1e-6f) detailEvaluator(x, y) else null
 
                 val dz = (d?.dz ?: 0f) * vMask
                 var px = x
                 var py = y
-                var pz = cache.baseZ[i] + dz + overlapBias
+                var baseZ = cache.baseZ[i]
+                var baseAo = cache.baseAo[i]
+                var basePigment = cache.basePigment[i]
+
+                val pz: Float
+                if (betaSmoothVulvaSeam) {
+                    // Seam A (Geometry): Blend full 3D (px, py, pz) smoothly onto exact rendered body triangle surface
+                    // across [0.80..0.96] with ZERO step/dive at the outermost ring -> flush rim even from grazing right-rim views!
+                    if (edgeR >= SEAM_A_MESH_POS_BLEND_START && cache.hasSeamMatch[i]) {
+                        val seamBlend = quinticStep(SEAM_A_MESH_POS_BLEND_START, SEAM_A_MESH_POS_BLEND_END, edgeR)
+                        px = x * (1f - seamBlend) + cache.seamMeshX[i] * seamBlend
+                        py = y * (1f - seamBlend) + cache.seamMeshY[i] * seamBlend
+                        baseZ = baseZ * (1f - seamBlend) + cache.seamMeshZ[i] * seamBlend
+                    }
+                    pz = baseZ + dz
+                } else {
+                    // Baseline exact behavior
+                    val overlapBias = 0.0012f * smoothStep(0.82f, 0.90f, edgeR) * (1f - smoothStep(0.93f, 0.96f, edgeR)) -
+                        0.0024f * smoothStep(0.95f, 1.00f, edgeR)
+                    pz = baseZ + dz + overlapBias
+                }
+
+                // Seam B (Color): Match surrounding body triangle's exact interpolated AO & pigment at the outer edge
+                if (betaBlendVulvaSeamColor && edgeR >= SEAM_B_BODY_MAT_BLEND_START && cache.hasSeamMatch[i]) {
+                    val matSeamBlend = quinticStep(SEAM_B_BODY_MAT_BLEND_START, SEAM_B_BODY_MAT_BLEND_END, edgeR)
+                    baseAo = baseAo * (1f - matSeamBlend) + cache.seamMeshAo[i] * matSeamBlend
+                    basePigment = basePigment * (1f - matSeamBlend) + cache.seamMeshPigment[i] * matSeamBlend
+                }
 
                 // Seamlessly apply matching gluteal soft-tissue yield on the perianal buttock cheeks left & right of the anus
+                var finalPz = pz
                 if (hasGluteShift && y < -0.34f) {
-                    val gw = gluteElasticWeight(x, y, cache.baseZ[i])
+                    val gw = gluteElasticWeight(x, y, baseZ)
                     if (gw > 0.002f) {
                         val side = if (x >= 0f) 1f else -1f
                         val gx = if (side < 0f) lx else rx
@@ -1600,20 +1839,20 @@ internal object BlossomSdfBodyBuilder {
                         px += gx * 0.068f * gw
                         py += gy * 0.064f * gw
                         val gdz = (-0.015f * compressMag + 0.020f * (-gx * side)) * gw
-                        pz = max(pz + gdz, mattressSurfaceZ(py) + 0.008f)
+                        finalPz = max(finalPz + gdz, mattressSurfaceZ(py) + 0.008f)
                     }
                 }
 
                 val mucosa = ((d?.mucosa ?: 0f) * matMask).coerceIn(0f, 1f)
-                val wetness = (0.055f + (d?.wetness ?: 0f) * matMask).coerceIn(0f, 1f)
+                val wetness = (BODY_BASE_WETNESS + (d?.wetness ?: 0f) * matMask).coerceIn(0f, 1f)
                 val detailAo = 1f - (1f - (d?.ao ?: 1f)) * matMask
-                val ao = (cache.baseAo[i] * detailAo).coerceIn(0.06f, 1f)
-                val pigment = (cache.basePigment[i] + (d?.pigment ?: 0f) * matMask).coerceIn(0f, 1f)
+                val ao = (baseAo * detailAo).coerceIn(0.06f, 1f)
+                val pigment = (basePigment + (d?.pigment ?: 0f) * matMask).coerceIn(0f, 1f)
 
                 val vIdx = i * stride
                 data[vIdx] = px
                 data[vIdx + 1] = py
-                data[vIdx + 2] = pz
+                data[vIdx + 2] = finalPz
                 data[vIdx + 6] = mucosa
                 data[vIdx + 7] = wetness
                 data[vIdx + 8] = ao
@@ -1623,18 +1862,31 @@ internal object BlossomSdfBodyBuilder {
 
         computeNormals(data, cols, rows, false, false)
 
-        // Wide, smooth outer-skirt normal matching to the unified SDF body's analytical gradient normals -> ZERO seam!
+        // Wide, smooth outer-skirt normal matching to the unified SDF body's normals -> ZERO seam!
         for (i in 0 until cache.count) {
             val edgeR = cache.edgeR[i]
             val bx = cache.baseX[i]
             val by = cache.baseY[i]
-            val anusProtect = exp(-((bx / 0.16f).let { it * it } + ((by + 0.86f) / 0.15f).let { it * it }))
-            val normalBlend = (smoothStep(0.66f, 0.93f, edgeR) * (1f - anusProtect * 0.82f)).coerceIn(0f, 1f)
+            val anusProtect = exp(-((bx / 0.16f).let { it * it } + ((by - anusCenterY) / 0.15f).let { it * it }))
+            val normalBlend = if (betaSmoothVulvaSeam) {
+                val anusNormProtect = anusProtect * (1f - quinticStep(SEAM_A_ANUS_PROTECT_FADE_START, SEAM_A_ANUS_PROTECT_FADE_END, edgeR))
+                (quinticStep(SEAM_A_NORMAL_BLEND_START, SEAM_A_NORMAL_BLEND_END, edgeR) * (1f - anusNormProtect * 0.85f)).coerceIn(0f, 1f)
+            } else {
+                (smoothStep(0.66f, 0.93f, edgeR) * (1f - anusProtect * 0.82f)).coerceIn(0f, 1f)
+            }
             if (normalBlend > 0.001f) {
                 val vIdx = i * stride
                 var bnx = cache.baseNx[i]
                 var bny = cache.baseNy[i]
                 var bnz = cache.baseNz[i]
+                if (betaSmoothVulvaSeam && edgeR >= SEAM_A_MESH_NORMAL_BLEND_START && cache.hasSeamMatch[i]) {
+                    val seamNBlend = quinticStep(SEAM_A_MESH_NORMAL_BLEND_START, SEAM_A_MESH_NORMAL_BLEND_END, edgeR)
+                    bnx = bnx * (1f - seamNBlend) + cache.seamMeshNx[i] * seamNBlend
+                    bny = bny * (1f - seamNBlend) + cache.seamMeshNy[i] * seamNBlend
+                    bnz = bnz * (1f - seamNBlend) + cache.seamMeshNz[i] * seamNBlend
+                    val sLen = sqrt(bnx * bnx + bny * bny + bnz * bnz).coerceAtLeast(1e-5f)
+                    bnx /= sLen; bny /= sLen; bnz /= sLen
+                }
                 if (hasGluteShift && by < -0.34f) {
                     val gw = gluteElasticWeight(bx, by, cache.baseZ[i])
                     if (gw > 0.002f) {
@@ -1664,6 +1916,698 @@ internal object BlossomSdfBodyBuilder {
         }
 
         mesh.commitVertices()
+    }
+
+    // -------------------------------------------------------------------------
+    // LOCALIZED REVERSIBLE PELVIS/BUTTOCK/SEAM BETA CACHE (INSTANT 60 FPS TOGGLE)
+    // -------------------------------------------------------------------------
+    class PelvisBetaCache(
+        val bodyVertIndices: IntArray,
+        val baselineVertData: FloatArray,   // 8 floats/vert: x,y,z,nx,ny,nz,ao,pigment (exact backup!)
+        val unrecessedPos: FloatArray,      // 3 floats/vert: exact SDF=0 position prior to collar recess
+        val ovalR: FloatArray,
+        val isAnteriorCollar: BooleanArray,
+        val inButtockZone: BooleanArray,
+        val smoothNeighborOffsets: IntArray, // CSR offsets (length = bodyVertIndices.size + 1) for un-recessed rim smoothing
+        val smoothNeighborVerts: IntArray    // Body vertex indices of 1-ring neighbors for Seam A rim smoothing
+    )
+
+    fun buildPelvisBetaCache(bodyMesh: DynamicGlMesh): PelvisBetaCache {
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val bData = bodyMesh.vertexData
+        val vCount = bodyMesh.vertexCount
+
+        val idxBuf = IntArray(vCount)
+        val ovalBuf = FloatArray(vCount)
+        val antBuf = BooleanArray(vCount)
+        val buttockBuf = BooleanArray(vCount)
+        var count = 0
+
+        for (i in 0 until vCount) {
+            val base = i * stride
+            val x = bData[base]
+            val y = bData[base + 1]
+            val z = bData[base + 2]
+            val nz = bData[base + 5]
+            val ax = abs(x)
+
+            val rOval = sqrt((x / PATCH_RX).let { it * it } + ((y - PATCH_CENTER_Y) / PATCH_RY).let { it * it })
+            val isAnt = z > -0.92f && nz > 0.04f && rOval < 1.30f
+            val inButtock = y in -1.44f..0.26f && ax < 1.74f && z < 0.30f
+
+            if (isAnt || inButtock) {
+                idxBuf[count] = i
+                ovalBuf[count] = rOval
+                antBuf[count] = isAnt
+                buttockBuf[count] = inButtock
+                count++
+            }
+        }
+
+        val indices = idxBuf.copyOf(count)
+        val ovalR = ovalBuf.copyOf(count)
+        val isAntCollar = antBuf.copyOf(count)
+        val inButtock = buttockBuf.copyOf(count)
+        val baseline = FloatArray(count * 8)
+        val unrecessed = FloatArray(count * 3)
+
+        val vertToCache = IntArray(vCount) { -1 }
+        for (k in 0 until count) {
+            vertToCache[indices[k]] = k
+            val src = indices[k] * stride
+            val x = bData[src]; val y = bData[src + 1]; val z = bData[src + 2]
+            val nx = bData[src + 3]; val ny = bData[src + 4]; val nz = bData[src + 5]
+            val ao = bData[src + 8]; val pig = bData[src + 9]
+
+            val bOff = k * 8
+            baseline[bOff] = x; baseline[bOff + 1] = y; baseline[bOff + 2] = z
+            baseline[bOff + 3] = nx; baseline[bOff + 4] = ny; baseline[bOff + 5] = nz
+            baseline[bOff + 6] = ao; baseline[bOff + 7] = pig
+
+            var ux = x; var uy = y; var uz = z
+            if (isAntCollar[k] && ovalR[k] < 0.94f && z > -0.85f && nz > 0.08f) {
+                val oldRecess = 0.090f * (1f - smoothStep(0.76f, 0.94f, ovalR[k]))
+                ux += nx * oldRecess
+                uy += ny * oldRecess
+                uz += nz * oldRecess
+                // 2 Newton polish steps back onto baseline SDF=0
+                for (it in 0 until 2) {
+                    val d = evaluateBodySdf(ux, uy, uz)
+                    if (abs(d) < 0.0003f) break
+                    val n = evaluateBodyNormal(ux, uy, uz, eps = 0.014f)
+                    val step = d.coerceIn(-0.04f, 0.04f)
+                    ux -= n[0] * step; uy -= n[1] * step; uz -= n[2] * step
+                }
+            }
+            val uOff = k * 3
+            unrecessed[uOff] = ux; unrecessed[uOff + 1] = uy; unrecessed[uOff + 2] = uz
+        }
+
+        // Precompute 1-ring neighbors (excluding deeply recessed inner vertices) for anterior rim smoothing
+        val maxDeg = 12
+        val nbMat = IntArray(count * maxDeg)
+        val nbDeg = IntArray(count)
+        fun addNeighbor(cacheK: Int, nbBodyVert: Int) {
+            if (!isAntCollar[cacheK]) return
+            if (ovalR[cacheK] < SEAM_A_BODY_SMOOTH_INNER || ovalR[cacheK] >= SEAM_A_BODY_SMOOTH_OUTER) return
+            // Skip recessed inner neighbors so collar recess never drags rim vertices inward
+            val nbK = vertToCache[nbBodyVert]
+            if (nbK >= 0 && isAntCollar[nbK] && ovalR[nbK] < SEAM_A_BODY_SMOOTH_INNER) return
+            val deg = nbDeg[cacheK]
+            val rowOff = cacheK * maxDeg
+            for (d in 0 until deg) {
+                if (nbMat[rowOff + d] == nbBodyVert) return
+            }
+            if (deg < maxDeg) {
+                nbMat[rowOff + deg] = nbBodyVert
+                nbDeg[cacheK] = deg + 1
+            }
+        }
+        val idxBufMesh = bodyMesh.indexBuffer
+        val triCount = bodyMesh.indexCount / 3
+        idxBufMesh.position(0)
+        for (t in 0 until triCount) {
+            val a = idxBufMesh.get().toInt() and 0xFFFF
+            val b = idxBufMesh.get().toInt() and 0xFFFF
+            val c = idxBufMesh.get().toInt() and 0xFFFF
+            val ka = vertToCache[a]
+            val kb = vertToCache[b]
+            val kc = vertToCache[c]
+            if (ka >= 0) { addNeighbor(ka, b); addNeighbor(ka, c) }
+            if (kb >= 0) { addNeighbor(kb, a); addNeighbor(kb, c) }
+            if (kc >= 0) { addNeighbor(kc, a); addNeighbor(kc, b) }
+        }
+        idxBufMesh.position(0)
+
+        val nbOffsets = IntArray(count + 1)
+        var totalNb = 0
+        for (k in 0 until count) {
+            nbOffsets[k] = totalNb
+            totalNb += nbDeg[k]
+        }
+        nbOffsets[count] = totalNb
+        val nbVerts = IntArray(totalNb)
+        for (k in 0 until count) {
+            val deg = nbDeg[k]
+            if (deg > 0) {
+                System.arraycopy(nbMat, k * maxDeg, nbVerts, nbOffsets[k], deg)
+            }
+        }
+
+        return PelvisBetaCache(
+            bodyVertIndices = indices,
+            baselineVertData = baseline,
+            unrecessedPos = unrecessed,
+            ovalR = ovalR,
+            isAnteriorCollar = isAntCollar,
+            inButtockZone = inButtock,
+            smoothNeighborOffsets = nbOffsets,
+            smoothNeighborVerts = nbVerts
+        )
+    }
+
+    /**
+     * Applies any independent combination of the pelvis/buttock/seam Beta refinements cleanly and reversibly
+     * to ONLY the pelvic/buttock/patch-seam region of Blossom's body mesh and vulva patch cache,
+     * keeping legs, vulva design, and everything above the pelvis 100% untouched.
+     * Restores the exact immutable baseline backup whenever all toggles are OFF.
+     */
+    fun applyPelvisBetaRefinements(
+        bodyMesh: DynamicGlMesh,
+        pelvisCache: PelvisBetaCache,
+        legCache: LegSkinCache,
+        gluteCache: GluteSkinCache,
+        patchCache: BlossomVulvaPatchCache,
+        baselinePatchCache: BlossomVulvaPatchCache,
+        betaShortPerineum: Boolean,
+        betaSoftButtockTable: Boolean,
+        betaSmoothVulvaSeam: Boolean,
+        betaBlendVulvaSeamColor: Boolean = false
+    ) {
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val bData = bodyMesh.vertexData
+        val indices = pelvisCache.bodyVertIndices
+        val baseline = pelvisCache.baselineVertData
+        val unrecessed = pelvisCache.unrecessedPos
+        val ovalRs = pelvisCache.ovalR
+        val isAnts = pelvisCache.isAnteriorCollar
+        val inButtocks = pelvisCache.inButtockZone
+
+        val bodyChanged = betaShortPerineum || betaSoftButtockTable || betaSmoothVulvaSeam
+        val sdfChanged = betaShortPerineum || betaSoftButtockTable
+        val anusCenterY = if (betaShortPerineum) -0.782f else -0.86f
+
+        // 1. Update ONLY pelvic/buttock/collar vertices of blossomBodyMesh
+        for (k in indices.indices) {
+            val dst = indices[k] * stride
+            val bOff = k * 8
+            val touchesButtock = sdfChanged && inButtocks[k]
+            val touchesSeam = betaSmoothVulvaSeam && isAnts[k]
+            if (!bodyChanged || (!touchesButtock && !touchesSeam)) {
+                bData[dst] = baseline[bOff]
+                bData[dst + 1] = baseline[bOff + 1]
+                bData[dst + 2] = baseline[bOff + 2]
+                bData[dst + 3] = baseline[bOff + 3]
+                bData[dst + 4] = baseline[bOff + 4]
+                bData[dst + 5] = baseline[bOff + 5]
+                bData[dst + 8] = baseline[bOff + 6]
+                bData[dst + 9] = baseline[bOff + 7]
+                continue
+            }
+
+            val uOff = k * 3
+            var px = unrecessed[uOff]
+            var py = unrecessed[uOff + 1]
+            var pz = unrecessed[uOff + 2]
+            var nx = baseline[bOff + 3]
+            var ny = baseline[bOff + 4]
+            var nz = baseline[bOff + 5]
+            var ao = baseline[bOff + 6]
+            var pig = baseline[bOff + 7]
+
+            if (sdfChanged && inButtocks[k]) {
+                // Smooth damped projection onto toggled pelvic/buttock SDF
+                for (it in 0 until 4) {
+                    val dVal = evaluateBodySdf(px, py, pz, betaShortPerineum, betaSoftButtockTable)
+                    if (abs(dVal) < 0.0005f) break
+                    val norm = evaluateBodyNormal(px, py, pz, eps = 0.015f, betaShortPerineum, betaSoftButtockTable)
+                    val step = dVal.coerceIn(-0.07f, 0.07f)
+                    px -= norm[0] * step
+                    py -= norm[1] * step
+                    pz -= norm[2] * step
+                }
+                val finalNorm = evaluateBodyNormal(px, py, pz, eps = 0.014f, betaShortPerineum, betaSoftButtockTable)
+                nx = finalNorm[0]; ny = finalNorm[1]; nz = finalNorm[2]
+                val mat = evaluateBodyMaterial(px, py, pz, nx, ny, nz, betaShortPerineum, betaSoftButtockTable)
+                ao = mat.first; pig = mat.second
+            }
+
+            if (isAnts[k]) {
+                val rOval = ovalRs[k]
+                if (betaSmoothVulvaSeam) {
+                    // Seam A: Pull inner recess strictly inside [0.70..0.84] so EVERY body triangle
+                    // touching the outer rim (edgeR >= 0.86) has all 3 vertices 100% un-recessed on SDF=0!
+                    val baseRecess = if (rOval < SEAM_A_COLLAR_RECESS_END) {
+                        SEAM_A_COLLAR_RECESS_DEPTH * (1f - quinticStep(SEAM_A_COLLAR_RECESS_START, SEAM_A_COLLAR_RECESS_END, rOval))
+                    } else 0f
+                    val perianalClear = if (rOval < 0.90f && abs(px) < 0.22f && py < -0.64f) {
+                        SEAM_A_PERIANAL_RECESS_DEPTH * exp(-((px / 0.13f).let { it * it } + ((py - anusCenterY) / 0.12f).let { it * it }))
+                    } else 0f
+                    val recess = max(baseRecess, perianalClear)
+                    if (recess > 1e-5f) {
+                        px -= nx * recess; py -= ny * recess; pz -= nz * recess
+                    } else if (!sdfChanged && rOval < SEAM_A_BODY_SMOOTH_OUTER) {
+                        val dVal = evaluateBodySdf(px, py, pz)
+                        if (abs(dVal) > 0.0002f) {
+                            val step = dVal.coerceIn(-0.02f, 0.02f)
+                            px -= nx * step; py -= ny * step; pz -= nz * step
+                        }
+                        val n = evaluateBodyNormal(px, py, pz, eps = 0.014f)
+                        nx = n[0]; ny = n[1]; nz = n[2]
+                        val mat = evaluateBodyMaterial(px, py, pz, nx, ny, nz)
+                        ao = mat.first; pig = mat.second
+                    }
+                } else if (rOval < 0.94f && baseline[bOff + 2] > -0.85f && baseline[bOff + 5] > 0.08f) {
+                    val recess = 0.090f * (1f - smoothStep(0.76f, 0.94f, rOval))
+                    px -= nx * recess; py -= ny * recess; pz -= nz * recess
+                }
+            }
+
+            bData[dst] = px
+            bData[dst + 1] = py
+            bData[dst + 2] = pz
+            bData[dst + 3] = nx
+            bData[dst + 4] = ny
+            bData[dst + 5] = nz
+            bData[dst + 8] = ao
+            bData[dst + 9] = pig
+        }
+
+        // 1B. Seam A (Geometry): 2 local Laplacian smoothing + exact SDF=0 projection passes across the
+        // un-recessed rim & immediately surrounding skin band [0.84..1.26] to eliminate Surface Nets ripple shading!
+        if (betaSmoothVulvaSeam) {
+            val nbOffsets = pelvisCache.smoothNeighborOffsets
+            val nbVerts = pelvisCache.smoothNeighborVerts
+            val tmpX = FloatArray(indices.size)
+            val tmpY = FloatArray(indices.size)
+            val tmpZ = FloatArray(indices.size)
+            val touched = BooleanArray(indices.size)
+
+            repeat(SEAM_A_BODY_SMOOTH_PASSES) {
+                for (k in indices.indices) {
+                    val start = nbOffsets[k]
+                    val end = nbOffsets[k + 1]
+                    if (end <= start) {
+                        touched[k] = false
+                        continue
+                    }
+                    val rOval = ovalRs[k]
+                    val inRamp = quinticStep(SEAM_A_BODY_SMOOTH_INNER, 0.90f, rOval)
+                    val outRamp = 1f - quinticStep(SEAM_A_BODY_SMOOTH_FADE_START, SEAM_A_BODY_SMOOTH_OUTER, rOval)
+                    val w = SEAM_A_BODY_SMOOTH_LAMBDA * inRamp * outRamp
+                    if (w < 1e-4f) {
+                        touched[k] = false
+                        continue
+                    }
+                    var sx = 0f; var sy = 0f; var sz = 0f
+                    for (e in start until end) {
+                        val nbOff = nbVerts[e] * stride
+                        sx += bData[nbOff]
+                        sy += bData[nbOff + 1]
+                        sz += bData[nbOff + 2]
+                    }
+                    val invDeg = 1f / (end - start)
+                    val dst = indices[k] * stride
+                    var px = bData[dst] * (1f - w) + (sx * invDeg) * w
+                    var py = bData[dst + 1] * (1f - w) + (sy * invDeg) * w
+                    var pz = bData[dst + 2] * (1f - w) + (sz * invDeg) * w
+
+                    // Project smoothly back onto exact SDF=0 isosurface
+                    for (it in 0 until 2) {
+                        val dVal = evaluateBodySdf(px, py, pz, betaShortPerineum, betaSoftButtockTable)
+                        if (abs(dVal) < 0.0002f) break
+                        val nrm = evaluateBodyNormal(px, py, pz, eps = 0.014f, betaShortPerineum, betaSoftButtockTable)
+                        val step = dVal.coerceIn(-0.04f, 0.04f)
+                        px -= nrm[0] * step; py -= nrm[1] * step; pz -= nrm[2] * step
+                    }
+                    tmpX[k] = px; tmpY[k] = py; tmpZ[k] = pz
+                    touched[k] = true
+                }
+                for (k in indices.indices) {
+                    if (!touched[k]) continue
+                    val dst = indices[k] * stride
+                    val px = tmpX[k]; val py = tmpY[k]; val pz = tmpZ[k]
+                    val nrm = evaluateBodyNormal(px, py, pz, eps = 0.014f, betaShortPerineum, betaSoftButtockTable)
+                    val mat = evaluateBodyMaterial(px, py, pz, nrm[0], nrm[1], nrm[2], betaShortPerineum, betaSoftButtockTable)
+                    bData[dst] = px
+                    bData[dst + 1] = py
+                    bData[dst + 2] = pz
+                    bData[dst + 3] = nrm[0]
+                    bData[dst + 4] = nrm[1]
+                    bData[dst + 5] = nrm[2]
+                    bData[dst + 8] = mat.first
+                    bData[dst + 9] = mat.second
+                }
+            }
+        }
+
+        // Sync affected rest positions into leg & glute skin caches so live leg-spread & glute elasticity compose seamlessly
+        val gluteIdx = gluteCache.bodyVertIndices
+        val gluteRest = gluteCache.bodyRestPosNorm
+        for (k in gluteIdx.indices) {
+            val src = gluteIdx[k] * stride
+            val dst = k * 6
+            gluteRest[dst] = bData[src]; gluteRest[dst + 1] = bData[src + 1]; gluteRest[dst + 2] = bData[src + 2]
+            gluteRest[dst + 3] = bData[src + 3]; gluteRest[dst + 4] = bData[src + 4]; gluteRest[dst + 5] = bData[src + 5]
+        }
+        val legIdx = legCache.bodyVertIndices
+        val legBase = legCache.bodyBasePosNorm
+        for (k in legIdx.indices) {
+            val vIdx = legIdx[k]
+            val src = vIdx * stride
+            if (bData[src + 1] > -1.50f) {
+                val dst = k * 6
+                legBase[dst] = bData[src]; legBase[dst + 1] = bData[src + 1]; legBase[dst + 2] = bData[src + 2]
+                legBase[dst + 3] = bData[src + 3]; legBase[dst + 4] = bData[src + 4]; legBase[dst + 5] = bData[src + 5]
+            }
+        }
+
+        bodyMesh.commitVertices()
+
+        // 2. Refresh vulva patch base cache (instant copy when OFF, localized lower-region resample when SDF changed)
+        patchCache.copyFrom(baselinePatchCache)
+        if (sdfChanged) {
+            for (i in 0 until patchCache.count) {
+                val py = patchCache.baseY[i]
+                if (py < 0.24f) {
+                    val sample = sampleBodySurfacePoint(
+                        x = patchCache.baseX[i],
+                        y = py,
+                        betaShortPerineum = betaShortPerineum,
+                        betaSoftButtockTable = betaSoftButtockTable
+                    )
+                    patchCache.baseZ[i] = sample.z
+                    patchCache.baseNx[i] = sample.nx
+                    patchCache.baseNy[i] = sample.ny
+                    patchCache.baseNz[i] = sample.nz
+                    patchCache.baseAo[i] = sample.ao
+                    patchCache.basePigment[i] = sample.pigment
+                }
+            }
+        }
+
+        // 3. Populate exact 3D barycentric body-triangle seam targets whenever Seam A (Geometry) or Seam B (Color) is active
+        if (betaSmoothVulvaSeam || betaBlendVulvaSeamColor) {
+            populateVulvaPatchSeamTargets(bodyMesh, patchCache)
+        }
+    }
+
+    /**
+     * Exact 3D Möller–Trumbore normal-ray intersection + closest-triangle barycentric fallback against
+     * the actual rendered anterior seam-collar triangles of [bodyMesh] for every outer patch vertex
+     * (`edgeR >= SEAM_TARGET_MIN_EDGE_R`). Guarantees 100% perimeter coverage including steeply sloped
+     * right/left inner-thigh rims with identical 3D positions, normals, AO, and pigment!
+     */
+    private fun populateVulvaPatchSeamTargets(
+        bodyMesh: DynamicGlMesh,
+        patchCache: BlossomVulvaPatchCache
+    ) {
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val bData = bodyMesh.vertexData
+        val idxBuf = bodyMesh.indexBuffer
+        val triCount = bodyMesh.indexCount / 3
+
+        val boxMinX = -PATCH_RX - 0.18f
+        val boxMaxX = PATCH_RX + 0.18f
+        val boxMinY = PATCH_CENTER_Y - PATCH_RY - 0.18f
+        val boxMaxY = PATCH_CENTER_Y + PATCH_RY + 0.18f
+
+        val triA = IntArray(triCount)
+        val triB = IntArray(triCount)
+        val triC = IntArray(triCount)
+        val triMinX = FloatArray(triCount)
+        val triMaxX = FloatArray(triCount)
+        val triMinY = FloatArray(triCount)
+        val triMaxY = FloatArray(triCount)
+        val triMinZ = FloatArray(triCount)
+        val triMaxZ = FloatArray(triCount)
+        var selCount = 0
+
+        idxBuf.position(0)
+        for (t in 0 until triCount) {
+            val a = idxBuf.get().toInt() and 0xFFFF
+            val b = idxBuf.get().toInt() and 0xFFFF
+            val c = idxBuf.get().toInt() and 0xFFFF
+
+            val ao = a * stride; val bo = b * stride; val co = c * stride
+            val az = bData[ao + 2]; val bz = bData[bo + 2]; val cz = bData[co + 2]
+            if (az < -1.05f && bz < -1.05f && cz < -1.05f) continue
+            val anz = bData[ao + 5]; val bnz = bData[bo + 5]; val cnz = bData[co + 5]
+            if (anz + bnz + cnz < SEAM_TRI_MIN_NZ_SUM) continue
+
+            val ax = bData[ao]; val ay = bData[ao + 1]
+            val bx = bData[bo]; val by = bData[bo + 1]
+            val cx = bData[co]; val cy = bData[co + 1]
+
+            val minX = min(ax, min(bx, cx))
+            val maxX = max(ax, max(bx, cx))
+            val minY = min(ay, min(by, cy))
+            val maxY = max(ay, max(by, cy))
+            if (maxX < boxMinX || minX > boxMaxX || maxY < boxMinY || minY > boxMaxY) continue
+
+            triA[selCount] = a; triB[selCount] = b; triC[selCount] = c
+            triMinX[selCount] = minX - 0.06f
+            triMaxX[selCount] = maxX + 0.06f
+            triMinY[selCount] = minY - 0.06f
+            triMaxY[selCount] = maxY + 0.06f
+            triMinZ[selCount] = min(az, min(bz, cz)) - 0.08f
+            triMaxZ[selCount] = max(az, max(bz, cz)) + 0.08f
+            selCount++
+        }
+        idxBuf.position(0)
+
+        // Lightweight 8x8 spatial hash over patch XY footprint for sub-millisecond toggle latency
+        val gridN = 8
+        val invSpanX = gridN / (boxMaxX - boxMinX)
+        val invSpanY = gridN / (boxMaxY - boxMinY)
+        val cellCounts = IntArray(gridN * gridN)
+        for (t in 0 until selCount) {
+            val ix0 = ((triMinX[t] - boxMinX) * invSpanX).toInt().coerceIn(0, gridN - 1)
+            val ix1 = ((triMaxX[t] - boxMinX) * invSpanX).toInt().coerceIn(0, gridN - 1)
+            val iy0 = ((triMinY[t] - boxMinY) * invSpanY).toInt().coerceIn(0, gridN - 1)
+            val iy1 = ((triMaxY[t] - boxMinY) * invSpanY).toInt().coerceIn(0, gridN - 1)
+            for (iy in iy0..iy1) {
+                val rowOff = iy * gridN
+                for (ix in ix0..ix1) cellCounts[rowOff + ix]++
+            }
+        }
+        val cellOffsets = IntArray(gridN * gridN + 1)
+        var totalRefs = 0
+        for (c in 0 until gridN * gridN) {
+            cellOffsets[c] = totalRefs
+            totalRefs += cellCounts[c]
+            cellCounts[c] = 0
+        }
+        cellOffsets[gridN * gridN] = totalRefs
+        val cellTris = IntArray(totalRefs)
+        for (t in 0 until selCount) {
+            val ix0 = ((triMinX[t] - boxMinX) * invSpanX).toInt().coerceIn(0, gridN - 1)
+            val ix1 = ((triMaxX[t] - boxMinX) * invSpanX).toInt().coerceIn(0, gridN - 1)
+            val iy0 = ((triMinY[t] - boxMinY) * invSpanY).toInt().coerceIn(0, gridN - 1)
+            val iy1 = ((triMaxY[t] - boxMinY) * invSpanY).toInt().coerceIn(0, gridN - 1)
+            for (iy in iy0..iy1) {
+                val rowOff = iy * gridN
+                for (ix in ix0..ix1) {
+                    val cell = rowOff + ix
+                    cellTris[cellOffsets[cell] + cellCounts[cell]++] = t
+                }
+            }
+        }
+
+        val baryOut = FloatArray(3)
+        for (i in 0 until patchCache.count) {
+            val edgeR = patchCache.edgeR[i]
+            if (edgeR < SEAM_TARGET_MIN_EDGE_R) {
+                patchCache.hasSeamMatch[i] = false
+                continue
+            }
+            val ox = patchCache.baseX[i]
+            val oy = patchCache.baseY[i]
+            val oz = patchCache.baseZ[i]
+            val dx = patchCache.baseNx[i]
+            val dy = patchCache.baseNy[i]
+            val dz = patchCache.baseNz[i]
+
+            val ix = ((ox - boxMinX) * invSpanX).toInt().coerceIn(0, gridN - 1)
+            val iy = ((oy - boxMinY) * invSpanY).toInt().coerceIn(0, gridN - 1)
+            val cell = iy * gridN + ix
+            val cStart = cellOffsets[cell]
+            val cEnd = cellOffsets[cell + 1]
+
+            var bestRayAbsT = Float.POSITIVE_INFINITY
+            var rayFound = false
+            var bestX = ox; var bestY = oy; var bestZ = oz
+            var bestNx = dx; var bestNy = dy; var bestNz = dz
+            var bestAo = patchCache.baseAo[i]; var bestPig = patchCache.basePigment[i]
+
+            // Pass 1: Exact Möller–Trumbore ray-triangle intersection along surface normal D
+            for (ci in cStart until cEnd) {
+                val t = cellTris[ci]
+                if (ox < triMinX[t] || ox > triMaxX[t] || oy < triMinY[t] || oy > triMaxY[t] || oz < triMinZ[t] || oz > triMaxZ[t]) continue
+
+                val ao = triA[t] * stride
+                val bo = triB[t] * stride
+                val co = triC[t] * stride
+                val x0 = bData[ao]; val y0 = bData[ao + 1]; val z0 = bData[ao + 2]
+                val e1x = bData[bo] - x0; val e1y = bData[bo + 1] - y0; val e1z = bData[bo + 2] - z0
+                val e2x = bData[co] - x0; val e2y = bData[co + 1] - y0; val e2z = bData[co + 2] - z0
+
+                val pvx = dy * e2z - dz * e2y
+                val pvy = dz * e2x - dx * e2z
+                val pvz = dx * e2y - dy * e2x
+                val det = e1x * pvx + e1y * pvy + e1z * pvz
+                if (abs(det) < 1e-7f) continue
+
+                val invDet = 1f / det
+                val tvx = ox - x0; val tvy = oy - y0; val tvz = oz - z0
+                val u = (tvx * pvx + tvy * pvy + tvz * pvz) * invDet
+                if (u < -0.02f || u > 1.02f) continue
+
+                val qvx = tvy * e1z - tvz * e1y
+                val qvy = tvz * e1x - tvx * e1z
+                val qvz = tvx * e1y - tvy * e1x
+                val v = (dx * qvx + dy * qvy + dz * qvz) * invDet
+                val w = 1f - u - v
+                if (v < -0.02f || w < -0.02f) continue
+
+                val rayT = (e2x * qvx + e2y * qvy + e2z * qvz) * invDet
+                val absT = abs(rayT)
+                if (absT < SEAM_RAY_MAX_DIST && absT < bestRayAbsT) {
+                    val cu = u.coerceIn(0f, 1f)
+                    val cv = v.coerceIn(0f, 1f)
+                    val cw = w.coerceIn(0f, 1f)
+                    val wSum = (cu + cv + cw).coerceAtLeast(1e-6f)
+                    val nw0 = cw / wSum; val nw1 = cu / wSum; val nw2 = cv / wSum
+
+                    bestRayAbsT = absT
+                    bestX = nw0 * x0 + nw1 * bData[bo] + nw2 * bData[co]
+                    bestY = nw0 * y0 + nw1 * bData[bo + 1] + nw2 * bData[co + 1]
+                    bestZ = nw0 * z0 + nw1 * bData[bo + 2] + nw2 * bData[co + 2]
+                    var tnx = nw0 * bData[ao + 3] + nw1 * bData[bo + 3] + nw2 * bData[co + 3]
+                    var tny = nw0 * bData[ao + 4] + nw1 * bData[bo + 4] + nw2 * bData[co + 4]
+                    var tnz = nw0 * bData[ao + 5] + nw1 * bData[bo + 5] + nw2 * bData[co + 5]
+                    val nLen = sqrt(tnx * tnx + tny * tny + tnz * tnz).coerceAtLeast(1e-5f)
+                    tnx /= nLen; tny /= nLen; tnz /= nLen
+                    bestNx = tnx; bestNy = tny; bestNz = tnz
+                    bestAo = nw0 * bData[ao + 8] + nw1 * bData[bo + 8] + nw2 * bData[co + 8]
+                    bestPig = nw0 * bData[ao + 9] + nw1 * bData[bo + 9] + nw2 * bData[co + 9]
+                    rayFound = true
+                }
+            }
+
+            // Pass 2: Guaranteed closest-triangle 3D barycentric projection fallback (0% dropouts on steep rims!)
+            if (!rayFound) {
+                var bestDistSq = Float.POSITIVE_INFINITY
+                val useCell = cEnd > cStart
+                val iterCount = if (useCell) cEnd - cStart else selCount
+                for (k in 0 until iterCount) {
+                    val t = if (useCell) cellTris[cStart + k] else k
+                    val ao = triA[t] * stride
+                    val bo = triB[t] * stride
+                    val co = triC[t] * stride
+                    val distSq = closestPointOnTriangleBarycentric(
+                        ox, oy, oz,
+                        bData[ao], bData[ao + 1], bData[ao + 2],
+                        bData[bo], bData[bo + 1], bData[bo + 2],
+                        bData[co], bData[co + 1], bData[co + 2],
+                        baryOut
+                    )
+                    if (distSq < bestDistSq) {
+                        bestDistSq = distSq
+                        val nw0 = baryOut[0]; val nw1 = baryOut[1]; val nw2 = baryOut[2]
+                        bestX = nw0 * bData[ao] + nw1 * bData[bo] + nw2 * bData[co]
+                        bestY = nw0 * bData[ao + 1] + nw1 * bData[bo + 1] + nw2 * bData[co + 1]
+                        bestZ = nw0 * bData[ao + 2] + nw1 * bData[bo + 2] + nw2 * bData[co + 2]
+                        var tnx = nw0 * bData[ao + 3] + nw1 * bData[bo + 3] + nw2 * bData[co + 3]
+                        var tny = nw0 * bData[ao + 4] + nw1 * bData[bo + 4] + nw2 * bData[co + 4]
+                        var tnz = nw0 * bData[ao + 5] + nw1 * bData[bo + 5] + nw2 * bData[co + 5]
+                        val nLen = sqrt(tnx * tnx + tny * tny + tnz * tnz).coerceAtLeast(1e-5f)
+                        tnx /= nLen; tny /= nLen; tnz /= nLen
+                        bestNx = tnx; bestNy = tny; bestNz = tnz
+                        bestAo = nw0 * bData[ao + 8] + nw1 * bData[bo + 8] + nw2 * bData[co + 8]
+                        bestPig = nw0 * bData[ao + 9] + nw1 * bData[bo + 9] + nw2 * bData[co + 9]
+                        rayFound = true
+                    }
+                }
+            }
+
+            if (rayFound) {
+                patchCache.seamMeshX[i] = bestX
+                patchCache.seamMeshY[i] = bestY
+                patchCache.seamMeshZ[i] = bestZ
+                patchCache.seamMeshNx[i] = bestNx
+                patchCache.seamMeshNy[i] = bestNy
+                patchCache.seamMeshNz[i] = bestNz
+                patchCache.seamMeshAo[i] = bestAo
+                patchCache.seamMeshPigment[i] = bestPig
+                patchCache.hasSeamMatch[i] = true
+            } else {
+                patchCache.hasSeamMatch[i] = false
+            }
+        }
+    }
+
+    /**
+     * Exact closest point on 3D triangle (A, B, C) to point P; writes normalized barycentric weights
+     * (wA, wB, wC) into [baryOut] and returns squared Euclidean distance.
+     */
+    private fun closestPointOnTriangleBarycentric(
+        px: Float, py: Float, pz: Float,
+        ax: Float, ay: Float, az: Float,
+        bx: Float, by: Float, bz: Float,
+        cx: Float, cy: Float, cz: Float,
+        baryOut: FloatArray
+    ): Float {
+        val abx = bx - ax; val aby = by - ay; val abz = bz - az
+        val acx = cx - ax; val acy = cy - ay; val acz = cz - az
+        val apx = px - ax; val apy = py - ay; val apz = pz - az
+
+        val d1 = abx * apx + aby * apy + abz * apz
+        val d2 = acx * apx + acy * apy + acz * apz
+        if (d1 <= 0f && d2 <= 0f) {
+            baryOut[0] = 1f; baryOut[1] = 0f; baryOut[2] = 0f
+            return apx * apx + apy * apy + apz * apz
+        }
+
+        val bpx = px - bx; val bpy = py - by; val bpz = pz - bz
+        val d3 = abx * bpx + aby * bpy + abz * bpz
+        val d4 = acx * bpx + acy * bpy + acz * bpz
+        if (d3 >= 0f && d4 <= d3) {
+            baryOut[0] = 0f; baryOut[1] = 1f; baryOut[2] = 0f
+            return bpx * bpx + bpy * bpy + bpz * bpz
+        }
+
+        val vc = d1 * d4 - d3 * d2
+        if (vc <= 0f && d1 >= 0f && d3 <= 0f) {
+            val v = d1 / (d1 - d3).coerceAtLeast(1e-8f)
+            baryOut[0] = 1f - v; baryOut[1] = v; baryOut[2] = 0f
+            val qx = ax + abx * v - px; val qy = ay + aby * v - py; val qz = az + abz * v - pz
+            return qx * qx + qy * qy + qz * qz
+        }
+
+        val cpx = px - cx; val cpy = py - cy; val cpz = pz - cz
+        val d5 = abx * cpx + aby * cpy + abz * cpz
+        val d6 = acx * cpx + acy * cpy + acz * cpz
+        if (d6 >= 0f && d5 <= d6) {
+            baryOut[0] = 0f; baryOut[1] = 0f; baryOut[2] = 1f
+            return cpx * cpx + cpy * cpy + cpz * cpz
+        }
+
+        val vb = d5 * d2 - d1 * d6
+        if (vb <= 0f && d2 >= 0f && d6 <= 0f) {
+            val w = d2 / (d2 - d6).coerceAtLeast(1e-8f)
+            baryOut[0] = 1f - w; baryOut[1] = 0f; baryOut[2] = w
+            val qx = ax + acx * w - px; val qy = ay + acy * w - py; val qz = az + acz * w - pz
+            return qx * qx + qy * qy + qz * qz
+        }
+
+        val va = d3 * d6 - d5 * d4
+        if (va <= 0f && (d4 - d3) >= 0f && (d5 - d6) >= 0f) {
+            val w = (d4 - d3) / ((d4 - d3) + (d5 - d6)).coerceAtLeast(1e-8f)
+            baryOut[0] = 0f; baryOut[1] = 1f - w; baryOut[2] = w
+            val qx = bx + (cx - bx) * w - px; val qy = by + (cy - by) * w - py; val qz = bz + (cz - bz) * w - pz
+            return qx * qx + qy * qy + qz * qz
+        }
+
+        val denom = 1f / (va + vb + vc).coerceAtLeast(1e-8f)
+        val v = vb * denom
+        val w = vc * denom
+        val u = 1f - v - w
+        baryOut[0] = u; baryOut[1] = v; baryOut[2] = w
+        val qx = ax + abx * v + acx * w - px
+        val qy = ay + aby * v + acy * w - py
+        val qz = az + abz * v + acz * w - pz
+        return qx * qx + qy * qy + qz * qz
     }
 
     // -------------------------------------------------------------------------
@@ -2140,6 +3084,11 @@ internal object BlossomSdfBodyBuilder {
     private fun smoothStep(edge0: Float, edge1: Float, x: Float): Float {
         val t = ((x - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
         return t * t * (3f - 2f * t)
+    }
+
+    private fun quinticStep(edge0: Float, edge1: Float, x: Float): Float {
+        val t = ((x - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
+        return t * t * t * (t * (t * 6f - 15f) + 10f)
     }
 
     private fun smoothBell(x: Float, start: Float, end: Float, feather: Float): Float {

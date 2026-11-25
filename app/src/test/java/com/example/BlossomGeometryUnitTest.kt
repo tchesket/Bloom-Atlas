@@ -431,7 +431,13 @@ class BlossomGeometryUnitTest {
                     ((y - BlossomSdfBodyBuilder.PATCH_CENTER_Y) / BlossomSdfBodyBuilder.PATCH_RY).let { it * it }
             )
             if (ovalR >= 0.94f) {
-                val err = abs(BlossomSdfBodyBuilder.evaluateBodySdf(x, y, z))
+                val err = abs(
+                    BlossomSdfBodyBuilder.evaluateBodySdf(
+                        x, y, z,
+                        betaShortPerineum = true,
+                        betaSoftButtockTable = true
+                    )
+                )
                 if (err > maxPerimeterSdfError) maxPerimeterSdfError = err
             }
         }
@@ -806,6 +812,744 @@ class BlossomGeometryUnitTest {
         scene.update(VulvaDeformationState(breastSize = 0.50f), includeLithotomyBody = true)
         assertValidMesh(scene.blossomBreastsMesh)
         assertOutwardWindingMatchesNormals("blossomBreastsMesh(medium)", scene.blossomBreastsMesh)
+    }
+
+    @Test
+    fun betaPelvicRefinementsAreIndependentLocalizedAndReversible() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+
+        // Capture exact legacy baseline (legacyVulvaMode = true -> all 12 refinements OFF)
+        val legacyBase = VulvaDeformationState(legacyVulvaMode = true)
+        scene.update(legacyBase, includeLithotomyBody = true)
+        val baseBody = scene.blossomBodyMesh.vertexData.copyOf()
+        val basePatch = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+        val baseArch = scene.labiaHoodArchMesh.vertexData.copyOf()
+        val baseGlans = scene.glansMesh.vertexData.copyOf()
+
+        fun findAnusMinY(patchData: FloatArray): Float {
+            var minAo = Float.POSITIVE_INFINITY
+            var anusY = 0f
+            val count = patchData.size / stride
+            for (i in 0 until count) {
+                val x = patchData[i * stride]
+                val y = patchData[i * stride + 1]
+                val ao = patchData[i * stride + 8]
+                if (abs(x) < 0.04f && y in -0.96f..-0.68f && ao < minAo) {
+                    minAo = ao
+                    anusY = y
+                }
+            }
+            return anusY
+        }
+
+        val baselineAnusY = findAnusMinY(basePatch)
+        assertTrue("Baseline anus should be centered near -0.86, got $baselineAnusY", baselineAnusY in -0.89f..-0.83f)
+
+        // 1. Beta Toggle 1 ONLY: Shorter perineum (~20%) moves anus upward without altering vulva/legs/upper body
+        scene.update(legacyBase.copy(betaShortPerineum = true), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomBodyMesh)
+        assertValidMesh(scene.blossomVulvaPatchMesh)
+        val beta1AnusY = findAnusMinY(scene.blossomVulvaPatchMesh.vertexData)
+        val shiftY = beta1AnusY - baselineAnusY
+        assertTrue(
+            "Beta 1 should move anus upward by ~0.078 (~20% of 0.40 fourchette-anus span), got shift=$shiftY (base=$baselineAnusY, beta1=$beta1AnusY)",
+            shiftY in 0.062f..0.095f
+        )
+        // Vulva glans & labia arch must stay 100% bitwise untouched!
+        for (i in baseGlans.indices) {
+            assertTrue("Beta 1 must not alter clitoral glans", abs(scene.glansMesh.vertexData[i] - baseGlans[i]) < 1e-6f)
+        }
+        for (i in baseArch.indices) {
+            assertTrue("Beta 1 must not alter labia/hood arch", abs(scene.labiaHoodArchMesh.vertexData[i] - baseArch[i]) < 1e-6f)
+        }
+
+        // 2. Beta Toggle 2 ONLY: Soft buttock-table contact & subtle infragluteal fold (localized strictly to buttocks)
+        scene.update(legacyBase.copy(betaSoftButtockTable = true), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomBodyMesh)
+        assertValidMesh(scene.blossomVulvaPatchMesh)
+        var buttockMaxDelta = 0f
+        var nonPelvisMaxDelta = 0f
+        val beta2Body = scene.blossomBodyMesh.vertexData
+        for (v in 0 until scene.blossomBodyMesh.vertexCount) {
+            val base = v * stride
+            val y = baseBody[base + 1]
+            val dx = beta2Body[base] - baseBody[base]
+            val dy = beta2Body[base + 1] - baseBody[base + 1]
+            val dz = beta2Body[base + 2] - baseBody[base + 2]
+            val d = sqrt(dx * dx + dy * dy + dz * dz)
+            if (y in -1.35f..0.15f && abs(baseBody[base]) < 1.65f) {
+                if (d > buttockMaxDelta) buttockMaxDelta = d
+            } else if (y > 0.65f || y < -1.75f) {
+                if (d > nonPelvisMaxDelta) nonPelvisMaxDelta = d
+            }
+        }
+        assertTrue("Beta 2 should visibly soften buttock-table contact / add subtle fold (maxDelta > 0.008), got $buttockMaxDelta", buttockMaxDelta > 0.008f)
+        assertTrue("Beta 2 must not alter legs or upper body above pelvis (nonPelvisMaxDelta < 1e-6), got $nonPelvisMaxDelta", nonPelvisMaxDelta < 1e-6f)
+
+        // 3. Beta Toggle 3 ONLY: Smooth vulva patch seam keeps valid normals & outward CCW winding
+        scene.update(legacyBase.copy(betaSmoothVulvaSeam = true), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomBodyMesh)
+        assertValidMesh(scene.blossomVulvaPatchMesh)
+        assertOutwardWindingMatchesNormals("blossomVulvaPatchMesh(betaSmoothSeam)", scene.blossomVulvaPatchMesh)
+
+        // 4. All 3 ON together -> valid meshes, then Legacy mode -> 100% exact baseline backup restoration!
+        scene.update(
+            legacyBase.copy(
+                betaShortPerineum = true,
+                betaSoftButtockTable = true,
+                betaSmoothVulvaSeam = true
+            ),
+            includeLithotomyBody = true
+        )
+        assertValidMesh(scene.blossomBodyMesh)
+        assertValidMesh(scene.blossomVulvaPatchMesh)
+        assertOutwardWindingMatchesNormals("blossomVulvaPatchMesh(all3Beta)", scene.blossomVulvaPatchMesh)
+
+        scene.update(legacyBase, includeLithotomyBody = true)
+        var maxRestoreBodyDiff = 0f
+        for (i in baseBody.indices) {
+            val diff = abs(scene.blossomBodyMesh.vertexData[i] - baseBody[i])
+            if (diff > maxRestoreBodyDiff) maxRestoreBodyDiff = diff
+        }
+        var maxRestorePatchDiff = 0f
+        for (i in basePatch.indices) {
+            val diff = abs(scene.blossomVulvaPatchMesh.vertexData[i] - basePatch[i])
+            if (diff > maxRestorePatchDiff) maxRestorePatchDiff = diff
+        }
+        assertTrue("Legacy mode must restore exact baseline body mesh (< 1e-5), got $maxRestoreBodyDiff", maxRestoreBodyDiff < 1e-5f)
+        assertTrue("Legacy mode must restore exact baseline vulva patch (< 1e-5), got $maxRestorePatchDiff", maxRestorePatchDiff < 1e-5f)
+    }
+
+    @Test
+    fun betaVulvaSeamAGeometryAndSeamBColorAreIndependentFlushAndExact() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val cols = BlossomSdfBodyBuilder.VULVA_PATCH_COLS
+        val rows = BlossomSdfBodyBuilder.VULVA_PATCH_ROWS
+
+        val legacyBase = VulvaDeformationState(legacyVulvaMode = true)
+        scene.update(legacyBase, includeLithotomyBody = true)
+        val baseBody = scene.blossomBodyMesh.vertexData.copyOf()
+        val basePatch = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+
+        // Helper: brute-force exact closest point & interpolated normal/AO/pigment on rendered anterior body triangles
+        fun sampleNearestRenderedBodyTri(
+            bodyMesh: DynamicGlMesh,
+            px: Float,
+            py: Float,
+            pz: Float
+        ): FloatArray {
+            val bData = bodyMesh.vertexData
+            val idxBuf = bodyMesh.indexBuffer
+            val triCount = bodyMesh.indexCount / 3
+            var bestDistSq = Float.POSITIVE_INFINITY
+            var bestNx = 0f; var bestNy = 0f; var bestNz = 1f
+            var bestAo = 1f; var bestPig = 0f
+            idxBuf.position(0)
+            for (t in 0 until triCount) {
+                val a = idxBuf.get().toInt() and 0xFFFF
+                val b = idxBuf.get().toInt() and 0xFFFF
+                val c = idxBuf.get().toInt() and 0xFFFF
+                val ao = a * stride; val bo = b * stride; val co = c * stride
+                if (bData[ao + 5] + bData[bo + 5] + bData[co + 5] < 0.02f) continue
+                val ax = bData[ao]; val ay = bData[ao + 1]; val az = bData[ao + 2]
+                val bx = bData[bo]; val by = bData[bo + 1]; val bz = bData[bo + 2]
+                val cx = bData[co]; val cy = bData[co + 1]; val cz = bData[co + 2]
+                // Fast bounding-sphere reject around triangle vertex A
+                val dxA = px - ax; val dyA = py - ay; val dzA = pz - az
+                if (dxA * dxA + dyA * dyA + dzA * dzA > 0.12f) continue
+
+                // Closest barycentric point on triangle (A,B,C)
+                val abx = bx - ax; val aby = by - ay; val abz = bz - az
+                val acx = cx - ax; val acy = cy - ay; val acz = cz - az
+                val apx = px - ax; val apy = py - ay; val apz = pz - az
+                val d1 = abx * apx + aby * apy + abz * apz
+                val d2 = acx * apx + acy * apy + acz * apz
+                var w0: Float; var w1: Float; var w2: Float
+                if (d1 <= 0f && d2 <= 0f) {
+                    w0 = 1f; w1 = 0f; w2 = 0f
+                } else {
+                    val bpx = px - bx; val bpy = py - by; val bpz = pz - bz
+                    val d3 = abx * bpx + aby * bpy + abz * bpz
+                    val d4 = acx * bpx + acy * bpy + acz * bpz
+                    if (d3 >= 0f && d4 <= d3) {
+                        w0 = 0f; w1 = 1f; w2 = 0f
+                    } else {
+                        val vc = d1 * d4 - d3 * d2
+                        if (vc <= 0f && d1 >= 0f && d3 <= 0f) {
+                            val v = d1 / (d1 - d3).coerceAtLeast(1e-8f)
+                            w0 = 1f - v; w1 = v; w2 = 0f
+                        } else {
+                            val cpx = px - cx; val cpy = py - cy; val cpz = pz - cz
+                            val d5 = abx * cpx + aby * cpy + abz * cpz
+                            val d6 = acx * cpx + acy * cpy + acz * cpz
+                            if (d6 >= 0f && d5 <= d6) {
+                                w0 = 0f; w1 = 0f; w2 = 1f
+                            } else {
+                                val vb = d5 * d2 - d1 * d6
+                                if (vb <= 0f && d2 >= 0f && d6 <= 0f) {
+                                    val w = d2 / (d2 - d6).coerceAtLeast(1e-8f)
+                                    w0 = 1f - w; w1 = 0f; w2 = w
+                                } else {
+                                    val va = d3 * d6 - d5 * d4
+                                    if (va <= 0f && (d4 - d3) >= 0f && (d5 - d6) >= 0f) {
+                                        val w = (d4 - d3) / ((d4 - d3) + (d5 - d6)).coerceAtLeast(1e-8f)
+                                        w0 = 0f; w1 = 1f - w; w2 = w
+                                    } else {
+                                        val denom = 1f / (va + vb + vc).coerceAtLeast(1e-8f)
+                                        w1 = vb * denom; w2 = vc * denom; w0 = 1f - w1 - w2
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                val qx = w0 * ax + w1 * bx + w2 * cx - px
+                val qy = w0 * ay + w1 * by + w2 * cy - py
+                val qz = w0 * az + w1 * bz + w2 * cz - pz
+                val dSq = qx * qx + qy * qy + qz * qz
+                if (dSq < bestDistSq) {
+                    bestDistSq = dSq
+                    var nx = w0 * bData[ao + 3] + w1 * bData[bo + 3] + w2 * bData[co + 3]
+                    var ny = w0 * bData[ao + 4] + w1 * bData[bo + 4] + w2 * bData[co + 4]
+                    var nz = w0 * bData[ao + 5] + w1 * bData[bo + 5] + w2 * bData[co + 5]
+                    val nLen = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-6f)
+                    bestNx = nx / nLen; bestNy = ny / nLen; bestNz = nz / nLen
+                    bestAo = w0 * bData[ao + 8] + w1 * bData[bo + 8] + w2 * bData[co + 8]
+                    bestPig = w0 * bData[ao + 9] + w1 * bData[bo + 9] + w2 * bData[co + 9]
+                }
+            }
+            idxBuf.position(0)
+            return floatArrayOf(sqrt(bestDistSq), bestNx, bestNy, bestNz, bestAo, bestPig)
+        }
+
+        // 1. SEAM A ONLY (Geometry): Outermost ring sits strictly flush with rendered body triangles & identical normals
+        scene.update(legacyBase.copy(betaSmoothVulvaSeam = true, betaBlendVulvaSeamColor = false), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomBodyMesh)
+        assertValidMesh(scene.blossomVulvaPatchMesh)
+        assertOutwardWindingMatchesNormals("blossomVulvaPatchMesh(seamA)", scene.blossomVulvaPatchMesh)
+
+        val seamAPatch = scene.blossomVulvaPatchMesh.vertexData
+        var maxRimDist = 0f
+        var minRimNormalDot = 1f
+        var maxRightRimDist = 0f
+        var maxInteriorDiffA = 0f
+        var maxMatDiffA = 0f
+
+        for (r in 0 until rows) {
+            for (c in 0 until cols) {
+                val i = r * cols + c
+                val b = i * stride
+                val bx = basePatch[b]
+                val by = basePatch[b + 1]
+                val ovalR = sqrt((bx / BlossomSdfBodyBuilder.PATCH_RX).let { it * it } +
+                    ((by - BlossomSdfBodyBuilder.PATCH_CENTER_Y) / BlossomSdfBodyBuilder.PATCH_RY).let { it * it })
+                // Seam A must NOT alter interior (labia, vestibule, clitoral hood)
+                if (ovalR <= 0.54f) {
+                    for (k in 0 until stride) {
+                        val d = abs(seamAPatch[b + k] - basePatch[b + k])
+                        if (d > maxInteriorDiffA) maxInteriorDiffA = d
+                    }
+                }
+                // Seam A must NOT alter material channels (mucosa, wetness, ao, pigment belong to Seam B)
+                for (k in 6..9) {
+                    val d = abs(seamAPatch[b + k] - basePatch[b + k])
+                    if (d > maxMatDiffA) maxMatDiffA = d
+                }
+                val isRim = r == 0 || r == rows - 1 || c == 0 || c == cols - 1
+                if (isRim && ((r + c) % 4 == 0)) {
+                    val px = seamAPatch[b]; val py = seamAPatch[b + 1]; val pz = seamAPatch[b + 2]
+                    val near = sampleNearestRenderedBodyTri(scene.blossomBodyMesh, px, py, pz)
+                    val dist = near[0]
+                    val dot = seamAPatch[b + 3] * near[1] + seamAPatch[b + 4] * near[2] + seamAPatch[b + 5] * near[3]
+                    if (dist > maxRimDist) maxRimDist = dist
+                    if (dot < minRimNormalDot) minRimNormalDot = dot
+                    if (c == cols - 1 && dist > maxRightRimDist) maxRightRimDist = dist
+                }
+            }
+        }
+        assertTrue("Seam A outermost ring must sit flush on body triangles (< 0.001), got maxRimDist=$maxRimDist (rightRim=$maxRightRimDist)", maxRimDist < 0.001f)
+        assertTrue("Seam A outermost ring normals must match body triangles (dot > 0.999), got minDot=$minRimNormalDot", minRimNormalDot > 0.999f)
+        assertTrue("Seam A must not alter interior vulva (< 1e-6), got $maxInteriorDiffA", maxInteriorDiffA < 1e-6f)
+        assertTrue("Seam A must not alter Seam B material channels (< 1e-6), got $maxMatDiffA", maxMatDiffA < 1e-6f)
+
+        // 2. SEAM B ONLY (Color): Geometry untouched, interior untouched, outer 40% widens fade & rim equals exact body skin
+        scene.update(legacyBase.copy(betaSmoothVulvaSeam = false, betaBlendVulvaSeamColor = true), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomVulvaPatchMesh)
+        val seamBPatch = scene.blossomVulvaPatchMesh.vertexData
+        var maxGeomDiffB = 0f
+        var maxInteriorDiffB = 0f
+        var maxOuterBandMatChange = 0f
+        var maxRimMucosa = 0f
+        var maxRimWetnessDiff = 0f
+        var maxRimAoDiff = 0f
+        var maxRimPigDiff = 0f
+
+        for (r in 0 until rows) {
+            for (c in 0 until cols) {
+                val i = r * cols + c
+                val b = i * stride
+                // Seam B must NOT alter geometry or normals
+                for (k in 0..5) {
+                    val d = abs(seamBPatch[b + k] - basePatch[b + k])
+                    if (d > maxGeomDiffB) maxGeomDiffB = d
+                }
+                val bx = basePatch[b]; val by = basePatch[b + 1]
+                val ovalR = sqrt((bx / BlossomSdfBodyBuilder.PATCH_RX).let { it * it } +
+                    ((by - BlossomSdfBodyBuilder.PATCH_CENTER_Y) / BlossomSdfBodyBuilder.PATCH_RY).let { it * it })
+                if (ovalR <= 0.54f) {
+                    for (k in 0 until stride) {
+                        val d = abs(seamBPatch[b + k] - basePatch[b + k])
+                        if (d > maxInteriorDiffB) maxInteriorDiffB = d
+                    }
+                } else if (ovalR in 0.60f..0.92f) {
+                    val dMat = abs(seamBPatch[b + 8] - basePatch[b + 8]) + abs(seamBPatch[b + 9] - basePatch[b + 9])
+                    if (dMat > maxOuterBandMatChange) maxOuterBandMatChange = dMat
+                }
+                val isRim = r == 0 || r == rows - 1 || c == 0 || c == cols - 1
+                if (isRim) {
+                    if (abs(seamBPatch[b + 6]) > maxRimMucosa) maxRimMucosa = abs(seamBPatch[b + 6])
+                    val wDiff = abs(seamBPatch[b + 7] - BlossomSdfBodyBuilder.BODY_BASE_WETNESS)
+                    if (wDiff > maxRimWetnessDiff) maxRimWetnessDiff = wDiff
+                    if ((r + c) % 4 == 0) {
+                        val near = sampleNearestRenderedBodyTri(scene.blossomBodyMesh, seamBPatch[b], seamBPatch[b + 1], seamBPatch[b + 2])
+                        val aoDiff = abs(seamBPatch[b + 8] - near[4])
+                        val pigDiff = abs(seamBPatch[b + 9] - near[5])
+                        if (aoDiff > maxRimAoDiff) maxRimAoDiff = aoDiff
+                        if (pigDiff > maxRimPigDiff) maxRimPigDiff = pigDiff
+                    }
+                }
+            }
+        }
+        assertTrue("Seam B must not alter patch geometry or normals (< 1e-6), got $maxGeomDiffB", maxGeomDiffB < 1e-6f)
+        assertTrue("Seam B must not alter interior vulva (< 1e-6), got $maxInteriorDiffB", maxInteriorDiffB < 1e-6f)
+        assertTrue("Seam B should widen material fade across outer 40% (> 0.015), got $maxOuterBandMatChange", maxOuterBandMatChange > 0.015f)
+        assertTrue("Seam B rim mucosa must equal body 0.0 (< 1e-6), got $maxRimMucosa", maxRimMucosa < 1e-6f)
+        assertTrue("Seam B rim wetness must equal body 0.055 (< 1e-6), got $maxRimWetnessDiff", maxRimWetnessDiff < 1e-6f)
+        assertTrue("Seam B rim AO must match surrounding body skin (< 0.005), got $maxRimAoDiff", maxRimAoDiff < 0.005f)
+        assertTrue("Seam B rim pigment must match surrounding body skin (< 0.005), got $maxRimPigDiff", maxRimPigDiff < 0.005f)
+
+        // 3. BOTH Seam A + Seam B ON together -> exact flush rim + exact body material match, then OFF -> exact baseline!
+        scene.update(legacyBase.copy(betaSmoothVulvaSeam = true, betaBlendVulvaSeamColor = true), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomBodyMesh)
+        assertValidMesh(scene.blossomVulvaPatchMesh)
+        assertOutwardWindingMatchesNormals("blossomVulvaPatchMesh(seamA+seamB)", scene.blossomVulvaPatchMesh)
+
+        scene.update(legacyBase, includeLithotomyBody = true)
+        var maxRestoreBody = 0f
+        for (i in baseBody.indices) {
+            val d = abs(scene.blossomBodyMesh.vertexData[i] - baseBody[i])
+            if (d > maxRestoreBody) maxRestoreBody = d
+        }
+        var maxRestorePatch = 0f
+        for (i in basePatch.indices) {
+            val d = abs(scene.blossomVulvaPatchMesh.vertexData[i] - basePatch[i])
+            if (d > maxRestorePatch) maxRestorePatch = d
+        }
+        assertTrue("Disabling Seam A & B must restore exact baseline body (< 1e-5), got $maxRestoreBody", maxRestoreBody < 1e-5f)
+        assertTrue("Disabling Seam A & B must restore exact baseline patch (< 1e-5), got $maxRestorePatch", maxRestorePatch < 1e-5f)
+    }
+
+    @Test
+    fun betaSeamCInteriorFalloffAndSeamDSmoothHoleInvariantsHold() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val legacyBase = VulvaDeformationState(legacyVulvaMode = true)
+        scene.update(legacyBase, includeLithotomyBody = true)
+        val baseBody = scene.blossomBodyMesh.vertexData.copyOf()
+        val basePatch = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+        val baseArch = scene.labiaHoodArchMesh.vertexData.copyOf()
+        val baseGlans = scene.glansMesh.vertexData.copyOf()
+
+        // 1. Seam C ONLY: geometry & interior colors unchanged, outer-edge labia falloff widened
+        scene.update(legacyBase.copy(betaSoftLabiaInteriorEdge = true), includeLithotomyBody = true)
+        val seamCPatch = scene.blossomVulvaPatchMesh.vertexData
+        var maxGeomDiffC = 0f
+        var maxInteriorColorDiffC = 0f
+        var maxOuterBandColorChangeC = 0f
+        for (i in 0 until scene.blossomVulvaPatchMesh.vertexCount) {
+            val b = i * stride
+            for (k in 0..5) {
+                val d = abs(seamCPatch[b + k] - basePatch[b + k])
+                if (d > maxGeomDiffC) maxGeomDiffC = d
+            }
+            val x = basePatch[b]
+            val y = basePatch[b + 1]
+            if (abs(x) <= 0.020f && y in -0.20f..0.12f) {
+                for (k in 6..9) {
+                    val d = abs(seamCPatch[b + k] - basePatch[b + k])
+                    if (d > maxInteriorColorDiffC) maxInteriorColorDiffC = d
+                }
+            } else if (abs(x) in 0.25f..0.52f && y in -0.58f..0.52f) {
+                val dMat = abs(seamCPatch[b + 6] - basePatch[b + 6]) +
+                    abs(seamCPatch[b + 8] - basePatch[b + 8]) +
+                    abs(seamCPatch[b + 9] - basePatch[b + 9])
+                if (dMat > maxOuterBandColorChangeC) maxOuterBandColorChangeC = dMat
+            }
+        }
+        var maxArchGeomDiffC = 0f
+        for (v in 0 until scene.labiaHoodArchMesh.vertexCount) {
+            val b = v * stride
+            for (k in 0..5) {
+                val d = abs(scene.labiaHoodArchMesh.vertexData[b + k] - baseArch[b + k])
+                if (d > maxArchGeomDiffC) maxArchGeomDiffC = d
+            }
+        }
+        var maxGlansDiffC = 0f
+        for (i in baseGlans.indices) {
+            val d = abs(scene.glansMesh.vertexData[i] - baseGlans[i])
+            if (d > maxGlansDiffC) maxGlansDiffC = d
+        }
+        assertTrue("Seam C must not alter patch geometry or normals (< 1e-6), got $maxGeomDiffC", maxGeomDiffC < 1e-6f)
+        assertTrue("Seam C must not alter labia/hood arch geometry or normals (< 1e-6), got $maxArchGeomDiffC", maxArchGeomDiffC < 1e-6f)
+        assertTrue("Seam C must not alter clitoral glans (< 1e-6), got $maxGlansDiffC", maxGlansDiffC < 1e-6f)
+        assertTrue("Seam C must preserve interior vestibule colors (< 1e-6), got $maxInteriorColorDiffC", maxInteriorColorDiffC < 1e-6f)
+        assertTrue("Seam C must widen outer-edge labia color falloff (> 0.01), got $maxOuterBandColorChangeC", maxOuterBandColorChangeC > 0.01f)
+
+        // 2. Seam D ONLY: smooth per-fragment ovalR cutoff strictly outside quad-omission zone (0.80) and inside patch rim (1.00)
+        assertTrue(
+            "Seam D hole threshold must sit cleanly in (0.82, 0.96), got ${VulvaGlTextureView.SEAM_D_HOLE_OVAL_R}",
+            VulvaGlTextureView.SEAM_D_HOLE_OVAL_R in 0.82f..0.96f
+        )
+        scene.update(legacyBase.copy(betaSmoothBodyHoleCutoff = true), includeLithotomyBody = true)
+        var maxBodyDiffD = 0f
+        for (i in baseBody.indices) {
+            val d = abs(scene.blossomBodyMesh.vertexData[i] - baseBody[i])
+            if (d > maxBodyDiffD) maxBodyDiffD = d
+        }
+        var maxPatchDiffD = 0f
+        for (i in basePatch.indices) {
+            val d = abs(scene.blossomVulvaPatchMesh.vertexData[i] - basePatch[i])
+            if (d > maxPatchDiffD) maxPatchDiffD = d
+        }
+        assertTrue("Seam D must not corrupt body vertex data (< 1e-6), got $maxBodyDiffD", maxBodyDiffD < 1e-6f)
+        assertTrue("Seam D must not alter patch vertex data (< 1e-6), got $maxPatchDiffD", maxPatchDiffD < 1e-6f)
+
+        // 3. Disabling Seam C & D restores exact baseline
+        scene.update(legacyBase, includeLithotomyBody = true)
+        var maxRestorePatch = 0f
+        for (i in basePatch.indices) {
+            val d = abs(scene.blossomVulvaPatchMesh.vertexData[i] - basePatch[i])
+            if (d > maxRestorePatch) maxRestorePatch = d
+        }
+        assertTrue("Disabling Seam C & D must restore exact baseline (< 1e-6), got $maxRestorePatch", maxRestorePatch < 1e-6f)
+    }
+
+    @Test
+    fun betaRapheNeckAndHairRefinementsAreIndependentLocalizedAndReversible() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val legacyBase = VulvaDeformationState(legacyVulvaMode = true)
+        scene.update(legacyBase, includeLithotomyBody = true)
+
+        val baseBody = scene.blossomBodyMesh.vertexData.copyOf()
+        val basePatch = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+        val baseGlans = scene.glansMesh.vertexData.copyOf()
+        val baseArch = scene.labiaHoodArchMesh.vertexData.copyOf()
+        val baseHead = scene.blossomHeadMesh.vertexData.copyOf()
+        val baseHair = scene.blossomHairMesh.vertexData.copyOf()
+
+        // 1. Beta Toggle 4 ONLY: Faint Perineal Raphe adds subtle midline ridge between vulva & anus without touching vulva/head/hair
+        scene.update(legacyBase.copy(betaPerinealRaphe = true), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomVulvaPatchMesh)
+        var maxMidlineRapheLift = 0f
+        val pBeta4 = scene.blossomVulvaPatchMesh.vertexData
+        for (i in 0 until scene.blossomVulvaPatchMesh.vertexCount) {
+            val b = i * stride
+            val x = pBeta4[b]
+            val y = pBeta4[b + 1]
+            if (abs(x) < 0.015f && y in -0.76f..-0.54f) {
+                val lift = pBeta4[b + 2] - basePatch[b + 2]
+                if (lift > maxMidlineRapheLift) maxMidlineRapheLift = lift
+            }
+        }
+        assertTrue(
+            "Beta 4 should raise a subtle midline perineal raphe ridge (0.003..0.025), got $maxMidlineRapheLift",
+            maxMidlineRapheLift in 0.003f..0.025f
+        )
+        for (i in baseGlans.indices) {
+            assertTrue("Beta 4 must not alter clitoral glans", abs(scene.glansMesh.vertexData[i] - baseGlans[i]) < 1e-6f)
+        }
+        for (i in baseArch.indices) {
+            assertTrue("Beta 4 must not alter labia/hood arch", abs(scene.labiaHoodArchMesh.vertexData[i] - baseArch[i]) < 1e-6f)
+        }
+        for (i in baseHead.indices) {
+            assertTrue("Beta 4 must not alter head mesh", abs(scene.blossomHeadMesh.vertexData[i] - baseHead[i]) < 1e-6f)
+        }
+        for (i in baseHair.indices) {
+            assertTrue("Beta 4 must not alter hair mesh", abs(scene.blossomHairMesh.vertexData[i] - baseHair[i]) < 1e-6f)
+        }
+
+        // 2. Beta Toggle 5 ONLY: Wide Smooth Neck Seam (~2x feather down neck) leaves face (y > 5.88), eyes, hair & torso/breasts untouched!
+        val baseEyes = scene.blossomEyeMeshes.map { it.vertexData.copyOf() }
+        scene.update(legacyBase.copy(betaSmoothNeckSeam = true), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomHeadMesh)
+        assertValidMesh(scene.blossomBodyMesh)
+        assertOutwardWindingMatchesNormals("blossomHeadMesh(betaSmoothNeckSeam)", scene.blossomHeadMesh)
+
+        var maxSubmentalAoChange = 0f
+        var maxUpperFaceDiff = 0f
+        val headBeta5 = scene.blossomHeadMesh.vertexData
+        for (v in 0 until scene.blossomHeadMesh.vertexCount) {
+            val b = v * stride
+            val baseY = baseHead[b + 1]
+            if (baseY > 5.88f) {
+                for (k in 0 until stride) {
+                    val d = abs(headBeta5[b + k] - baseHead[b + k])
+                    if (d > maxUpperFaceDiff) maxUpperFaceDiff = d
+                }
+            } else if (baseY < 5.72f) {
+                val aoDiff = abs(headBeta5[b + 8] - baseHead[b + 8])
+                if (aoDiff > maxSubmentalAoChange) maxSubmentalAoChange = aoDiff
+            }
+        }
+        assertTrue("Beta 5 should blend submental AO smoothly across jaw-neck join (> 0.02), got $maxSubmentalAoChange", maxSubmentalAoChange > 0.02f)
+        assertTrue("Beta 5 must not touch face above jaw rim (y > 5.88 diff < 1e-6), got $maxUpperFaceDiff", maxUpperFaceDiff < 1e-6f)
+        scene.blossomEyeMeshes.forEachIndexed { idx, eyeMesh ->
+            val baseEye = baseEyes[idx]
+            for (i in baseEye.indices) {
+                assertTrue("Beta 5 must not alter eye mesh $idx", abs(eyeMesh.vertexData[i] - baseEye[i]) < 1e-6f)
+            }
+        }
+        for (i in baseHair.indices) {
+            assertTrue("Beta 5 must not alter hair", abs(scene.blossomHairMesh.vertexData[i] - baseHair[i]) < 1e-6f)
+        }
+
+        var maxBelowNeckBodyDiff = 0f
+        val bodyBeta5 = scene.blossomBodyMesh.vertexData
+        for (v in 0 until scene.blossomBodyMesh.vertexCount) {
+            val b = v * stride
+            if (baseBody[b + 1] < 4.60f || abs(baseBody[b]) > 0.65f) {
+                for (k in 0 until stride) {
+                    val d = abs(bodyBeta5[b + k] - baseBody[b + k])
+                    if (d > maxBelowNeckBodyDiff) maxBelowNeckBodyDiff = d
+                }
+            }
+        }
+        assertTrue("Beta 5 must not touch torso/breasts/shoulders outside neck (diff < 1e-6), got $maxBelowNeckBodyDiff", maxBelowNeckBodyDiff < 1e-6f)
+
+        // 3. Beta Toggle 6 ONLY: Strand-Detail Hair preserves exact original silhouette/part/length while adding strand normals, shade variation & subtle tapered tips
+        scene.update(legacyBase.copy(betaSoftHair = true), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomHairMesh)
+        assertOutwardWindingMatchesNormals("blossomHairMesh(betaSoftHair)", scene.blossomHairMesh)
+        var beta6HairMinY = Float.POSITIVE_INFINITY
+        var beta6MaxPosDiff = 0f
+        var beta6MaxNormalDiff = 0f
+        var beta6MaxShadeDiff = 0f
+        val hairBeta6 = scene.blossomHairMesh.vertexData
+        for (v in 0 until scene.blossomHairMesh.vertexCount) {
+            val b = v * stride
+            val y = hairBeta6[b + 1]
+            if (y < beta6HairMinY) beta6HairMinY = y
+            val posD = sqrt(
+                (hairBeta6[b] - baseHair[b]) * (hairBeta6[b] - baseHair[b]) +
+                    (hairBeta6[b + 1] - baseHair[b + 1]) * (hairBeta6[b + 1] - baseHair[b + 1]) +
+                    (hairBeta6[b + 2] - baseHair[b + 2]) * (hairBeta6[b + 2] - baseHair[b + 2])
+            )
+            if (posD > beta6MaxPosDiff) beta6MaxPosDiff = posD
+            val nrmD = sqrt(
+                (hairBeta6[b + 3] - baseHair[b + 3]) * (hairBeta6[b + 3] - baseHair[b + 3]) +
+                    (hairBeta6[b + 4] - baseHair[b + 4]) * (hairBeta6[b + 4] - baseHair[b + 4]) +
+                    (hairBeta6[b + 5] - baseHair[b + 5]) * (hairBeta6[b + 5] - baseHair[b + 5])
+            )
+            if (nrmD > beta6MaxNormalDiff) beta6MaxNormalDiff = nrmD
+            val shadeD = abs(hairBeta6[b + 9] - baseHair[b + 9])
+            if (shadeD > beta6MaxShadeDiff) beta6MaxShadeDiff = shadeD
+        }
+        assertTrue("Beta 6 hair should preserve bob length (minY < 5.15), got $beta6HairMinY", beta6HairMinY < 5.15f)
+        assertTrue("Beta 6 hair should preserve overall silhouette with subtle tapered irregular tips (0.005..0.065), got $beta6MaxPosDiff", beta6MaxPosDiff in 0.005f..0.065f)
+        assertTrue("Beta 6 hair should add strand-direction normal detail (> 0.02), got $beta6MaxNormalDiff", beta6MaxNormalDiff > 0.02f)
+        assertTrue("Beta 6 hair should add subtle per-strand tonal variation (> 0.015), got $beta6MaxShadeDiff", beta6MaxShadeDiff > 0.015f)
+
+        // 4. All 6 Beta toggles ON together + head turn -> valid meshes, then ALL OFF -> exact baseline restoration across all meshes!
+        scene.update(
+            legacyBase.copy(
+                headTurn = 0.6f,
+                betaShortPerineum = true,
+                betaSoftButtockTable = true,
+                betaSmoothVulvaSeam = true,
+                betaPerinealRaphe = true,
+                betaSmoothNeckSeam = true,
+                betaSoftHair = true
+            ),
+            includeLithotomyBody = true
+        )
+        assertValidMesh(scene.blossomBodyMesh)
+        assertValidMesh(scene.blossomVulvaPatchMesh)
+        assertValidMesh(scene.blossomHeadMesh)
+        assertValidMesh(scene.blossomHairMesh)
+        assertOutwardWindingMatchesNormals("blossomHeadMesh(all6Beta+turn)", scene.blossomHeadMesh)
+        assertOutwardWindingMatchesNormals("blossomHairMesh(all6Beta+turn)", scene.blossomHairMesh)
+
+        scene.update(legacyBase, includeLithotomyBody = true)
+        fun maxDiff(a: FloatArray, b: FloatArray): Float {
+            var m = 0f
+            for (i in a.indices) {
+                val d = abs(a[i] - b[i])
+                if (d > m) m = d
+            }
+            return m
+        }
+        assertTrue("Resetting all 6 Beta toggles must restore exact baseline body (< 1e-5)", maxDiff(scene.blossomBodyMesh.vertexData, baseBody) < 1e-5f)
+        assertTrue("Resetting all 6 Beta toggles must restore exact baseline patch (< 1e-5)", maxDiff(scene.blossomVulvaPatchMesh.vertexData, basePatch) < 1e-5f)
+        assertTrue("Resetting all 6 Beta toggles must restore exact baseline head (< 1e-5)", maxDiff(scene.blossomHeadMesh.vertexData, baseHead) < 1e-5f)
+        assertTrue("Resetting all 6 Beta toggles must restore exact baseline hair (< 1e-5)", maxDiff(scene.blossomHairMesh.vertexData, baseHair) < 1e-5f)
+    }
+
+    @Test
+    fun seamFFixesLabiaHoodArchOutwardCcwWindingWithoutAlteringGeometryOrSeamE() {
+        val scene = VulvaAnatomySceneMesh()
+        scene.update(
+            VulvaDeformationState(legacyVulvaMode = true, betaSoftArchEdge = true, betaWarmTransitionZone = false),
+            includeLithotomyBody = true
+        )
+        val arch = scene.labiaHoodArchMesh
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val baseVerts = arch.vertexData.copyOf()
+        val baseAlpha = FloatArray(arch.vertexCount).also { dst ->
+            scene.labiaHoodArchAlphaBuffer.position(0)
+            scene.labiaHoodArchAlphaBuffer.get(dst)
+            scene.labiaHoodArchAlphaBuffer.position(0)
+        }
+
+        fun alignedTriangleRatio(idxBuf: java.nio.ShortBuffer): Float {
+            val data = arch.vertexData
+            idxBuf.position(0)
+            var aligned = 0
+            var total = 0
+            var t = 0
+            while (t + 2 < arch.indexCount) {
+                val i0 = idxBuf.get(t).toInt() and 0xFFFF
+                val i1 = idxBuf.get(t + 1).toInt() and 0xFFFF
+                val i2 = idxBuf.get(t + 2).toInt() and 0xFFFF
+                t += 3
+                val b0 = i0 * stride
+                val b1 = i1 * stride
+                val b2 = i2 * stride
+                val e1x = data[b1] - data[b0]
+                val e1y = data[b1 + 1] - data[b0 + 1]
+                val e1z = data[b1 + 2] - data[b0 + 2]
+                val e2x = data[b2] - data[b0]
+                val e2y = data[b2 + 1] - data[b0 + 1]
+                val e2z = data[b2 + 2] - data[b0 + 2]
+                val fx = e1y * e2z - e1z * e2y
+                val fy = e1z * e2x - e1x * e2z
+                val fz = e1x * e2y - e1y * e2x
+                val fLen = sqrt(fx * fx + fy * fy + fz * fz)
+                if (fLen < 1e-7f) continue
+                val nx = (data[b0 + 3] + data[b1 + 3] + data[b2 + 3]) / 3f
+                val ny = (data[b0 + 4] + data[b1 + 4] + data[b2 + 4]) / 3f
+                val nz = (data[b0 + 5] + data[b1 + 5] + data[b2 + 5]) / 3f
+                total++
+                if ((fx * nx + fy * ny + fz * nz) / fLen > 0f) aligned++
+            }
+            return if (total > 0) aligned.toFloat() / total else 0f
+        }
+
+        val baselineRatio = alignedTriangleRatio(arch.indexBuffer)
+        val seamFRatio = alignedTriangleRatio(scene.labiaHoodArchCcwIndexBuffer)
+        assertTrue(
+            "Baseline labiaHoodArchMesh.indexBuffer had inverted CW winding (< 5%), got ${(baselineRatio * 100f).toInt()}%",
+            baselineRatio < 0.05f
+        )
+        assertTrue(
+            "Seam F labiaHoodArchCcwIndexBuffer must have outward CCW winding matching normals (> 98%), got ${(seamFRatio * 100f).toInt()}%",
+            seamFRatio > 0.98f
+        )
+
+        // Enabling Seam F must leave arch vertex geometry, normals, materials & Seam E alpha identical
+        scene.update(
+            VulvaDeformationState(legacyVulvaMode = true, betaSoftArchEdge = true, betaWarmTransitionZone = true),
+            includeLithotomyBody = true
+        )
+        for (i in baseVerts.indices) {
+            assertTrue("Seam F must not alter labiaHoodArchMesh vertex data", abs(arch.vertexData[i] - baseVerts[i]) < 1e-6f)
+        }
+        val seamFAlpha = FloatArray(arch.vertexCount).also { dst ->
+            scene.labiaHoodArchAlphaBuffer.position(0)
+            scene.labiaHoodArchAlphaBuffer.get(dst)
+            scene.labiaHoodArchAlphaBuffer.position(0)
+        }
+        for (i in baseAlpha.indices) {
+            assertTrue("Seam F must not alter Seam E alpha feathering", abs(seamFAlpha[i] - baseAlpha[i]) < 1e-6f)
+        }
+    }
+
+    @Test
+    fun betaV1DefaultAndLegacyVulvaToggleInvariantsHold() {
+        val betaV1 = VulvaDeformationState()
+        assertTrue("Default state should have legacyVulvaMode = false", !betaV1.legacyVulvaMode)
+        assertTrue(
+            "Default Beta v1 state must enable all 12 refinements",
+            betaV1.betaShortPerineum &&
+                betaV1.betaSoftButtockTable &&
+                betaV1.betaSmoothVulvaSeam &&
+                betaV1.betaBlendVulvaSeamColor &&
+                betaV1.betaSoftLabiaInteriorEdge &&
+                betaV1.betaSmoothBodyHoleCutoff &&
+                betaV1.betaSoftArchEdge &&
+                betaV1.betaWarmTransitionZone &&
+                betaV1.betaRefineInnerLabia &&
+                betaV1.betaPerinealRaphe &&
+                betaV1.betaSmoothNeckSeam &&
+                betaV1.betaSoftHair
+        )
+
+        val legacy = VulvaDeformationState(legacyVulvaMode = true)
+        assertTrue("Legacy state should have legacyVulvaMode = true", legacy.legacyVulvaMode)
+        assertTrue(
+            "Legacy Vulva mode must disable all 12 Beta v1 refinements",
+            !legacy.betaShortPerineum &&
+                !legacy.betaSoftButtockTable &&
+                !legacy.betaSmoothVulvaSeam &&
+                !legacy.betaBlendVulvaSeamColor &&
+                !legacy.betaSoftLabiaInteriorEdge &&
+                !legacy.betaSmoothBodyHoleCutoff &&
+                !legacy.betaSoftArchEdge &&
+                !legacy.betaWarmTransitionZone &&
+                !legacy.betaRefineInnerLabia &&
+                !legacy.betaPerinealRaphe &&
+                !legacy.betaSmoothNeckSeam &&
+                !legacy.betaSoftHair
+        )
+
+        val scene = VulvaAnatomySceneMesh()
+        scene.update(betaV1, includeLithotomyBody = true)
+        assertValidMesh(scene.blossomBodyMesh)
+        assertValidMesh(scene.blossomVulvaPatchMesh)
+        assertValidMesh(scene.labiaHoodArchMesh)
+        assertValidMesh(scene.glansMesh)
+        assertValidMesh(scene.blossomHeadMesh)
+        assertValidMesh(scene.blossomHairMesh)
+        val betaV1Body = scene.blossomBodyMesh.vertexData.copyOf()
+        val betaV1Patch = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+        val betaV1Arch = scene.labiaHoodArchMesh.vertexData.copyOf()
+
+        // Non-vulva updates (eye blink, head turn) must hit the vulva dirty-flag fast path with bitwise-identical meshes
+        scene.update(betaV1.copy(eyeBlink = 0.85f, headTurn = 0.35f), includeLithotomyBody = true)
+        for (i in betaV1Patch.indices) {
+            assertTrue("Vulva patch must remain identical across eyeBlink/headTurn", scene.blossomVulvaPatchMesh.vertexData[i] == betaV1Patch[i])
+        }
+        for (i in betaV1Arch.indices) {
+            assertTrue("Labia arch must remain identical across eyeBlink/headTurn", scene.labiaHoodArchMesh.vertexData[i] == betaV1Arch[i])
+        }
+
+        // Switching to Legacy Vulva mode and back to Beta v1 restores exact Beta v1 geometry
+        scene.update(legacy, includeLithotomyBody = true)
+        assertValidMesh(scene.blossomBodyMesh)
+        assertValidMesh(scene.blossomVulvaPatchMesh)
+        scene.update(betaV1, includeLithotomyBody = true)
+        var maxRestoreDiff = 0f
+        for (i in betaV1Body.indices) {
+            val d = abs(scene.blossomBodyMesh.vertexData[i] - betaV1Body[i])
+            if (d > maxRestoreDiff) maxRestoreDiff = d
+        }
+        for (i in betaV1Patch.indices) {
+            val d = abs(scene.blossomVulvaPatchMesh.vertexData[i] - betaV1Patch[i])
+            if (d > maxRestoreDiff) maxRestoreDiff = d
+        }
+        assertTrue("Switching Legacy -> Beta v1 must restore exact Beta v1 meshes (< 1e-5), got $maxRestoreDiff", maxRestoreDiff < 1e-5f)
     }
 
     /**

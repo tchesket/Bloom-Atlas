@@ -16,6 +16,7 @@ import android.view.TextureView
 import android.view.View
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import java.util.IdentityHashMap
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -124,6 +125,13 @@ class VulvaGlTextureView(
     @Volatile
     private var lastAppliedLegsMode: Boolean? = null
 
+    private class GlMeshVbo(
+        val vboId: Int,
+        val iboId: Int,
+        var uploadedVertexVersion: Int = -1,
+        var uploadedIndexVersion: Int = -1
+    )
+
     private class RenderSession(
         val generation: Int,
         val surface: SurfaceTexture,
@@ -141,6 +149,13 @@ class VulvaGlTextureView(
         @Volatile
         var renderScheduled: Boolean = false
         var breathTickerScheduled: Boolean = false
+        val meshVbos: IdentityHashMap<DynamicGlMesh, GlMeshVbo> = IdentityHashMap()
+        var archAlphaVboId: Int = 0
+        var archAlphaVersion: Int = -1
+        var archCcwIboId: Int = 0
+        var archCoreIboId: Int = 0
+        var archSkirtIboId: Int = 0
+        var archSplitVersion: Int = -1
     }
 
     private val sessionLock = Any()
@@ -149,6 +164,7 @@ class VulvaGlTextureView(
     private var aPosLoc = -1
     private var aNormalLoc = -1
     private var aMatLoc = -1
+    private var aArchAlphaLoc = -1
 
     private var uMvpLoc = -1
     private var uModelLoc = -1
@@ -171,6 +187,13 @@ class VulvaGlTextureView(
     private var uBreathChestLoc = -1
     private var uBreathAbdomenLoc = -1
     private var uAllowBreathingLoc = -1
+    private var uBetaSmoothNeckSeamLoc = -1
+    private var uBetaSoftHairLoc = -1
+    private var uBetaSmoothBodyHoleLoc = -1
+    private var uSmoothBodyHoleOvalRLoc = -1
+    private var uArchAlphaPassLoc = -1
+    private var uBetaWarmTransitionZoneLoc = -1
+    private var uBetaRefineInnerLabiaLoc = -1
 
     private var surfaceWidth = 1
     private var surfaceHeight = 1
@@ -312,7 +335,8 @@ class VulvaGlTextureView(
 
     private fun startRenderThread(surface: SurfaceTexture) {
         requestSessionTeardown(surfaceToRelease = null)
-        val thread = HandlerThread("VulvaGlRenderThread", Process.THREAD_PRIORITY_LESS_FAVORABLE + 3)
+        // Run below UI/HWUI RenderThread priority so Compose window compositing & fence waits are never starved
+        val thread = HandlerThread("VulvaGlRenderThread", Process.THREAD_PRIORITY_BACKGROUND)
         thread.start()
         val handler = Handler(thread.looper)
         val session = synchronized(sessionLock) {
@@ -330,21 +354,21 @@ class VulvaGlTextureView(
                 }
                 return@post
             }
-            // Build heavy procedural SDF anatomy meshes on a follow-up tick after the first clear buffer
-            // has already been swapped to SurfaceTexture so SurfaceSyncGroup settles immediately.
-            handler.post {
+            // Brief yield after the first clear buffer swap so HWUI finishes initial frame composition
+            // before heavy procedural SDF anatomy meshes are generated.
+            handler.postDelayed({
                 if (session.generation != renderGeneration || session.teardownPosted ||
                     session.eglSurface == EGL14.EGL_NO_SURFACE
-                ) return@post
+                ) return@postDelayed
                 sceneMesh = VulvaAnatomySceneMesh()
                 lastAppliedDeformation = VulvaDeformationState()
-                lastAppliedLegsMode = null
+                lastAppliedLegsMode = true
                 lastBreathTimeNs = System.nanoTime()
                 isGlReady = true
                 if (isHostVisible && !isHostPaused && session.generation == renderGeneration && !session.teardownPosted) {
                     drawFrameInternal(session)
                 }
-            }
+            }, 60L)
         }
     }
 
@@ -459,6 +483,7 @@ class VulvaGlTextureView(
         GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight)
         GLES20.glClearColor(0.11f, 0.085f, 0.085f, 1.0f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glFinish()
         if (!EGL14.eglSwapBuffers(display, eglSurf)) return false
 
         val program = compileProgram(VERTEX_SHADER, FRAGMENT_SHADER)
@@ -468,6 +493,7 @@ class VulvaGlTextureView(
         aPosLoc = GLES20.glGetAttribLocation(program, "aPos")
         aNormalLoc = GLES20.glGetAttribLocation(program, "aNormal")
         aMatLoc = GLES20.glGetAttribLocation(program, "aMat")
+        aArchAlphaLoc = GLES20.glGetAttribLocation(program, "aArchAlpha")
 
         uMvpLoc = GLES20.glGetUniformLocation(program, "uMvp")
         uModelLoc = GLES20.glGetUniformLocation(program, "uModel")
@@ -490,6 +516,13 @@ class VulvaGlTextureView(
         uBreathChestLoc = GLES20.glGetUniformLocation(program, "uBreathChest")
         uBreathAbdomenLoc = GLES20.glGetUniformLocation(program, "uBreathAbdomen")
         uAllowBreathingLoc = GLES20.glGetUniformLocation(program, "uAllowBreathing")
+        uBetaSmoothNeckSeamLoc = GLES20.glGetUniformLocation(program, "uBetaSmoothNeckSeam")
+        uBetaSoftHairLoc = GLES20.glGetUniformLocation(program, "uBetaSoftHair")
+        uBetaSmoothBodyHoleLoc = GLES20.glGetUniformLocation(program, "uBetaSmoothBodyHole")
+        uSmoothBodyHoleOvalRLoc = GLES20.glGetUniformLocation(program, "uSmoothBodyHoleOvalR")
+        uArchAlphaPassLoc = GLES20.glGetUniformLocation(program, "uArchAlphaPass")
+        uBetaWarmTransitionZoneLoc = GLES20.glGetUniformLocation(program, "uBetaWarmTransitionZone")
+        uBetaRefineInnerLabiaLoc = GLES20.glGetUniformLocation(program, "uBetaRefineInnerLabia")
 
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glDepthFunc(GLES20.GL_LEQUAL)
@@ -550,6 +583,9 @@ class VulvaGlTextureView(
             currentDeform.leftInner + currentDeform.rightInner) * 0.25f).coerceIn(0f, 1f)
         GLES20.glUniform1f(uStretchLoc, avgStretch)
         GLES20.glUniform1f(uLightModeLoc, if (dramaticSideLight) 1.0f else 0.0f)
+        GLES20.glUniform1f(uBetaSmoothNeckSeamLoc, if (currentDeform.betaSmoothNeckSeam) 1.0f else 0.0f)
+        GLES20.glUniform1f(uBetaSoftHairLoc, if (currentDeform.betaSoftHair) 1.0f else 0.0f)
+        GLES20.glUniform1f(uSmoothBodyHoleOvalRLoc, SEAM_D_HOLE_OVAL_R)
 
         // Advance natural periodic chest & abdominal breathing phase (true physiological speed regardless of idle frame pacing)
         val nowNs = System.nanoTime()
@@ -574,26 +610,229 @@ class VulvaGlTextureView(
         GLES20.glEnableVertexAttribArray(aNormalLoc)
         GLES20.glEnableVertexAttribArray(aMatLoc)
 
+        fun isAabbVisible(
+            minX: Float, maxX: Float,
+            minY: Float, maxY: Float,
+            minZ: Float, maxZ: Float,
+            margin: Float
+        ): Boolean {
+            val x0 = minX - margin; val x1 = maxX + margin
+            val y0 = minY - margin; val y1 = maxY + margin
+            val z0 = minZ - margin; val z1 = maxZ + margin
+            val m = mvpMatrix
+            var outLeft = true
+            var outRight = true
+            var outBottom = true
+            var outTop = true
+            var outNear = true
+            var outFar = true
+            for (c in 0 until 8) {
+                val px = if ((c and 1) == 0) x0 else x1
+                val py = if ((c and 2) == 0) y0 else y1
+                val pz = if ((c and 4) == 0) z0 else z1
+                val cx = m[0] * px + m[4] * py + m[8] * pz + m[12]
+                val cy = m[1] * px + m[5] * py + m[9] * pz + m[13]
+                val cz = m[2] * px + m[6] * py + m[10] * pz + m[14]
+                val cw = m[3] * px + m[7] * py + m[11] * pz + m[15]
+                if (cw <= 0f) return true
+                if (cx >= -cw) outLeft = false
+                if (cx <= cw) outRight = false
+                if (cy >= -cw) outBottom = false
+                if (cy <= cw) outTop = false
+                if (cz >= -cw) outNear = false
+                if (cz <= cw) outFar = false
+            }
+            return !(outLeft || outRight || outBottom || outTop || outNear || outFar)
+        }
+
+        fun ensureMeshBuffers(glMesh: DynamicGlMesh): GlMeshVbo {
+            var entry = session.meshVbos[glMesh]
+            if (entry == null) {
+                val ids = IntArray(2)
+                GLES20.glGenBuffers(2, ids, 0)
+                entry = GlMeshVbo(vboId = ids[0], iboId = ids[1])
+                session.meshVbos[glMesh] = entry
+            }
+            if (entry.uploadedVertexVersion != glMesh.vertexVersion) {
+                val vb = glMesh.vertexBuffer
+                vb.position(0)
+                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, entry.vboId)
+                if (entry.uploadedVertexVersion < 0) {
+                    GLES20.glBufferData(
+                        GLES20.GL_ARRAY_BUFFER,
+                        glMesh.vertexData.size * 4,
+                        vb,
+                        GLES20.GL_DYNAMIC_DRAW
+                    )
+                } else {
+                    GLES20.glBufferSubData(GLES20.GL_ARRAY_BUFFER, 0, glMesh.vertexData.size * 4, vb)
+                }
+                entry.uploadedVertexVersion = glMesh.vertexVersion
+            }
+            if (entry.uploadedIndexVersion != glMesh.indexVersion) {
+                val ib = glMesh.indexBuffer
+                ib.position(0)
+                GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, entry.iboId)
+                GLES20.glBufferData(
+                    GLES20.GL_ELEMENT_ARRAY_BUFFER,
+                    glMesh.indexCount * 2,
+                    ib,
+                    GLES20.GL_STATIC_DRAW
+                )
+                entry.uploadedIndexVersion = glMesh.indexVersion
+            }
+            return entry
+        }
+
+        fun ensureArchExtraBuffers() {
+            if (session.archCcwIboId == 0) {
+                val ids = IntArray(4)
+                GLES20.glGenBuffers(4, ids, 0)
+                session.archAlphaVboId = ids[0]
+                session.archCcwIboId = ids[1]
+                session.archCoreIboId = ids[2]
+                session.archSkirtIboId = ids[3]
+
+                val ccwBuf = mesh.labiaHoodArchCcwIndexBuffer
+                ccwBuf.position(0)
+                GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, session.archCcwIboId)
+                GLES20.glBufferData(
+                    GLES20.GL_ELEMENT_ARRAY_BUFFER,
+                    mesh.labiaHoodArchMesh.indexCount * 2,
+                    ccwBuf,
+                    GLES20.GL_STATIC_DRAW
+                )
+            }
+            if (session.archAlphaVersion != mesh.labiaHoodArchAlphaVersion) {
+                val alphaBuf = mesh.labiaHoodArchAlphaBuffer
+                alphaBuf.position(0)
+                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, session.archAlphaVboId)
+                val alphaBytes = mesh.labiaHoodArchMesh.vertexCount * 4
+                if (session.archAlphaVersion < 0) {
+                    GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, alphaBytes, alphaBuf, GLES20.GL_DYNAMIC_DRAW)
+                } else {
+                    GLES20.glBufferSubData(GLES20.GL_ARRAY_BUFFER, 0, alphaBytes, alphaBuf)
+                }
+                session.archAlphaVersion = mesh.labiaHoodArchAlphaVersion
+            }
+            if (session.archSplitVersion != mesh.labiaHoodArchSplitVersion) {
+                if (mesh.labiaHoodArchCoreIndexCount > 0) {
+                    val coreBuf = mesh.labiaHoodArchCoreIndexBuffer
+                    coreBuf.position(0)
+                    GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, session.archCoreIboId)
+                    GLES20.glBufferData(
+                        GLES20.GL_ELEMENT_ARRAY_BUFFER,
+                        mesh.labiaHoodArchCoreIndexCount * 2,
+                        coreBuf,
+                        GLES20.GL_DYNAMIC_DRAW
+                    )
+                }
+                if (mesh.labiaHoodArchSkirtIndexCount > 0) {
+                    val skirtBuf = mesh.labiaHoodArchSkirtIndexBuffer
+                    skirtBuf.position(0)
+                    GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, session.archSkirtIboId)
+                    GLES20.glBufferData(
+                        GLES20.GL_ELEMENT_ARRAY_BUFFER,
+                        mesh.labiaHoodArchSkirtIndexCount * 2,
+                        skirtBuf,
+                        GLES20.GL_DYNAMIC_DRAW
+                    )
+                }
+                session.archSplitVersion = mesh.labiaHoodArchSplitVersion
+            }
+        }
+
         fun drawMeshList(meshes: List<DynamicGlMesh>, materialType: Float) {
             GLES20.glUniform1f(uMaterialTypeLoc, materialType)
             meshes.forEach { glMesh ->
+                // Exact conservative clip-space AABB frustum culling (skips off-screen head/hair/breasts/toes in close-ups)
+                if (!isAabbVisible(glMesh.minX, glMesh.maxX, glMesh.minY, glMesh.maxY, glMesh.minZ, glMesh.maxZ, margin = 0.28f)) {
+                    return@forEach
+                }
+
                 val allowPubic = (materialType < 0.5f) &&
                     (glMesh === mesh.blossomBodyMesh || glMesh === mesh.blossomVulvaPatchMesh || glMesh === mesh.pelvisMesh)
                 GLES20.glUniform1f(uAllowPubicHairLoc, if (allowPubic) 1.0f else 0.0f)
                 val allowBreath = legsMode && (materialType < 0.5f) &&
                     (glMesh === mesh.blossomBodyMesh || glMesh === mesh.blossomBreastsMesh)
                 GLES20.glUniform1f(uAllowBreathingLoc, if (allowBreath) 1.0f else 0.0f)
+                val useSmoothBodyHole = legsMode && materialType < 0.5f &&
+                    currentDeform.betaSmoothBodyHoleCutoff && glMesh === mesh.blossomBodyMesh
+                GLES20.glUniform1f(uBetaSmoothBodyHoleLoc, if (useSmoothBodyHole) 1.0f else 0.0f)
 
-                val vb = glMesh.vertexBuffer
-                vb.position(0)
-                GLES20.glVertexAttribPointer(aPosLoc, 3, GLES20.GL_FLOAT, false, DynamicGlMesh.STRIDE_BYTES, vb)
-                vb.position(3)
-                GLES20.glVertexAttribPointer(aNormalLoc, 3, GLES20.GL_FLOAT, false, DynamicGlMesh.STRIDE_BYTES, vb)
-                vb.position(6)
-                GLES20.glVertexAttribPointer(aMatLoc, 4, GLES20.GL_FLOAT, false, DynamicGlMesh.STRIDE_BYTES, vb)
+                val vboEntry = ensureMeshBuffers(glMesh)
+                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vboEntry.vboId)
+                GLES20.glVertexAttribPointer(aPosLoc, 3, GLES20.GL_FLOAT, false, DynamicGlMesh.STRIDE_BYTES, 0)
+                GLES20.glVertexAttribPointer(aNormalLoc, 3, GLES20.GL_FLOAT, false, DynamicGlMesh.STRIDE_BYTES, 12)
+                GLES20.glVertexAttribPointer(aMatLoc, 4, GLES20.GL_FLOAT, false, DynamicGlMesh.STRIDE_BYTES, 24)
 
-                glMesh.indexBuffer.position(0)
-                GLES20.glDrawElements(GLES20.GL_TRIANGLES, glMesh.indexCount, GLES20.GL_UNSIGNED_SHORT, glMesh.indexBuffer)
+                val isArchMesh = materialType < 0.5f && glMesh === mesh.labiaHoodArchMesh
+                val useArchWarmFix = isArchMesh && currentDeform.betaWarmTransitionZone
+                GLES20.glUniform1f(uBetaWarmTransitionZoneLoc, if (useArchWarmFix) 1.0f else 0.0f)
+
+                val useInnerLabiaRefine = isArchMesh && currentDeform.betaRefineInnerLabia
+                GLES20.glUniform1f(uBetaRefineInnerLabiaLoc, if (useInnerLabiaRefine) 1.0f else 0.0f)
+
+                val useArchSoftEdge = isArchMesh && currentDeform.betaSoftArchEdge
+                if (isArchMesh && (useArchWarmFix || useArchSoftEdge)) {
+                    ensureArchExtraBuffers()
+                }
+                if (aArchAlphaLoc >= 0) {
+                    if (useArchSoftEdge) {
+                        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, session.archAlphaVboId)
+                        GLES20.glEnableVertexAttribArray(aArchAlphaLoc)
+                        GLES20.glVertexAttribPointer(aArchAlphaLoc, 1, GLES20.GL_FLOAT, false, 4, 0)
+                    } else {
+                        GLES20.glDisableVertexAttribArray(aArchAlphaLoc)
+                        GLES20.glVertexAttrib1f(aArchAlphaLoc, 1.0f)
+                    }
+                }
+
+                val useSeamAPolyOffset = legsMode && currentDeform.betaSmoothVulvaSeam &&
+                    glMesh === mesh.blossomVulvaPatchMesh
+                if (useSeamAPolyOffset) {
+                    GLES20.glEnable(GLES20.GL_POLYGON_OFFSET_FILL)
+                    GLES20.glPolygonOffset(SEAM_A_PATCH_POLY_OFFSET_FACTOR, SEAM_A_PATCH_POLY_OFFSET_UNITS)
+                }
+                if (useArchSoftEdge) {
+                    // Pass 1: Opaque interior core (writes depth for clean self-occlusion)
+                    GLES20.glUniform1f(uArchAlphaPassLoc, 1.0f)
+                    if (useArchWarmFix) {
+                        if (mesh.labiaHoodArchCoreIndexCount > 0) {
+                            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, session.archCoreIboId)
+                            GLES20.glDrawElements(GLES20.GL_TRIANGLES, mesh.labiaHoodArchCoreIndexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+                        }
+                    } else {
+                        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, vboEntry.iboId)
+                        GLES20.glDrawElements(GLES20.GL_TRIANGLES, glMesh.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+                    }
+
+                    // Pass 2: Feathered outer ~20% skirt alpha-blended cleanly onto underlying vulva patch
+                    GLES20.glUniform1f(uArchAlphaPassLoc, 2.0f)
+                    GLES20.glEnable(GLES20.GL_BLEND)
+                    GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                    GLES20.glDepthMask(false)
+                    if (useArchWarmFix) {
+                        if (mesh.labiaHoodArchSkirtIndexCount > 0) {
+                            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, session.archSkirtIboId)
+                            GLES20.glDrawElements(GLES20.GL_TRIANGLES, mesh.labiaHoodArchSkirtIndexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+                        }
+                    } else {
+                        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, vboEntry.iboId)
+                        GLES20.glDrawElements(GLES20.GL_TRIANGLES, glMesh.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+                    }
+                    GLES20.glDepthMask(true)
+                    GLES20.glDisable(GLES20.GL_BLEND)
+                    GLES20.glUniform1f(uArchAlphaPassLoc, 0.0f)
+                } else {
+                    GLES20.glUniform1f(uArchAlphaPassLoc, 0.0f)
+                    val iboId = if (useArchWarmFix) session.archCcwIboId else vboEntry.iboId
+                    GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, iboId)
+                    GLES20.glDrawElements(GLES20.GL_TRIANGLES, glMesh.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+                }
+                if (useSeamAPolyOffset) {
+                    GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL)
+                }
             }
         }
 
@@ -611,11 +850,19 @@ class VulvaGlTextureView(
             drawMeshList(mesh.coreMeshes, materialType = 0.0f)
         }
 
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
         GLES20.glDisableVertexAttribArray(aPosLoc)
         GLES20.glDisableVertexAttribArray(aNormalLoc)
         GLES20.glDisableVertexAttribArray(aMatLoc)
+        if (aArchAlphaLoc >= 0) {
+            GLES20.glDisableVertexAttribArray(aArchAlphaLoc)
+        }
 
         if (session.generation != renderGeneration || session.teardownPosted || !isGlReady) return
+        // Complete GPU rasterization on this background GL thread before handing the buffer to SurfaceTexture
+        // so HWUI's EglManager::fenceWait never stalls on queued GPU work, and frameMs reflects real GPU time.
+        GLES20.glFinish()
         val swapped = EGL14.eglSwapBuffers(session.eglDisplay, session.eglSurface)
         if (!swapped) {
             val eglErr = EGL14.eglGetError()
@@ -625,12 +872,14 @@ class VulvaGlTextureView(
             return
         }
 
-        if (legsMode && isGlReady && isHostVisible && !isHostPaused &&
+        // Only schedule idle breathing ticks when the breathing abdomen/chest region is visible in the viewport
+        val breathingRegionVisible = legsMode && isAabbVisible(-1.50f, 1.50f, 1.08f, 4.86f, -0.50f, 1.25f, margin = 0.10f)
+        if (breathingRegionVisible && isGlReady && isHostVisible && !isHostPaused &&
             session.generation == renderGeneration && !session.teardownPosted && !session.breathTickerScheduled
         ) {
             val frameMs = ((System.nanoTime() - frameStartNs) / 1_000_000L).coerceAtLeast(0L)
-            // Adaptive idle pacing: smooth ~15-30 FPS breathing while preserving generous RenderThread headroom
-            val nextDelayMs = maxOf(33L, frameMs * 2L).coerceAtMost(70L)
+            // GPU-aware adaptive idle pacing: smooth calm breathing while preserving generous HWUI headroom
+            val nextDelayMs = maxOf(66L, frameMs * 2L).coerceAtMost(220L)
             session.breathTickerScheduled = true
             session.handler.postDelayed(breathTicker, nextDelayMs)
         }
@@ -640,11 +889,34 @@ class VulvaGlTextureView(
         if (session.generation == renderGeneration) {
             isGlReady = false
         }
-        if (session.programId != 0) {
-            GLES20.glDeleteProgram(session.programId)
-            session.programId = 0
-        }
-        if (session.eglDisplay != EGL14.EGL_NO_DISPLAY) {
+        if (session.eglDisplay != EGL14.EGL_NO_DISPLAY && session.eglContext != EGL14.EGL_NO_CONTEXT) {
+            if (session.meshVbos.isNotEmpty()) {
+                val ids = IntArray(session.meshVbos.size * 2)
+                var k = 0
+                session.meshVbos.values.forEach { entry ->
+                    ids[k++] = entry.vboId
+                    ids[k++] = entry.iboId
+                }
+                GLES20.glDeleteBuffers(k, ids, 0)
+                session.meshVbos.clear()
+            }
+            if (session.archCcwIboId != 0) {
+                val extras = intArrayOf(
+                    session.archAlphaVboId,
+                    session.archCcwIboId,
+                    session.archCoreIboId,
+                    session.archSkirtIboId
+                )
+                GLES20.glDeleteBuffers(extras.size, extras, 0)
+                session.archAlphaVboId = 0
+                session.archCcwIboId = 0
+                session.archCoreIboId = 0
+                session.archSkirtIboId = 0
+            }
+            if (session.programId != 0) {
+                GLES20.glDeleteProgram(session.programId)
+                session.programId = 0
+            }
             EGL14.eglMakeCurrent(
                 session.eglDisplay,
                 EGL14.EGL_NO_SURFACE,
@@ -661,6 +933,9 @@ class VulvaGlTextureView(
             }
             EGL14.eglTerminate(session.eglDisplay)
             session.eglDisplay = EGL14.EGL_NO_DISPLAY
+        } else {
+            session.meshVbos.clear()
+            session.programId = 0
         }
     }
 
@@ -701,6 +976,10 @@ class VulvaGlTextureView(
     }
 
     companion object {
+        internal const val SEAM_A_PATCH_POLY_OFFSET_FACTOR = -0.75f
+        internal const val SEAM_A_PATCH_POLY_OFFSET_UNITS = -1.0f
+        internal const val SEAM_D_HOLE_OVAL_R = 0.93f
+
         fun computeMatrices(
             cam: VulvaCamera3D,
             aspect: Float,
@@ -798,6 +1077,7 @@ class VulvaGlTextureView(
             attribute vec3 aPos;
             attribute vec3 aNormal;
             attribute vec4 aMat;
+            attribute float aArchAlpha;
 
             uniform mat4 uMvp;
             uniform mat4 uModel;
@@ -809,6 +1089,7 @@ class VulvaGlTextureView(
             varying vec3 vRestPos;
             varying vec3 vNormal;
             varying vec4 vMat;
+            varying float vArchAlpha;
 
             void main() {
                 vec3 pos = aPos;
@@ -842,6 +1123,7 @@ class VulvaGlTextureView(
                 vRestPos = (uModel * vec4(aPos, 1.0)).xyz;
                 vNormal = nrm;
                 vMat = aMat;
+                vArchAlpha = aArchAlpha;
                 gl_Position = uMvp * vec4(pos, 1.0);
             }
         """
@@ -862,6 +1144,7 @@ class VulvaGlTextureView(
             varying vec3 vRestPos;
             varying vec3 vNormal;
             varying vec4 vMat;
+            varying float vArchAlpha;
 
             uniform vec3 uCamPos;
             uniform vec3 uSkinBase;
@@ -879,6 +1162,13 @@ class VulvaGlTextureView(
             uniform vec3 uHairSheen;
             uniform float uPubicHair;
             uniform float uAllowPubicHair;
+            uniform float uBetaSmoothNeckSeam;
+            uniform float uBetaSoftHair;
+            uniform float uBetaSmoothBodyHole;
+            uniform float uSmoothBodyHoleOvalR;
+            uniform float uArchAlphaPass;
+            uniform float uBetaWarmTransitionZone;
+            uniform float uBetaRefineInnerLabia;
 
             float hash31(vec3 p) {
                 p = fract(p * vec3(0.1031, 0.11369, 0.13787));
@@ -998,6 +1288,63 @@ class VulvaGlTextureView(
                     float hairAo = clamp(vMat.z, 0.35, 1.0);
                     float lockBias = vMat.w;
 
+                    if (uBetaSoftHair > 0.5) {
+                        // Beta 6: Exact baseline hair silhouette + fine strand-direction normal detail,
+                        // subtle strand-to-strand highlight/color variation & silky broken-up dual sheen
+                        vec3 hp = vRestPos;
+                        float hEps = 0.0042;
+                        vec3 strandFreq1 = vec3(124.0, 22.0, 124.0);
+                        vec3 strandFreq2 = vec3(235.0, 42.0, 235.0);
+                        float sC = vnoise3(hp * strandFreq1) * 0.62 + vnoise3(hp * strandFreq2) * 0.38;
+                        float sX = vnoise3((hp + vec3(hEps, 0.0, 0.0)) * strandFreq1) * 0.62 +
+                                   vnoise3((hp + vec3(hEps, 0.0, 0.0)) * strandFreq2) * 0.38;
+                        float sY = vnoise3((hp + vec3(0.0, hEps, 0.0)) * strandFreq1) * 0.62 +
+                                   vnoise3((hp + vec3(0.0, hEps, 0.0)) * strandFreq2) * 0.38;
+                        float sZ = vnoise3((hp + vec3(0.0, 0.0, hEps)) * strandFreq1) * 0.62 +
+                                   vnoise3((hp + vec3(0.0, 0.0, hEps)) * strandFreq2) * 0.38;
+                        vec3 sRawGrad = vec3(sC - sX, sC - sY, sC - sZ);
+                        vec3 sTanGrad = sRawGrad - N * dot(sRawGrad, N);
+                        vec3 Nhair = normalize(N + sTanGrad * 0.58);
+
+                        float lockToneVar = vnoise3(hp * vec3(38.0, 8.5, 38.0));
+                        float fineStrandTone = sC;
+                        float lowlightMask = smoothstep(0.56, 0.22, lockToneVar * 0.58 + fineStrandTone * 0.42);
+                        float highlightMask = smoothstep(0.52, 0.88, lockToneVar * 0.45 + fineStrandTone * 0.55);
+                        float silkyBandB = 0.5 + 0.5 * sin(strandFlow * 18.0 + fineStrandTone * 5.2 + lockToneVar * 2.8);
+                        float tipSoft = smoothstep(0.74, 1.0, strandFlow);
+
+                        vec3 hairAlbedo = mix(uHairBase, uHairHighlight, clamp(strandRib * 0.22 + fineStrandTone * 0.44 + lockBias * 0.48, 0.0, 1.0));
+                        hairAlbedo = mix(hairAlbedo, uHairBase * 0.76, lowlightMask * 0.34);
+                        hairAlbedo = mix(hairAlbedo, mix(uHairHighlight, uHairSheen, 0.22), highlightMask * 0.28);
+                        hairAlbedo *= mix(0.83, 1.07, smoothstep(0.0, 0.34, strandFlow) * (0.76 + 0.24 * silkyBandB));
+                        hairAlbedo = mix(hairAlbedo, hairAlbedo * 1.04, tipSoft * 0.35);
+
+                        vec3 flowRef = abs(Nhair.y) < 0.94 ? vec3(0.0, -1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+                        vec3 Tstrand = normalize(flowRef - Nhair * dot(flowRef, Nhair));
+                        float dKeyH = clamp((dot(Nhair, Lkey) + 0.28) / 1.28, 0.0, 1.0);
+                        float dFillH = clamp((dot(Nhair, Lfill) + 0.30) / 1.30, 0.0, 1.0);
+                        vec3 HkeyH = normalize(Lkey + V);
+                        vec3 HfillH = normalize(Lfill + V);
+
+                        vec3 Nsheen1 = normalize(Nhair + Tstrand * (-0.08 + (fineStrandTone - 0.5) * 0.10));
+                        vec3 Nsheen2 = normalize(Nhair + Tstrand * (0.11 + (lockToneVar - 0.5) * 0.08));
+                        float strandBreakup = 0.52 + 0.48 * smoothstep(0.24, 0.84, fineStrandTone);
+                        float primarySheen = pow(max(dot(Nsheen1, HkeyH), 0.0), 46.0) * (0.20 + 0.26 * strandBreakup) * (1.0 - tipSoft * 0.22);
+                        float secondarySheen = (pow(max(dot(Nsheen2, HkeyH), 0.0), 18.0) * 0.13 +
+                                                pow(max(dot(Nsheen2, HfillH), 0.0), 18.0) * 0.10) * (0.72 + 0.28 * lockToneVar);
+                        float rimSheen = pow(clamp(1.0 - max(dot(Nhair, V), 0.0), 0.0, 1.0), 2.6) * 0.18 * clamp(dot(Nhair, Lrim) * 0.5 + 0.5, 0.2, 1.0);
+                        float strandAo = clamp(hairAo * mix(0.88, 1.06, fineStrandTone), 0.32, 1.0);
+
+                        vec3 hairLit = hairAlbedo * (0.26 + dKeyH * 0.72 + dFillH * 0.25) * strandAo +
+                                       uHairSheen * primarySheen * strandAo +
+                                       uHairHighlight * secondarySheen * 1.15 * strandAo +
+                                       uHairSheen * 0.50 * rimSheen * strandAo;
+                        vec3 hairMapped = hairLit / (hairLit + vec3(0.72));
+                        hairMapped = pow(clamp(hairMapped * 1.26, 0.0, 1.0), vec3(1.01));
+                        gl_FragColor = vec4(hairMapped, 1.0);
+                        return;
+                    }
+
                     // Fine silky longitudinal micro-strands so hair reads soft & natural instead of sculpted clay
                     float fineStrands = vnoise3(vWorldPos * vec3(56.0, 18.0, 56.0)) * 0.58 +
                                         vnoise3(vWorldPos * vec3(128.0, 34.0, 128.0)) * 0.42;
@@ -1111,10 +1458,28 @@ class VulvaGlTextureView(
                 // -----------------------------------------------------------------
                 // PASS A: LIVING SKIN & MUCOSA WITH RGB SUBSURFACE SCATTERING (SSS)
                 // -----------------------------------------------------------------
+                // Standard Beta v1 Seam D: clip anterior body mesh hole along a smooth per-fragment ovalR curve
+                // instead of coarse Marching Cubes voxel stair-steps (disabled in Legacy Vulva mode).
+                if (uBetaSmoothBodyHole > 0.5) {
+                    float holeOvalR = length(vec2(vRestPos.x / 0.64, (vRestPos.y + 0.06) / 1.02));
+                    if (vRestPos.z > -0.92 && normalize(vNormal).z > 0.04 && holeOvalR < uSmoothBodyHoleOvalR) {
+                        discard;
+                    }
+                }
                 float mucosa = clamp(vMat.x, 0.0, 1.0);
                 float wetness = clamp(vMat.y, 0.0, 1.0);
                 float ao = clamp(vMat.z, 0.06, 1.0);
                 float pigment = clamp(vMat.w, 0.0, 1.0);
+
+                // Standard Beta v1 Seam E: two-pass alpha split for labiaHoodArchMesh outer ~20% skirt
+                // (Pass 1 = opaque core writing depth; Pass 2 = depth-tested alpha-blended feathered perimeter).
+                float archAlpha = clamp(vArchAlpha, 0.0, 1.0);
+                if (uArchAlphaPass > 0.5 && uArchAlphaPass < 1.5 && archAlpha < 0.995) {
+                    discard;
+                }
+                if (uArchAlphaPass > 1.5 && (archAlpha >= 0.995 || archAlpha < 0.004)) {
+                    discard;
+                }
 
                 // Multi-octave 3D procedural skin albedo mottling + subtle living dual-chromophore (hemoglobin/melanin) variation
                 // Sampled in undisplaced vRestPos so procedural pores & pubic hair NEVER swim during breathing!
@@ -1132,8 +1497,21 @@ class VulvaGlTextureView(
                 float hZ = skinDetailHeight(vRestPos + vec3(0.0, 0.0, eps), mucosa, pigment, uStretch);
 
                 // Finer, velvety portrait skin micro-normal on face & chest (prevents coarse orange-peel pores!)
-                float faceVelvet = smoothstep(5.25, 5.85, vRestPos.y);
                 float isHeadRegion = smoothstep(5.40, 5.62, vRestPos.y);
+                float submentalDown = (1.0 - smoothstep(5.66, 5.92, vRestPos.y)) * smoothstep(0.06, -0.44, N.y);
+                float faceVelvet = mix(
+                    smoothstep(5.25, 5.85, vRestPos.y),
+                    smoothstep(4.55, 5.92, vRestPos.y) * (1.0 - submentalDown * 0.85),
+                    uBetaSmoothNeckSeam
+                );
+                float neckSkinBlend = mix(
+                    isHeadRegion,
+                    smoothstep(4.48, 5.92, vRestPos.y) * (1.0 - submentalDown),
+                    uBetaSmoothNeckSeam
+                );
+                float submentalFeatherZone = uBetaSmoothNeckSeam * submentalDown *
+                    smoothstep(4.78, 5.38, vRestPos.y) * (1.0 - smoothstep(5.80, 5.92, vRestPos.y)) *
+                    (1.0 - smoothstep(0.42, 0.74, abs(vRestPos.x)));
                 float pelvicSkinZone = smoothstep(-1.32, -0.92, vRestPos.y) *
                                        (1.0 - smoothstep(0.92, 1.32, vRestPos.y)) *
                                        (1.0 - smoothstep(0.68, 1.08, abs(vRestPos.x))) *
@@ -1192,8 +1570,21 @@ class VulvaGlTextureView(
                 float melaninShift = mix(0.974, 1.024, nMelanin);
                 skinMottle *= mix(vec3(1.0), hemoShift * melaninShift, chromoStrength * (0.82 + pelvicSkinZone * 0.28));
                 vec3 warmBlush = mix(skinMottle, skinMottle * vec3(1.05, 0.94, 0.92), 0.25 + nMid * 0.25 + pelvicSkinZone * 0.08 * nHemo);
+                // Seam F (betaWarmTransitionZone): labiaHoodArchMesh now uses outward CCW winding (gl_FrontFacing = true),
+                // plus a gentle warm-hue safeguard on its low-mucosa outer skin skirt so it converges
+                // cleanly into surrounding skin without lilac shift while keeping labia interior colors untouched.
+                float labiaInnerMask = uBetaRefineInnerLabia * smoothstep(0.06, 0.32, mucosa);
+                float archWarmLower = mix(0.18, 0.10, uBetaRefineInnerLabia);
+                float archWarmUpper = mix(0.48, 0.28, uBetaRefineInnerLabia);
+                float archWarmMask = uBetaWarmTransitionZone * (1.0 - smoothstep(archWarmLower, archWarmUpper, mucosa));
+                float ringSoftAo = mix(ao, mix(ao, 1.0, 0.28), archWarmMask);
+
                 // Skin-harmonized pigmentation across body and pelvic skin
-                vec3 pigmentedSkin = mix(warmBlush, mix(uSkinShadow * 0.93, uMucosaBase * 0.90, 0.44), pigment * (0.38 + pelvicSkinZone * 0.14) * (1.0 - isHeadRegion * 0.65));
+                vec3 defaultPigmentTarget = mix(uSkinShadow * 0.93, uMucosaBase * 0.90, 0.44);
+                vec3 warmRingPigmentTarget = mix(uSkinBase * vec3(0.96, 0.87, 0.80), uSkinShadow * vec3(1.03, 0.95, 0.88), 0.55);
+                vec3 pigmentTarget = mix(defaultPigmentTarget, warmRingPigmentTarget, archWarmMask);
+                float pigmentWeight = mix(0.38 + pelvicSkinZone * 0.14, 0.30, archWarmMask) * (1.0 - neckSkinBlend * 0.65);
+                vec3 pigmentedSkin = mix(warmBlush, pigmentTarget, pigment * pigmentWeight);
                 // Darker, more naturally visible v6.3 areola & nipple pigmentation (warm dusty rose-terracotta adapting smoothly to skin tone)
                 vec3 warmRoseDeep = mix(uMucosaBase * 0.68, uMucosaDeep * 1.15, 0.35);
                 vec3 areolaBaseTone = mix(uSkinShadow * vec3(0.74, 0.58, 0.54), warmRoseDeep, 0.42);
@@ -1207,86 +1598,116 @@ class VulvaGlTextureView(
                 // Soft, natural skin-harmonized muted rose facial lip tone (never artificial dark/injected!)
                 vec3 facialLipTone = mix(uSkinBase * vec3(1.02, 0.81, 0.81), uMucosaBase * vec3(1.04, 0.88, 0.90), 0.52);
                 vec3 baseMucosaTone = mix(harmonizedMucosa, facialLipTone, isHeadRegion);
-                vec3 mucosaVar = mix(baseMucosaTone * 0.93, baseMucosaTone * 1.07, nMid * 0.45 + nHemo * 0.35 + 0.15);
-                vec3 mucosaRich = mix(mucosaVar, uMucosaDeep, (1.0 - ao) * (0.50 - 0.24 * isHeadRegion - 0.28 * isChestRegion));
+                float mucosaVarLo = mix(0.93, 0.97, labiaInnerMask);
+                float mucosaVarHi = mix(1.07, 1.03, labiaInnerMask);
+                vec3 mucosaVar = mix(baseMucosaTone * mucosaVarLo, baseMucosaTone * mucosaVarHi, nMid * 0.45 + nHemo * 0.35 + 0.15);
+                vec3 mucosaRich = mix(mucosaVar, uMucosaDeep, (1.0 - ringSoftAo) * (0.50 - 0.24 * isHeadRegion - 0.28 * isChestRegion) * (1.0 - archWarmMask * 0.65));
                 // Natural darker pigmentation concentrated subtly along the labia minora free edge (strictly pelvic region)
                 float isPelvicMucosa = 1.0 - smoothstep(1.2, 2.0, vRestPos.y);
-                vec3 mucosaRimmed = mix(mucosaRich, mix(uMucosaDeep * 0.86, uSkinShadow * 0.82, 0.48), pigment * 0.34 * isPelvicMucosa);
+                vec3 defaultRimTarget = mix(uMucosaDeep * 0.86, uSkinShadow * 0.82, 0.48);
+                vec3 warmRimTarget = mix(uSkinBase * vec3(0.98, 0.80, 0.74), uSkinShadow * vec3(1.05, 0.82, 0.75), 0.45);
+                vec3 rimTarget = mix(defaultRimTarget, warmRimTarget, archWarmMask);
+                vec3 mucosaRimmed = mix(mucosaRich, rimTarget, pigment * 0.34 * isPelvicMucosa * (1.0 - archWarmMask * 0.35));
+                vec3 warmTransitionMucosa = mix(warmBlush * vec3(1.02, 0.87, 0.79), uSkinShadow * vec3(1.06, 0.86, 0.77), 0.35);
+                mucosaRimmed = mix(mucosaRimmed, warmTransitionMucosa, archWarmMask * 0.55);
                 // Keep facial skin (low mucosa) 100% matched to neck/chest brightness and neutral hue!
                 float faceLipActive = smoothstep(0.06, 0.22, mucosa);
-                vec3 faceHarmonizedSkin = mix(pigmentedSkin, warmBlush * vec3(1.01, 1.01, 1.00), isHeadRegion * (1.0 - faceLipActive) * 0.45);
+                vec3 faceHarmonizedSkin = mix(pigmentedSkin, warmBlush * vec3(1.01, 1.01, 1.00), neckSkinBlend * (1.0 - faceLipActive) * 0.45);
+                // Beta 5: gently warm-feather the downward-facing submental band under the chin into upper-neck tone (zero change on face y >= 5.92)
+                faceHarmonizedSkin = mix(faceHarmonizedSkin, faceHarmonizedSkin * vec3(0.955, 0.918, 0.902), submentalFeatherZone * (1.0 - faceLipActive) * 0.48);
                 vec3 albedo = mix(faceHarmonizedSkin, mucosaRimmed, mucosa);
+                // Seam F (uBetaWarmTransitionZone): deepen the newly front-lit labiaHoodArchMesh by ~1 warm skin-tone
+                // shade (proportional across light and dark skin tones), fading cleanly to 0 along the outer Seam E skirt.
+                float seamFShadeFade = smoothstep(0.0, 0.55, archAlpha) * smoothstep(0.06, 0.28, mucosa + pigment * 0.65);
+                vec3 seamFShadeTarget = mix(albedo * vec3(0.84, 0.77, 0.72), uSkinShadow * vec3(0.96, 0.90, 0.86), 0.24 * (1.0 - mucosa));
+                albedo = mix(albedo, seamFShadeTarget, uBetaWarmTransitionZone * seamFShadeFade);
+                // 3G (uBetaRefineInnerLabia): very faint natural warm rose-brown tissue tint on inner labia,
+                // strongest along the rolled free edges (high pigment) and fading smoothly to 0 before the outer skirt.
+                float innerLabiaFade = smoothstep(0.05, 0.42, mucosa);
+                float freeEdgeWeight = smoothstep(0.14, 0.56, pigment) * smoothstep(0.06, 0.34, mucosa);
+                float roseBrownStrength = uBetaRefineInnerLabia * clamp(innerLabiaFade * 0.11 + freeEdgeWeight * 0.19, 0.0, 0.28);
+                vec3 warmRoseBrown = mix(uSkinShadow * vec3(0.84, 0.64, 0.56), uMucosaDeep * vec3(0.96, 0.78, 0.70), 0.38);
+                albedo = mix(albedo, warmRoseBrown, roseBrownStrength);
 
                 // Hair-color-matched sculpted eyebrows (pigment ~0.18..0.56) & crisp dark eyelashes (pigment > 0.68) — zero stray dots!
+                // Fast-path guard: skip 3D brow hair noise on all non-facial/non-brow fragments (bit-for-bit identical result).
                 float browMaskFace = isHeadRegion * smoothstep(0.16, 0.52, pigment) * (1.0 - smoothstep(0.08, 0.18, mucosa));
                 float lashMaskFace = isHeadRegion * smoothstep(0.68, 0.90, pigment) * (1.0 - smoothstep(0.08, 0.18, mucosa));
-                float browMicroHair = smoothstep(0.28, 0.78, vnoise3(vRestPos * vec3(135.0, 210.0, 120.0)));
-                vec3 browTone = mix(uHairBase * 0.92, uSkinShadow * 0.44, 0.24) * mix(0.86, 1.08, browMicroHair);
-                vec3 lashTone = mix(uHairBase * 0.38, vec3(0.06, 0.045, 0.045), 0.56);
-                albedo = mix(albedo, browTone, browMaskFace * 0.72);
-                albedo = mix(albedo, lashTone, lashMaskFace * 0.86);
+                if (browMaskFace > 0.001 || lashMaskFace > 0.001) {
+                    float browMicroHair = smoothstep(0.28, 0.78, vnoise3(vRestPos * vec3(135.0, 210.0, 120.0)));
+                    vec3 browTone = mix(uHairBase * 0.92, uSkinShadow * 0.44, 0.24) * mix(0.86, 1.08, browMicroHair);
+                    vec3 lashTone = mix(uHairBase * 0.38, vec3(0.06, 0.045, 0.045), 0.56);
+                    albedo = mix(albedo, browTone, browMaskFace * 0.72);
+                    albedo = mix(albedo, lashTone, lashMaskFace * 0.86);
+                }
 
                 // Customizable pubic hair (0.0 = Cleanly Shaven, 0.45 = Natural default, 1.0 = Very Bushy)
                 // Organic inverted-teardrop density gradient tapering smoothly onto upper labia majora (zero hard rectangular edge!)
+                // Fast-path guard: skip 6-10 3D noise evaluations outside pelvic hair region or when cleanly shaven.
                 float ax = abs(vRestPos.x);
+                float hairCoverage = 0.0;
                 float hairAmt = clamp(uPubicHair, 0.0, 1.0);
-                float hairGrow = clamp(hairAmt / 0.45, 0.0, 1.0);
-                float hairBush = clamp((hairAmt - 0.45) / 0.55, 0.0, 1.0);
+                if (uAllowPubicHair > 0.5 && hairAmt > 0.015) {
+                    float hairGrow = clamp(hairAmt / 0.45, 0.0, 1.0);
+                    float hairBush = clamp((hairAmt - 0.45) / 0.55, 0.0, 1.0);
 
-                // Strictly isolate pubic hair to pelvic skin meshes & pelvic surface Z (ZERO bleeding onto posed hands/fingers!)
-                float pelvicZBand = smoothstep(-0.18, 0.04, vRestPos.z) * (1.0 - smoothstep(0.42, 0.54, vRestPos.z));
-                float anteriorMask = uAllowPubicHair * pelvicZBand * (1.0 - smoothstep(0.54 + 0.16 * hairBush, 0.86 + 0.18 * hairBush, ax));
-                float edgeNoise = (nMid - 0.5) * (0.14 + 0.06 * hairBush) + (nMicro - 0.5) * 0.045;
+                    // Strictly isolate pubic hair to pelvic skin meshes & pelvic surface Z (ZERO bleeding onto posed hands/fingers!)
+                    float pelvicZBand = smoothstep(-0.18, 0.04, vRestPos.z) * (1.0 - smoothstep(0.42, 0.54, vRestPos.z));
+                    float anteriorMask = uAllowPubicHair * pelvicZBand * (1.0 - smoothstep(0.54 + 0.16 * hairBush, 0.86 + 0.18 * hairBush, ax));
+                    float edgeNoise = (nMid - 0.5) * (0.14 + 0.06 * hairBush) + (nMicro - 0.5) * 0.045;
 
-                // Softly arched upper mons border + organic V-tapered lower contour flowing smoothly onto upper labia majora
-                float monsTopArch = (0.84 + 0.22 * hairBush) - ax * ax * (0.58 - 0.16 * hairBush) + edgeNoise;
-                float monsTopFade = 1.0 - smoothstep(monsTopArch - 0.22, monsTopArch + 0.07 + 0.06 * hairBush, vRestPos.y);
+                    // Softly arched upper mons border + organic V-tapered lower contour flowing smoothly onto upper labia majora
+                    float monsTopArch = (0.84 + 0.22 * hairBush) - ax * ax * (0.58 - 0.16 * hairBush) + edgeNoise;
+                    float monsTopFade = 1.0 - smoothstep(monsTopArch - 0.22, monsTopArch + 0.07 + 0.06 * hairBush, vRestPos.y);
 
-                // Curved lower density taper: gently clears the central anterior cleft while tapering organically down the outer labia majora
-                float cleftArchY = (0.42 - 0.10 * hairBush) - smoothstep(0.08, 0.32, ax) * (0.36 + 0.24 * hairBush) + edgeNoise * 0.55;
-                float lowerTaperFade = smoothstep(cleftArchY - 0.16, cleftArchY + 0.22, vRestPos.y);
-                float verticalDensity = smoothstep(0.02 - 0.34 * hairBush, 0.64 - 0.10 * hairBush, vRestPos.y + edgeNoise * 0.45);
+                    // Curved lower density taper: gently clears the central anterior cleft while tapering organically down the outer labia majora
+                    float cleftArchY = (0.42 - 0.10 * hairBush) - smoothstep(0.08, 0.32, ax) * (0.36 + 0.24 * hairBush) + edgeNoise * 0.55;
+                    float lowerTaperFade = smoothstep(cleftArchY - 0.16, cleftArchY + 0.22, vRestPos.y);
+                    float verticalDensity = smoothstep(0.02 - 0.34 * hairBush, 0.64 - 0.10 * hairBush, vRestPos.y + edgeNoise * 0.45);
 
-                // Organic tapered width narrowing naturally from the mons triangle down along the outer crowns of the labia majora
-                float yWidthT = smoothstep(-0.12 - 0.24 * hairBush, 0.72, vRestPos.y);
-                float widthLimit = (0.28 + 0.11 * hairBush) + (0.24 + 0.13 * hairBush) * yWidthT + edgeNoise * 0.55;
-                float sideTaperFade = 1.0 - smoothstep(widthLimit * (0.40 - 0.08 * hairBush), widthLimit, ax);
+                    // Organic tapered width narrowing naturally from the mons triangle down along the outer crowns of the labia majora
+                    float yWidthT = smoothstep(-0.12 - 0.24 * hairBush, 0.72, vRestPos.y);
+                    float widthLimit = (0.28 + 0.11 * hairBush) + (0.24 + 0.13 * hairBush) * yWidthT + edgeNoise * 0.55;
+                    float sideTaperFade = 1.0 - smoothstep(widthLimit * (0.40 - 0.08 * hairBush), widthLimit, ax);
 
-                // Keep inner cleft & mucosal vestibule naturally hair-free with a soft feathered margin
-                float cleftInnerClear = smoothstep(0.14 - 0.03 * hairBush, 0.26 - 0.04 * hairBush, ax + smoothstep(0.38, 0.62, vRestPos.y) * 0.26);
-                float upperLabiaTaper = monsTopFade * lowerTaperFade * sideTaperFade * cleftInnerClear *
-                                        mix(0.32, 1.0, verticalDensity) * (1.0 - mucosa) * anteriorMask;
-                float totalHairMask = clamp(upperLabiaTaper * (0.88 + 0.26 * hairBush), 0.0, 1.0) * smoothstep(0.015, 0.14, hairAmt);
+                    // Keep inner cleft & mucosal vestibule naturally hair-free with a soft feathered margin
+                    float cleftInnerClear = smoothstep(0.14 - 0.03 * hairBush, 0.26 - 0.04 * hairBush, ax + smoothstep(0.38, 0.62, vRestPos.y) * 0.26);
+                    float upperLabiaTaper = monsTopFade * lowerTaperFade * sideTaperFade * cleftInnerClear *
+                                            mix(0.32, 1.0, verticalDensity) * (1.0 - mucosa) * anteriorMask;
+                    float totalHairMask = clamp(upperLabiaTaper * (0.88 + 0.26 * hairBush), 0.0, 1.0) * smoothstep(0.015, 0.14, hairAmt);
 
-                // Natural downward-and-slightly-inward hair growth direction + multi-scale strand-thickness variation
-                float flowInward = sign(vRestPos.x) * (0.26 * smoothstep(0.30, 0.78, vRestPos.y) - 0.12 * (1.0 - smoothstep(0.10, 0.45, vRestPos.y)));
-                float curl1 = vnoise3(vRestPos * 19.0) * 2.5;
-                float curl2 = vnoise3(vRestPos * 46.0) * 1.15;
-                vec3 hairCoord = vec3(
-                    (vRestPos.x + vRestPos.y * flowInward) * 76.0 + curl1 + curl2,
-                    vRestPos.y * 28.0 + ax * 18.0 - curl1 * 0.55,
-                    vRestPos.z * 28.0
-                );
-                // Multi-thickness strand hierarchy: fine wispy border hairs, medium curly shafts, and denser core curls
-                float fineWisps = smoothstep(0.56 - 0.14 * hairBush, 0.90 - 0.10 * hairBush, vnoise3(hairCoord * 1.95 + vec3(1.4, -0.8, 0.5)));
-                float mediumStrands = smoothstep(0.48 - 0.18 * hairBush, 0.86 - 0.14 * hairBush, vnoise3(hairCoord * 1.28));
-                float coarseCore = smoothstep(0.30 - 0.12 * hairBush, 0.76 - 0.16 * hairBush, vnoise3(hairCoord * 0.62)) * smoothstep(0.18, 0.68, totalHairMask);
-                float hairDenseLayer = smoothstep(0.32, 0.72, vnoise3(hairCoord * 0.92 + vec3(3.1, -1.7, 2.4))) * hairBush * 0.40 * smoothstep(0.22, 0.72, totalHairMask);
-                float rawCoverage = totalHairMask * (fineWisps * 0.34 + mediumStrands * (0.44 + 0.20 * hairBush) + coarseCore * (0.34 + 0.22 * hairBush) + hairDenseLayer);
-                float hairCoverage = clamp(rawCoverage * hairGrow, 0.0, 0.64 + 0.32 * hairBush);
+                    if (totalHairMask > 0.0) {
+                        // Natural downward-and-slightly-inward hair growth direction + multi-scale strand-thickness variation
+                        float flowInward = sign(vRestPos.x) * (0.26 * smoothstep(0.30, 0.78, vRestPos.y) - 0.12 * (1.0 - smoothstep(0.10, 0.45, vRestPos.y)));
+                        float curl1 = vnoise3(vRestPos * 19.0) * 2.5;
+                        float curl2 = vnoise3(vRestPos * 46.0) * 1.15;
+                        vec3 hairCoord = vec3(
+                            (vRestPos.x + vRestPos.y * flowInward) * 76.0 + curl1 + curl2,
+                            vRestPos.y * 28.0 + ax * 18.0 - curl1 * 0.55,
+                            vRestPos.z * 28.0
+                        );
+                        // Multi-thickness strand hierarchy: fine wispy border hairs, medium curly shafts, and denser core curls
+                        float fineWisps = smoothstep(0.56 - 0.14 * hairBush, 0.90 - 0.10 * hairBush, vnoise3(hairCoord * 1.95 + vec3(1.4, -0.8, 0.5)));
+                        float mediumStrands = smoothstep(0.48 - 0.18 * hairBush, 0.86 - 0.14 * hairBush, vnoise3(hairCoord * 1.28));
+                        float coarseCore = smoothstep(0.30 - 0.12 * hairBush, 0.76 - 0.16 * hairBush, vnoise3(hairCoord * 0.62)) * smoothstep(0.18, 0.68, totalHairMask);
+                        float hairDenseLayer = smoothstep(0.32, 0.72, vnoise3(hairCoord * 0.92 + vec3(3.1, -1.7, 2.4))) * hairBush * 0.40 * smoothstep(0.22, 0.72, totalHairMask);
+                        float rawCoverage = totalHairMask * (fineWisps * 0.34 + mediumStrands * (0.44 + 0.20 * hairBush) + coarseCore * (0.34 + 0.22 * hairBush) + hairDenseLayer);
+                        hairCoverage = clamp(rawCoverage * hairGrow, 0.0, 0.64 + 0.32 * hairBush);
 
-                // Subtle 3D coarse curly-hair relief when fuller so pubic hair catches realistic studio depth
-                if (hairCoverage > 0.04) {
-                    float reliefGain = hairCoverage * (0.09 + 0.20 * hairBush);
-                    float hcX = vnoise3((hairCoord + vec3(0.45, 0.0, 0.0)) * 1.15) - vnoise3((hairCoord - vec3(0.45, 0.0, 0.0)) * 1.15);
-                    float hcY = vnoise3((hairCoord + vec3(0.0, 0.45, 0.0)) * 1.15) - vnoise3((hairCoord - vec3(0.0, 0.45, 0.0)) * 1.15);
-                    N = normalize(N + vec3(hcX, hcY, 0.0) * reliefGain);
+                        // Subtle 3D coarse curly-hair relief when fuller so pubic hair catches realistic studio depth
+                        if (hairCoverage > 0.04) {
+                            float reliefGain = hairCoverage * (0.09 + 0.20 * hairBush);
+                            float hcX = vnoise3((hairCoord + vec3(0.45, 0.0, 0.0)) * 1.15) - vnoise3((hairCoord - vec3(0.45, 0.0, 0.0)) * 1.15);
+                            float hcY = vnoise3((hairCoord + vec3(0.0, 0.45, 0.0)) * 1.15) - vnoise3((hairCoord - vec3(0.0, 0.45, 0.0)) * 1.15);
+                            N = normalize(N + vec3(hcX, hcY, 0.0) * reliefGain);
+                        }
+
+                        vec3 hairColor = mix(uSkinShadow * 0.34, uHairBase * 0.85, 0.60);
+                        // Subtle warm strand variation inside fuller bush so it never looks like a flat dark decal
+                        vec3 bushyHairColor = mix(hairColor * 0.84, mix(uHairBase, uHairHighlight, 0.28), (mediumStrands * 0.6 + fineWisps * 0.4) * (0.20 + 0.35 * hairBush));
+                        albedo = mix(albedo, bushyHairColor, hairCoverage * (0.64 + 0.28 * hairBush));
+                    }
                 }
-
-                vec3 hairColor = mix(uSkinShadow * 0.34, uHairBase * 0.85, 0.60);
-                // Subtle warm strand variation inside fuller bush so it never looks like a flat dark decal
-                vec3 bushyHairColor = mix(hairColor * 0.84, mix(uHairBase, uHairHighlight, 0.28), (mediumStrands * 0.6 + fineWisps * 0.4) * (0.20 + 0.35 * hairBush));
-                albedo = mix(albedo, bushyHairColor, hairCoverage * (0.64 + 0.28 * hairBush));
 
                 float NdotL1 = dot(N, Lkey);
                 float NdotL2 = dot(N, Lfill);
@@ -1334,18 +1755,28 @@ class VulvaGlTextureView(
                 float hairSpecDamp = 1.0 - hairCoverage * 0.65;
                 float jointSpecSoften = 1.0 - jointSss * 0.22;
                 // Natural matte-velvet finish on face, outer pelvic skin (majora/mons/perineum), and dry pigmented areolae
-                float faceMatteDamp = 1.0 - smoothstep(5.45, 5.95, vRestPos.y) * 0.36;
+                float faceMatteBlend = mix(
+                    smoothstep(5.45, 5.95, vRestPos.y),
+                    smoothstep(4.62, 5.95, vRestPos.y) * (1.0 - submentalDown * 0.65),
+                    uBetaSmoothNeckSeam
+                );
+                float faceMatteDamp = 1.0 - faceMatteBlend * 0.36;
                 float pelvicMatteDamp = 1.0 - pelvicSkinZone * 0.42;
                 float areolaMatteDamp = 1.0 - dryPigmentMask * 0.56;
-                float oilBreakup = mix(0.79, 1.19, nMicro * 0.65 + nMelanin * 0.35) * hairSpecDamp * jointSpecSoften * faceMatteDamp * pelvicMatteDamp * areolaMatteDamp;
+                float oilBreakupBase = hairSpecDamp * jointSpecSoften * faceMatteDamp * pelvicMatteDamp * areolaMatteDamp;
+                float oilBreakup = mix(0.79, 1.19, nMicro * 0.65 + nMelanin * 0.35) * oilBreakupBase;
+                float labiaOilBreakup = mix(oilBreakup, 0.92 * oilBreakupBase, 0.65 * labiaInnerMask);
                 float microRough = mix(-3.0, 3.2, nMid * 0.55 + nMicro * 0.45);
-                float broadExp = max(12.0, mix(18.0, 29.0, clamp(wetness + naturalSheen * 0.22, 0.0, 1.0)) + microRough * (1.0 - mucosa));
-                float broadAmp = mix(0.070, 0.148, wetness) * (0.88 + 0.24 * naturalSheen);
-                float broadSpec = pow(NdotH1, broadExp) * broadAmp * oilBreakup;
+                float broadExp = max(12.0, mix(18.0, 29.0, clamp(wetness + naturalSheen * 0.22, 0.0, 1.0)) + microRough * (1.0 - mucosa) + 22.0 * labiaInnerMask);
+                float broadAmp = mix(0.070, 0.148, wetness) * (0.88 + 0.24 * naturalSheen) * (1.0 - 0.56 * labiaInnerMask);
+                float broadSpec = pow(NdotH1, broadExp) * broadAmp * labiaOilBreakup;
                 // Secondary tight crisp highlight strictly reserved for naturally moist inner mucosa & clitoral glans
                 float moistMask = smoothstep(0.075, 0.18, wetness);
-                float wetSharpSpec = (pow(NdotH1, mix(78.0, 162.0, wetness)) * wetness * 0.54 +
-                                      pow(NdotH2, 92.0) * wetness * 0.15) * moistMask * faceMatteDamp * areolaMatteDamp;
+                float wetKeyExp = mix(78.0, 162.0, wetness) + 86.0 * labiaInnerMask;
+                float wetFillExp = 92.0 + 74.0 * labiaInnerMask;
+                float wetSpecGain = 1.0 - 0.56 * labiaInnerMask;
+                float wetSharpSpec = (pow(NdotH1, wetKeyExp) * wetness * 0.54 +
+                                      pow(NdotH2, wetFillExp) * wetness * 0.15) * wetSpecGain * moistMask * faceMatteDamp * areolaMatteDamp;
 
                 // Soft studio rim light + subtle matte-velvet peach-fuzz Fresnel wrap across dry skin silhouettes
                 float viewRim = clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0);
@@ -1354,21 +1785,29 @@ class VulvaGlTextureView(
                 float velvetWrap = pow(viewRim, 2.2) * (1.0 - mucosa) * (1.0 - hairCoverage * 0.80) * 0.052;
 
                 // Colored Hemoglobin AO Bounce: prevents crevices from looking muddy gray & softens hip/lip/body contrast
-                float fullAo = clamp(ao * microAo, 0.06, 1.0);
+                float featheredAo = mix(ringSoftAo, min(ringSoftAo, 0.87), submentalFeatherZone * 0.42);
+                featheredAo = mix(featheredAo, min(featheredAo, 0.93), labiaInnerMask * 0.45);
+                float fullAo = clamp(featheredAo * microAo, 0.06, 1.0);
                 vec3 aoExponents = mix(vec3(0.76, 1.00, 1.18), vec3(0.68, 0.90, 1.06), jointSss * 0.65);
+                aoExponents = mix(aoExponents, vec3(0.68, 0.96, 1.22), archWarmMask * 0.60);
                 vec3 coloredAo = pow(vec3(fullAo), aoExponents);
 
                 // Balanced portrait illumination so Blossom's face matches her neck & chest brightness naturally
-                float headFillLift = isHeadRegion * (1.0 - browMaskFace * 0.7 - lashMaskFace * 0.85) * 0.055;
+                float headFillLift = neckSkinBlend * (1.0 - browMaskFace * 0.7 - lashMaskFace * 0.85) * 0.055;
                 vec3 ambient = albedo * (0.19 + headFillLift + 0.08 * (N.y * 0.5 + 0.5));
                 vec3 keyColor = vec3(1.03, 0.96, 0.92);
                 vec3 fillColor = vec3(0.98, 0.93, 0.90);
-                float faceSssTrim = 1.0 - isHeadRegion * (1.0 - mucosa) * 0.30;
+                float faceSssTrim = 1.0 - neckSkinBlend * (1.0 - mucosa) * 0.30;
+                vec3 specColor = mix(
+                    vec3(1.0, 0.96, 0.94),
+                    mix(albedo * 1.35 + vec3(0.18, 0.13, 0.12), vec3(1.0, 0.91, 0.87), 0.52),
+                    0.42 * labiaInnerMask
+                );
 
                 vec3 lit = ambient * coloredAo +
-                           albedo * (diffKeyRGB * 0.78 * keyColor + diffFillRGB * (0.22 + isHeadRegion * 0.08) * fillColor) * (vec3(0.28) + 0.72 * coloredAo) +
+                           albedo * (diffKeyRGB * 0.78 * keyColor + diffFillRGB * (0.22 + neckSkinBlend * 0.08) * fillColor) * (vec3(0.28) + 0.72 * coloredAo) +
                            sssTint * (terminator * 0.35 * faceSssTrim + grazingTrans * 0.19 + thinTransmit * (0.22 + 0.20 * uLightMode)) * coloredAo +
-                           vec3(1.0, 0.96, 0.94) * (broadSpec + wetSharpSpec) * (0.30 + 0.70 * fullAo) +
+                           specColor * (broadSpec + wetSharpSpec) * (0.30 + 0.70 * fullAo) +
                            mix(uSkinBase, vec3(1.0, 0.96, 0.93), 0.28) * velvetWrap * (0.45 + 0.55 * fullAo) +
                            mix(uSkinBase, sssTint, 0.46) * rimLight;
 
@@ -1385,7 +1824,8 @@ class VulvaGlTextureView(
                 float mappedLuma = dot(mapped, vec3(0.299, 0.587, 0.114));
                 mapped = clamp(mix(vec3(mappedLuma), mapped, 1.03), 0.0, 1.0);
 
-                gl_FragColor = vec4(mapped, 1.0);
+                float outAlpha = (uArchAlphaPass > 1.5) ? archAlpha : 1.0;
+                gl_FragColor = vec4(mapped, outAlpha);
             }
         """
     }

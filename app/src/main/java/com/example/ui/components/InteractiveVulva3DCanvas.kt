@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import android.os.Build
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,6 +29,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.TouchApp
@@ -34,10 +38,12 @@ import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -193,10 +199,13 @@ fun InteractiveVulva3DCanvas(
     var pubicHairAmount by remember { mutableFloatStateOf(0.45f) }
     val hairStyle = BlossomHairStyles[hairStyleIndex.coerceIn(0, BlossomHairStyles.lastIndex)]
 
-    // Smooth 3D camera orbit, zoom, target framing, lighting & Blossom full-body Beta state (default ON, Exam View)
+    // Smooth 3D camera orbit, zoom, target framing, lighting & Blossom full-body state (default ON, Exam View)
     var isOrbitMode by remember { mutableStateOf(false) }
     var dramaticSideLight by remember { mutableStateOf(false) }
     var showExperimentalLegs by remember { mutableStateOf(true) }
+    // Buried compatibility toggle: restores exact pre-Beta v1 vulva, seam, neck, and hair appearance
+    var showAdvancedRendering by remember { mutableStateOf(false) }
+    var legacyVulvaMode by remember { mutableStateOf(false) }
     var activePreset by remember { mutableStateOf<CameraAnglePreset?>(CameraAnglePreset.EXAM_FRONT) }
     val initialCam = remember { CameraAnglePreset.EXAM_FRONT.resolveCamera(blossomBodyEnabled = true) }
     val camYaw = remember { Animatable(initialCam.yawDeg) }
@@ -291,7 +300,7 @@ fun InteractiveVulva3DCanvas(
     LaunchedEffect(blossomSpreadPoseActive) {
         if (blossomSpreadPoseActive) {
             val remaining = (1f - selfSpreadPose.value).coerceIn(0.05f, 1f)
-            val durationMs = (1750f * remaining).roundToInt().coerceAtLeast(200)
+            val durationMs = (2500f * remaining).roundToInt().coerceAtLeast(280)
             val startLO = leftOuterSpread.value
             val startRO = rightOuterSpread.value
             val startLI = leftInnerOpen.value
@@ -321,7 +330,7 @@ fun InteractiveVulva3DCanvas(
             }
         } else if (selfSpreadPose.value > 0.001f) {
             val remaining = selfSpreadPose.value.coerceIn(0.05f, 1f)
-            val durationMs = (1550f * remaining).roundToInt().coerceAtLeast(200)
+            val durationMs = (2215f * remaining).roundToInt().coerceAtLeast(280)
             val startLO = leftOuterSpread.value
             val startRO = rightOuterSpread.value
             val startLI = leftInnerOpen.value
@@ -386,20 +395,26 @@ fun InteractiveVulva3DCanvas(
         val rng = kotlin.random.Random(System.currentTimeMillis())
         delay(1600L)
         while (true) {
-            val stimAtBlink = latestTouchStimulus.coerceIn(0f, 1f)
-            val closeMs = (75 + (stimAtBlink * 18f)).roundToInt()
-            val holdMs = (28 + (stimAtBlink * 16f)).roundToInt().toLong()
-            val openMs = (135 + (stimAtBlink * 22f)).roundToInt()
-            eyeBlink.animateTo(1f, tween(durationMillis = closeMs, easing = FastOutSlowInEasing))
-            delay(holdMs)
-            eyeBlink.animateTo(0f, tween(durationMillis = openMs, easing = FastOutSlowInEasing))
+            // Skip animating 60 FPS eyelid blinks when zoomed tightly onto the pelvis (face at y ~ 6.35 is off-screen)
+            val faceCouldBeVisible = camZoom.value <= 0.62f || camTargetY.value >= 2.2f
+            if (faceCouldBeVisible) {
+                val stimAtBlink = latestTouchStimulus.coerceIn(0f, 1f)
+                val closeMs = (75 + (stimAtBlink * 18f)).roundToInt()
+                val holdMs = (28 + (stimAtBlink * 16f)).roundToInt().toLong()
+                val openMs = (135 + (stimAtBlink * 22f)).roundToInt()
+                eyeBlink.animateTo(1f, tween(durationMillis = closeMs, easing = FastOutSlowInEasing))
+                delay(holdMs)
+                eyeBlink.animateTo(0f, tween(durationMillis = openMs, easing = FastOutSlowInEasing))
 
-            val doubleBlinkProb = 0.16f + 0.16f * stimAtBlink
-            if (rng.nextFloat() < doubleBlinkProb) {
-                delay(145L)
-                eyeBlink.animateTo(1f, tween(durationMillis = 70, easing = FastOutSlowInEasing))
-                delay(22L)
-                eyeBlink.animateTo(0f, tween(durationMillis = 130, easing = FastOutSlowInEasing))
+                val doubleBlinkProb = 0.16f + 0.16f * stimAtBlink
+                if (rng.nextFloat() < doubleBlinkProb) {
+                    delay(145L)
+                    eyeBlink.animateTo(1f, tween(durationMillis = 70, easing = FastOutSlowInEasing))
+                    delay(22L)
+                    eyeBlink.animateTo(0f, tween(durationMillis = 130, easing = FastOutSlowInEasing))
+                }
+            } else if (eyeBlink.value > 0.001f) {
+                eyeBlink.snapTo(0f)
             }
 
             // Slice wait into 120ms steps so newly starting breast/vulva/clitoris touches shorten the wait immediately
@@ -463,7 +478,8 @@ fun InteractiveVulva3DCanvas(
         leftGluteX = leftGluteX.value,
         leftGluteY = leftGluteY.value,
         rightGluteX = rightGluteX.value,
-        rightGluteY = rightGluteY.value
+        rightGluteY = rightGluteY.value,
+        legacyVulvaMode = legacyVulvaMode
     )
     val currentCam = VulvaCamera3D(
         yawDeg = camYaw.value,
@@ -1168,7 +1184,7 @@ fun InteractiveVulva3DCanvas(
                             modifier = Modifier.size(16.dp)
                         )
                     },
-                    label = { Text(if (showExperimentalLegs) "Blossom Body (Beta): On" else "Blossom Body (Beta): Off") }
+                    label = { Text(if (showExperimentalLegs) "Full Body: On" else "Full Body: Off") }
                 )
             }
         }
@@ -1331,6 +1347,89 @@ fun InteractiveVulva3DCanvas(
                     }
             )
         }
+
+        // Discreet, collapsed-by-default Advanced rendering disclosure holding the Legacy Vulva fallback option
+        HorizontalDivider(
+            modifier = Modifier.padding(top = 2.dp),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+        )
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { showAdvancedRendering = !showAdvancedRendering }
+                    .padding(horizontal = 4.dp, vertical = 6.dp)
+                    .testTag("advanced_rendering_toggle")
+                    .semantics {
+                        contentDescription = if (showAdvancedRendering) {
+                            "Collapse advanced rendering options"
+                        } else {
+                            "Expand advanced rendering options"
+                        }
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = if (legacyVulvaMode) "Advanced rendering · Legacy active" else "Advanced rendering",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Icon(
+                    imageVector = if (showAdvancedRendering) Icons.Filled.KeyboardArrowUp else Icons.Filled.ArrowDropDown,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            AnimatedVisibility(visible = showAdvancedRendering) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp)
+                            .clickable {
+                                legacyVulvaMode = !legacyVulvaMode
+                                if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                            .testTag("toggle_legacy_vulva")
+                            .semantics {
+                                contentDescription = "Legacy vulva, ${if (legacyVulvaMode) "enabled" else "disabled"}. Use the original pre-Beta v1 appearance."
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Legacy vulva",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Use original pre-Beta v1 vulva, seam, neck, and hair appearance",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = legacyVulvaMode,
+                            onCheckedChange = null
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1389,3 +1488,4 @@ internal fun computeBlinkIntervalRangeMs(stimulus: Float): LongRange {
     val maxMs = (6200f - 4100f * s).roundToInt().toLong()
     return minMs..maxMs
 }
+

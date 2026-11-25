@@ -1322,12 +1322,15 @@ internal object BlossomUpperBodyBuilder {
     // 3. SCULPTURAL REALISTIC FEMININE HEAD & FACE (120x108, OUTWARD CCW!)
     //    theta runs BOTTOM-TO-TOP (PI -> 0) so d/dc=+X, d/dr=+Y => +Z OUTWARD!
     // -------------------------------------------------------------------------
+    private const val HEAD_COLS = 120
+    private const val HEAD_ROWS = 108
+
     fun buildBlossomHeadMesh(
         buildIndices: (Int, Int) -> ShortArray,
         computeNormals: (FloatArray, Int, Int, Boolean, Boolean) -> Unit
     ): DynamicGlMesh {
-        val cols = 120
-        val rows = 108
+        val cols = HEAD_COLS
+        val rows = HEAD_ROWS
         val mesh = DynamicGlMesh(cols * rows, (cols - 1) * (rows - 1) * 6)
         mesh.setIndices(buildIndices(cols, rows))
 
@@ -1680,9 +1683,9 @@ internal object BlossomUpperBodyBuilder {
     }
 
     // -------------------------------------------------------------------------
-    // 5. SOFT CHIN-TO-COLLARBONE LAYERED DARK-BROWN / SOFT-BLACK BOB (CAP + 34 LOCKS)
+    // 5. SOFT CHIN-TO-COLLARBONE LAYERED DARK-BROWN / SOFT-BLACK BOB (CAP + 30 LOCKS)
     // -------------------------------------------------------------------------
-    fun buildBlossomHairMesh(): DynamicGlMesh {
+    fun buildBlossomHairMesh(betaSoftHair: Boolean = false): DynamicGlMesh {
         val capCols = 72
         val capRows = 48
         val capVerts = capCols * capRows
@@ -1697,6 +1700,7 @@ internal object BlossomUpperBodyBuilder {
             val shadeBias: Float
         )
 
+        // Exact original clean side-swept fringe silhouette, overall shape, length & part preserved in BOTH baseline and Beta 6!
         val locks = listOf(
             // 4 Sleek close-hugging feathered temple & curtain-bang strands curving cleanly along hairline (zero slab edges!)
             LockSpec(floatArrayOf(0.22f, 0.86f, 0.36f), floatArrayOf(-0.16f, 0.69f, 0.60f), floatArrayOf(-0.62f, 0.22f, 0.38f), 0.145f, 0.018f, 0.18f),
@@ -1763,7 +1767,7 @@ internal object BlossomUpperBodyBuilder {
             }
         }
 
-        // Part A: Layered Bob Crown & Clean Smooth-Hem Nape Volume Cap
+        // Part A: Layered Bob Crown & Clean Smooth-Hem Nape Volume Cap (exact silhouette preserved!)
         for (r in 0 until capRows) {
             val v = r.toFloat() / (capRows - 1)
             for (c in 0 until capCols) {
@@ -1772,7 +1776,6 @@ internal object BlossomUpperBodyBuilder {
                 val sinP = sin(phi)
                 val cosP = cos(phi)
 
-                // Continuous cosine-blended temple-to-nape hemline (eliminates jagged temple step & ragged nape cut!)
                 val frontMask = smoothStep(-0.25f, 0.72f, cosP)
                 val backMask = smoothStep(0.05f, 0.85f, -cosP)
                 val sideMask = smoothStep(0.28f, 0.88f, abs(sinP))
@@ -1787,13 +1790,11 @@ internal object BlossomUpperBodyBuilder {
                 val cosT = cos(theta)
 
                 val crownVolume = 0.112f * (1f - smoothStep(0.26f, 0.90f, v)) + 0.042f * smoothStep(0.18f, 0.82f, v)
-                // Clean flush scalp/nape edge taper so temple & nape rims never stick out like a thick helmet edge
                 val edgeTaper = 1f - 0.94f * smoothStep(0.74f, 1.0f, v)
                 val strandRib = 0.0042f * sin(phi * 20f + v * 4.0f) + 0.0024f * cos(phi * 36f - v * 5.6f)
                 val loft = (crownVolume * edgeTaper + strandRib * (1f - smoothStep(0.78f, 1.0f, v))).coerceAtLeast(0.003f)
 
                 val craniumBack = 1f + 0.09f * backMask * sinT
-                // Smooth even rear nape drape onto headrest pillow (no jagged side/back jump)
                 val napeBlend = smoothStep(-0.12f, 0.65f, -cosP)
                 val pillowFan = 0.135f * smoothStep(0.60f, 0.96f, v) * napeBlend * (1f - 0.25f * smoothStep(0.88f, 1.0f, v))
                 val lx = sinT * sinP * (0.682f + loft + pillowFan)
@@ -1801,12 +1802,22 @@ internal object BlossomUpperBodyBuilder {
                 val lz = sinT * cosP * (0.778f * craniumBack + loft)
 
                 val wPt = headLocalToWorld(lx, ly, lz)
-                val lnx = sinT * sinP + 0.042f * cos(phi * 20f + v * 4.0f) * cosP
+                // Beta 6 adds finer strand-direction normal detail along the cap without altering silhouette
+                val strandNormRib = if (betaSoftHair) {
+                    0.056f * cos(phi * 28f + v * 3.8f) + 0.036f * sin(phi * 54f - v * 4.6f)
+                } else {
+                    0.042f * cos(phi * 20f + v * 4.0f)
+                }
+                val lnx = sinT * sinP + strandNormRib * cosP
                 val lny = cosT
-                val lnz = sinT * cosP - 0.042f * cos(phi * 20f + v * 4.0f) * sinP
+                val lnz = sinT * cosP - strandNormRib * sinP
                 val wN = headNormalToWorld(lnx, lny, lnz)
 
-                val strandShade = 0.5f + 0.5f * sin(phi * 26f + v * 5.0f)
+                val strandShade = if (betaSoftHair) {
+                    (0.5f + 0.32f * sin(phi * 28f + v * 3.8f) + 0.18f * cos(phi * 54f - v * 4.6f)).coerceIn(0f, 1f)
+                } else {
+                    0.5f + 0.5f * sin(phi * 26f + v * 5.0f)
+                }
                 val ao = (0.78f + 0.22f * (1f - smoothStep(0.62f, 1.0f, v)) * (0.78f + 0.22f * strandShade)).coerceIn(0.45f, 1f)
 
                 val idx = (r * capCols + c) * stride
@@ -1834,6 +1845,11 @@ internal object BlossomUpperBodyBuilder {
                 }
             }
 
+            // Deterministic per-lock subtle strand color/highlight variation (strictly Beta 6)
+            val lockColorJitter = if (betaSoftHair) {
+                0.075f * sin(lockIdx * 2.17f + 0.6f) + 0.040f * cos(lockIdx * 3.91f)
+            } else 0f
+
             for (r in 0 until lockRows) {
                 val t = r.toFloat() / (lockRows - 1)
                 val omt = 1f - t
@@ -1860,36 +1876,58 @@ internal object BlossomUpperBodyBuilder {
                 val by = tz * ox - tx * oz
                 val bz = tx * oy - ty * ox
 
-                // Fine silky feathered width & thickness tapering smoothly to soft points (zero blunt squared slabs!)
+                // Fine silky feathered width & thickness tapering smoothly to soft points (Beta 6 adds slightly finer tapered tips)
                 val rootEnv = 0.62f + 0.38f * smoothStep(0.0f, 0.18f, t)
-                val tipWidthFade = 1f - 0.86f * smoothStep(0.62f, 1.0f, t)
+                val tipWidthFade = if (betaSoftHair) {
+                    1f - 0.91f * smoothStep(0.58f, 1.0f, t)
+                } else {
+                    1f - 0.86f * smoothStep(0.62f, 1.0f, t)
+                }
                 val curW = lock.halfW * 1.06f * rootEnv * (0.86f + 0.16f * sin(t * PI.toFloat())) * tipWidthFade
-                val tipThickFade = 1f - 0.85f * smoothStep(0.58f, 1.0f, t)
+                val tipThickFade = if (betaSoftHair) {
+                    1f - 0.90f * smoothStep(0.56f, 1.0f, t)
+                } else {
+                    1f - 0.85f * smoothStep(0.58f, 1.0f, t)
+                }
                 val curThick = lock.thick * 0.40f * rootEnv * (0.45f + 0.55f * sin(t * PI.toFloat())) * tipThickFade
+                val tipZone = smoothStep(0.70f, 1.0f, t)
 
                 for (c in 0 until lockCols) {
                     val u = (c.toFloat() / (lockCols - 1)) * 2f - 1f
                     val arch = cos(u * (PI.toFloat() * 0.5f))
-                    val lx = cx + bx * (u * curW) + ox * (arch * curThick)
-                    val ly = cy + by * (u * curW) + oy * (arch * curThick)
-                    val lz = cz + bz * (u * curW) + oz * (arch * curThick)
+                    // Beta 6: subtle irregular strand-end taper strictly at the lock tips (preserves exact overall shape & length!)
+                    val tipIrregular = if (betaSoftHair && tipZone > 0.001f) {
+                        (0.022f * sin(u * 4.8f + lockIdx * 1.73f) + 0.012f * cos(u * 9.1f - lockIdx * 2.41f)) * tipZone
+                    } else 0f
+                    val lx = cx + bx * (u * curW) + ox * (arch * curThick) + tx * tipIrregular
+                    val ly = cy + by * (u * curW) + oy * (arch * curThick) + ty * tipIrregular
+                    val lz = cz + bz * (u * curW) + oz * (arch * curThick) + tz * tipIrregular
 
-                    val lnx = ox * (0.85f * arch + 0.15f) + bx * (u * 0.52f)
-                    val lny = oy * (0.85f * arch + 0.15f) + by * (u * 0.52f)
-                    val lnz = oz * (0.85f * arch + 0.15f) + bz * (u * 0.52f)
+                    // Beta 6: fine cross-strand normal ripple aligned cleanly along each lock's flow direction
+                    val strandRipple = if (betaSoftHair) {
+                        (0.14f * sin(u * 13.5f + lockIdx * 1.3f) + 0.07f * cos(u * 23.0f - lockIdx * 2.1f)) * arch
+                    } else 0f
+                    val lnx = ox * (0.85f * arch + 0.15f) + bx * (u * 0.52f + strandRipple)
+                    val lny = oy * (0.85f * arch + 0.15f) + by * (u * 0.52f + strandRipple)
+                    val lnz = oz * (0.85f * arch + 0.15f) + bz * (u * 0.52f + strandRipple)
 
                     val wPt = headLocalToWorld(lx, ly, lz)
                     val minHairZ = BlossomBodyBuilder.mattressSurfaceZ(wPt[1]) + 0.03f
                     if (wPt[2] < minHairZ) wPt[2] = minHairZ
                     val wN = headNormalToWorld(lnx, lny, lnz)
 
+                    val strandRibVal = if (betaSoftHair) {
+                        (0.5f + 0.34f * cos(u * PI.toFloat()) + 0.16f * sin(u * 13.5f + lockIdx * 1.3f)).coerceIn(0f, 1f)
+                    } else {
+                        0.5f + 0.5f * cos(u * PI.toFloat())
+                    }
                     val idx = (baseVert + r * lockCols + c) * stride
                     data[idx] = wPt[0]; data[idx + 1] = wPt[1]; data[idx + 2] = wPt[2]
                     data[idx + 3] = wN[0]; data[idx + 4] = wN[1]; data[idx + 5] = wN[2]
                     data[idx + 6] = t
-                    data[idx + 7] = 0.5f + 0.5f * cos(u * PI.toFloat())
+                    data[idx + 7] = strandRibVal
                     data[idx + 8] = (0.72f + 0.28f * arch).coerceIn(0.55f, 1f)
-                    data[idx + 9] = lock.shadeBias
+                    data[idx + 9] = (lock.shadeBias + lockColorJitter).coerceIn(0.02f, 0.42f)
                 }
             }
         }
@@ -2250,6 +2288,225 @@ internal object BlossomUpperBodyBuilder {
             bData[d + 3] = tmp[3]; bData[d + 4] = tmp[4]; bData[d + 5] = tmp[5]
         }
         bodyMesh.commitVertices()
+    }
+
+    // -------------------------------------------------------------------------
+    // 7. TEMPORARY INDEPENDENT BETA REFINEMENTS (NECK SEAM & SOFTENED HAIR)
+    //    Stores exact immutable baseline backups so each toggle can be cleanly undone!
+    // -------------------------------------------------------------------------
+    class HeadNeckHairBetaCache(
+        val baseHeadVertexData: FloatArray,
+        val neckBodyIndices: IntArray,
+        val baseNeckBodyData: FloatArray,
+        val baseHairVertexData: FloatArray
+    ) {
+        var betaHeadVertexData: FloatArray? = null
+        var betaNeckBodyData: FloatArray? = null
+        var betaHairVertexData: FloatArray? = null
+    }
+
+    fun buildHeadNeckHairBetaCache(
+        bodyMesh: DynamicGlMesh,
+        headMesh: DynamicGlMesh,
+        hairMesh: DynamicGlMesh
+    ): HeadNeckHairBetaCache {
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val bData = bodyMesh.vertexData
+        val idxBuf = IntArray(bodyMesh.vertexCount)
+        var count = 0
+        for (i in 0 until bodyMesh.vertexCount) {
+            val base = i * stride
+            val ax = abs(bData[base])
+            val y = bData[base + 1]
+            // Superset of HeadRigCache (y in 4.92..6.05) extended down to lower neck base (y >= 4.66, ax < 0.62)
+            // so Beta 5 can feather neck AO & normals ~2x farther below the jaw without touching breasts, chest, face, eyes or hair!
+            if (y in 4.66f..6.05f && ax < 0.62f) {
+                idxBuf[count++] = i
+            }
+        }
+        val neckIndices = idxBuf.copyOf(count)
+        val baseNeckData = FloatArray(count * stride)
+        for (k in 0 until count) {
+            System.arraycopy(bData, neckIndices[k] * stride, baseNeckData, k * stride, stride)
+        }
+        return HeadNeckHairBetaCache(
+            baseHeadVertexData = headMesh.vertexData.copyOf(),
+            neckBodyIndices = neckIndices,
+            baseNeckBodyData = baseNeckData,
+            baseHairVertexData = hairMesh.vertexData.copyOf()
+        )
+    }
+
+    /**
+     * Beta 5 (Smooth Neck Seam): widens the jaw-to-neck feather ~2x across the submental underside
+     * (`theta >= 0.765*PI`, `wy <= 5.86f`) and down the full neck (`y in 4.68..6.05`, `ax < 0.60`),
+     * smoothly matching AO, wetness, pigment & normals so the pale band under the chin disappears.
+     * Eyes, face above jaw rim (`y > 5.88`), hair, and body/breasts below neck stay 100% untouched.
+     */
+    fun applyNeckSeamBeta(
+        bodyMesh: DynamicGlMesh,
+        headMesh: DynamicGlMesh,
+        headRigCache: HeadRigCache,
+        betaCache: HeadNeckHairBetaCache,
+        enabled: Boolean
+    ) {
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        if (enabled && (betaCache.betaHeadVertexData == null || betaCache.betaNeckBodyData == null)) {
+            val headCopy = betaCache.baseHeadVertexData.copyOf()
+            val cols = HEAD_COLS
+            val rows = HEAD_ROWS
+            if (headMesh.vertexCount == cols * rows) {
+                // Step 1: Feather submental AO, wetness, pigment & normals smoothly from jaw rim right into SDF neck
+                for (r in 0 until rows) {
+                    val vRaw = 1f - (r.toFloat() / (rows - 1))
+                    val vCentered = vRaw * 2f - 1f
+                    val vCluster = 0.66f * vCentered + 0.34f * vCentered * vCentered * vCentered
+                    val theta = ((vCluster + 1f) * 0.5f).coerceIn(0.004f, 0.996f) * PI.toFloat()
+                    if (theta < 0.765f * PI.toFloat()) continue
+
+                    val thetaMat = smoothStep(0.765f * PI.toFloat(), 0.915f * PI.toFloat(), theta)
+                    val thetaNorm = smoothStep(0.770f * PI.toFloat(), 0.925f * PI.toFloat(), theta)
+                    val filletBell = sin(smoothStep(0.78f * PI.toFloat(), 0.96f * PI.toFloat(), theta) * PI.toFloat())
+
+                    for (c in 0 until cols) {
+                        val idx = (r * cols + c) * stride
+                        val wx = headCopy[idx]
+                        var wy = headCopy[idx + 1]
+                        val wz = headCopy[idx + 2]
+                        if (wy > 5.86f) continue
+
+                        val baseNy = headCopy[idx + 4]
+                        val downMask = smoothStep(0.18f, -0.28f, baseNy)
+                        val yGuard = 1f - smoothStep(5.74f, 5.86f, wy)
+                        val matBlend = (thetaMat * (0.45f + 0.55f * downMask) * yGuard).coerceIn(0f, 1f)
+                        val normBlend = (thetaNorm * (0.40f + 0.60f * downMask) * yGuard).coerceIn(0f, 1f)
+
+                        // Gentle downward fillet ease strictly under the jaw (zero change to face above jaw!)
+                        if (filletBell > 0.001f && yGuard > 0.001f) {
+                            wy -= 0.036f * filletBell * yGuard * smoothStep(-0.15f, 0.55f, headCopy[idx + 5])
+                            headCopy[idx + 1] = wy
+                        }
+
+                        var nx = headCopy[idx + 3]
+                        var ny = headCopy[idx + 4]
+                        var nz = headCopy[idx + 5]
+                        if (normBlend > 0.001f) {
+                            val sdfNorm = BlossomSdfBodyBuilder.evaluateBodyNormal(wx, wy, wz, eps = 0.026f)
+                            nx = nx * (1f - normBlend) + sdfNorm[0] * normBlend
+                            ny = ny * (1f - normBlend) + sdfNorm[1] * normBlend
+                            nz = nz * (1f - normBlend) + sdfNorm[2] * normBlend
+                            val nLen = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-5f)
+                            nx /= nLen; ny /= nLen; nz /= nLen
+                            headCopy[idx + 3] = nx
+                            headCopy[idx + 4] = ny
+                            headCopy[idx + 5] = nz
+                        }
+
+                        if (matBlend > 0.001f) {
+                            val (sdfAo, sdfPigment) = BlossomSdfBodyBuilder.evaluateBodyMaterial(wx, wy, wz, nx, ny, nz)
+                            // Match the softened upper-neck AO curve seamlessly (eliminates bright pale band under chin!)
+                            val softNeckAo = (sdfAo + (0.875f - sdfAo).coerceAtLeast(0f) * 0.48f).coerceIn(0.79f, 0.91f)
+                            headCopy[idx + 7] = headCopy[idx + 7] * (1f - matBlend) + 0.055f * matBlend
+                            headCopy[idx + 8] = headCopy[idx + 8] * (1f - matBlend) + softNeckAo * matBlend
+                            headCopy[idx + 9] = headCopy[idx + 9] * (1f - matBlend) + sdfPigment * matBlend
+                        }
+                    }
+                }
+            }
+            betaCache.betaHeadVertexData = headCopy
+
+            // Step 2: Feather under-chin AO & neck normals ~2x farther down the neck (y = 4.68..5.92)
+            val neckCopy = betaCache.baseNeckBodyData.copyOf()
+            for (k in betaCache.neckBodyIndices.indices) {
+                val d = k * stride
+                val ax = abs(neckCopy[d])
+                val y = neckCopy[d + 1]
+                val neckFade = smoothStep(4.70f, 5.38f, y) * (1f - smoothStep(0.38f, 0.60f, ax))
+                if (neckFade > 0.001f) {
+                    val baseAo = neckCopy[d + 8]
+                    val liftedAo = baseAo + (0.90f - baseAo).coerceAtLeast(0f) * 0.56f * neckFade
+                    neckCopy[d + 8] = liftedAo.coerceIn(0.14f, 1f)
+
+                    // Smooth, wide anterior neck normal feather flowing seamlessly out from under the chin
+                    val nz = neckCopy[d + 5]
+                    val wideNormalEase = smoothStep(4.92f, 5.62f, y) * (1f - smoothStep(5.76f, 6.02f, y)) *
+                        smoothStep(0.10f, 0.68f, nz) * (1f - smoothStep(0.38f, 0.60f, ax))
+                    if (wideNormalEase > 0.001f) {
+                        val nx = neckCopy[d + 3]
+                        val ny = neckCopy[d + 4] - 0.085f * wideNormalEase
+                        val nzz = nz
+                        val nLen = sqrt(nx * nx + ny * ny + nzz * nzz).coerceAtLeast(1e-5f)
+                        neckCopy[d + 3] = nx / nLen
+                        neckCopy[d + 4] = ny / nLen
+                        neckCopy[d + 5] = nzz / nLen
+                    }
+                }
+            }
+            betaCache.betaNeckBodyData = neckCopy
+        }
+
+        val srcHead = if (enabled) betaCache.betaHeadVertexData!! else betaCache.baseHeadVertexData
+        System.arraycopy(srcHead, 0, headMesh.vertexData, 0, srcHead.size)
+        headMesh.commitVertices()
+
+        val srcNeck = if (enabled) betaCache.betaNeckBodyData!! else betaCache.baseNeckBodyData
+        val bData = bodyMesh.vertexData
+        for (k in betaCache.neckBodyIndices.indices) {
+            System.arraycopy(srcNeck, k * stride, bData, betaCache.neckBodyIndices[k] * stride, stride)
+        }
+        bodyMesh.commitVertices()
+
+        // Keep HeadRigCache rest pose in sync so head turn, nod & blink compose seamlessly
+        for (i in 0 until headMesh.vertexCount) {
+            val s = i * stride
+            val d = i * 6
+            headRigCache.headRestPosNorm[d] = srcHead[s]
+            headRigCache.headRestPosNorm[d + 1] = srcHead[s + 1]
+            headRigCache.headRestPosNorm[d + 2] = srcHead[s + 2]
+            headRigCache.headRestPosNorm[d + 3] = srcHead[s + 3]
+            headRigCache.headRestPosNorm[d + 4] = srcHead[s + 4]
+            headRigCache.headRestPosNorm[d + 5] = srcHead[s + 5]
+        }
+        for (k in headRigCache.neckBodyIndices.indices) {
+            val s = headRigCache.neckBodyIndices[k] * stride
+            val d = k * 6
+            headRigCache.neckRestPosNorm[d] = bData[s]
+            headRigCache.neckRestPosNorm[d + 1] = bData[s + 1]
+            headRigCache.neckRestPosNorm[d + 2] = bData[s + 2]
+            headRigCache.neckRestPosNorm[d + 3] = bData[s + 3]
+            headRigCache.neckRestPosNorm[d + 4] = bData[s + 4]
+            headRigCache.neckRestPosNorm[d + 5] = bData[s + 5]
+        }
+    }
+
+    /**
+     * Beta 6 (Softened Hair): swaps Blossom's hair vertex buffer cleanly between the exact
+     * immutable baseline hair mesh and the lazily-cached softened fringe/temple/nape variant.
+     */
+    fun applyHairBeta(
+        hairMesh: DynamicGlMesh,
+        headRigCache: HeadRigCache,
+        betaCache: HeadNeckHairBetaCache,
+        enabled: Boolean
+    ) {
+        if (enabled && betaCache.betaHairVertexData == null) {
+            betaCache.betaHairVertexData = buildBlossomHairMesh(betaSoftHair = true).vertexData.copyOf()
+        }
+        val src = if (enabled) betaCache.betaHairVertexData!! else betaCache.baseHairVertexData
+        System.arraycopy(src, 0, hairMesh.vertexData, 0, src.size)
+        hairMesh.commitVertices()
+
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        for (i in 0 until hairMesh.vertexCount) {
+            val s = i * stride
+            val d = i * 6
+            headRigCache.hairRestPosNorm[d] = src[s]
+            headRigCache.hairRestPosNorm[d + 1] = src[s + 1]
+            headRigCache.hairRestPosNorm[d + 2] = src[s + 2]
+            headRigCache.hairRestPosNorm[d + 3] = src[s + 3]
+            headRigCache.hairRestPosNorm[d + 4] = src[s + 4]
+            headRigCache.hairRestPosNorm[d + 5] = src[s + 5]
+        }
     }
 
     private fun smoothStep(edge0: Float, edge1: Float, x: Float): Float {
