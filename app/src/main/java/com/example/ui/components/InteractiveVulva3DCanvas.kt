@@ -206,6 +206,12 @@ fun InteractiveVulva3DCanvas(
     // Buried compatibility toggle: restores exact pre-Beta v1 vulva, seam, neck, and hair appearance
     var showAdvancedRendering by remember { mutableStateOf(false) }
     var legacyVulvaMode by remember { mutableStateOf(false) }
+    // Collapsed-by-default Vulva Beta v2 experimental toggles (all OFF by default to preserve Version 13.0)
+    var showVulvaBetaV2 by remember { mutableStateOf(false) }
+    var betaV2SeamOnlyPolyOffset by remember { mutableStateOf(false) }
+    var betaV2NonInvertingLabiaFold by remember { mutableStateOf(false) }
+    var betaV2AlignedSulcus by remember { mutableStateOf(false) }
+    var betaV2NaturalPelvicFinish by remember { mutableStateOf(false) }
     var activePreset by remember { mutableStateOf<CameraAnglePreset?>(CameraAnglePreset.EXAM_FRONT) }
     val initialCam = remember { CameraAnglePreset.EXAM_FRONT.resolveCamera(blossomBodyEnabled = true) }
     val camYaw = remember { Animatable(initialCam.yawDeg) }
@@ -479,7 +485,11 @@ fun InteractiveVulva3DCanvas(
         leftGluteY = leftGluteY.value,
         rightGluteX = rightGluteX.value,
         rightGluteY = rightGluteY.value,
-        legacyVulvaMode = legacyVulvaMode
+        legacyVulvaMode = legacyVulvaMode,
+        betaV2SeamOnlyPolyOffset = betaV2SeamOnlyPolyOffset,
+        betaV2NonInvertingLabiaFold = betaV2NonInvertingLabiaFold,
+        betaV2AlignedSulcus = betaV2AlignedSulcus,
+        betaV2NaturalPelvicFinish = betaV2NaturalPelvicFinish
     )
     val currentCam = VulvaCamera3D(
         yawDeg = camYaw.value,
@@ -1348,6 +1358,119 @@ fun InteractiveVulva3DCanvas(
             )
         }
 
+        // Collapsed-by-default Vulva Beta v2 experimental section (4 independent toggles, all OFF by default)
+        val activeBetaV2Count = listOf(
+            betaV2SeamOnlyPolyOffset,
+            betaV2NonInvertingLabiaFold,
+            betaV2AlignedSulcus,
+            betaV2NaturalPelvicFinish
+        ).count { it }
+        HorizontalDivider(
+            modifier = Modifier.padding(top = 2.dp),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+        )
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { showVulvaBetaV2 = !showVulvaBetaV2 }
+                    .padding(horizontal = 4.dp, vertical = 6.dp)
+                    .testTag("vulva_beta_v2_toggle")
+                    .semantics {
+                        contentDescription = if (showVulvaBetaV2) {
+                            "Collapse Vulva Beta v2 experimental options"
+                        } else {
+                            "Expand Vulva Beta v2 experimental options"
+                        }
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = if (activeBetaV2Count > 0) {
+                        "Vulva Beta v2 · $activeBetaV2Count active"
+                    } else {
+                        "Vulva Beta v2"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Icon(
+                    imageVector = if (showVulvaBetaV2) Icons.Filled.KeyboardArrowUp else Icons.Filled.ArrowDropDown,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            AnimatedVisibility(visible = showVulvaBetaV2) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp, bottom = 4.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        VulvaBetaToggleRow(
+                            title = "1. Seam-only depth offset",
+                            subtitle = "Restricts patch polygon offset to the outer seam ring and keeps lower tips above the patch",
+                            checked = betaV2SeamOnlyPolyOffset,
+                            tag = "toggle_beta_v2_seam_poly_offset",
+                            onToggle = {
+                                betaV2SeamOnlyPolyOffset = !betaV2SeamOnlyPolyOffset
+                                if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                            }
+                        )
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 14.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                        )
+                        VulvaBetaToggleRow(
+                            title = "2. Non-inverting fold geometry",
+                            subtitle = "Expands outer labial skirt dynamically when parted and prevents midline/glans clipping",
+                            checked = betaV2NonInvertingLabiaFold,
+                            tag = "toggle_beta_v2_non_inverting_fold",
+                            onToggle = {
+                                betaV2NonInvertingLabiaFold = !betaV2NonInvertingLabiaFold
+                                if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                            }
+                        )
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 14.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                        )
+                        VulvaBetaToggleRow(
+                            title = "3. Aligned interlabial sulcus",
+                            subtitle = "Shifts and softens the interlabial groove cleanly between inner and outer labia",
+                            checked = betaV2AlignedSulcus,
+                            tag = "toggle_beta_v2_aligned_sulcus",
+                            onToggle = {
+                                betaV2AlignedSulcus = !betaV2AlignedSulcus
+                                if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                            }
+                        )
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 14.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                        )
+                        VulvaBetaToggleRow(
+                            title = "4. Natural satin-velvet finish",
+                            subtitle = "Damps grazing rim glare and broad specular polish on pelvic folds only",
+                            checked = betaV2NaturalPelvicFinish,
+                            tag = "toggle_beta_v2_natural_pelvic_finish",
+                            onToggle = {
+                                betaV2NaturalPelvicFinish = !betaV2NaturalPelvicFinish
+                                if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
         // Discreet, collapsed-by-default Advanced rendering disclosure holding the Legacy Vulva fallback option
         HorizontalDivider(
             modifier = Modifier.padding(top = 2.dp),
@@ -1430,6 +1553,47 @@ fun InteractiveVulva3DCanvas(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun VulvaBetaToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    tag: String,
+    onToggle: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+            .testTag(tag)
+            .semantics {
+                contentDescription = "$title, ${if (checked) "enabled" else "disabled"}. $subtitle"
+            },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = null
+        )
     }
 }
 

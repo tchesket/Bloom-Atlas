@@ -156,6 +156,8 @@ class VulvaGlTextureView(
         var archCoreIboId: Int = 0
         var archSkirtIboId: Int = 0
         var archSplitVersion: Int = -1
+        var vulvaPatchInteriorIboId: Int = 0
+        var vulvaPatchSeamIboId: Int = 0
     }
 
     private val sessionLock = Any()
@@ -194,6 +196,7 @@ class VulvaGlTextureView(
     private var uArchAlphaPassLoc = -1
     private var uBetaWarmTransitionZoneLoc = -1
     private var uBetaRefineInnerLabiaLoc = -1
+    private var uBetaV2NaturalPelvicFinishLoc = -1
 
     private var surfaceWidth = 1
     private var surfaceHeight = 1
@@ -523,6 +526,7 @@ class VulvaGlTextureView(
         uArchAlphaPassLoc = GLES20.glGetUniformLocation(program, "uArchAlphaPass")
         uBetaWarmTransitionZoneLoc = GLES20.glGetUniformLocation(program, "uBetaWarmTransitionZone")
         uBetaRefineInnerLabiaLoc = GLES20.glGetUniformLocation(program, "uBetaRefineInnerLabia")
+        uBetaV2NaturalPelvicFinishLoc = GLES20.glGetUniformLocation(program, "uBetaV2NaturalPelvicFinish")
 
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glDepthFunc(GLES20.GL_LEQUAL)
@@ -742,6 +746,38 @@ class VulvaGlTextureView(
             }
         }
 
+        fun ensureVulvaPatchSplitBuffers() {
+            if (session.vulvaPatchInteriorIboId == 0) {
+                val ids = IntArray(2)
+                GLES20.glGenBuffers(2, ids, 0)
+                session.vulvaPatchInteriorIboId = ids[0]
+                session.vulvaPatchSeamIboId = ids[1]
+
+                if (mesh.vulvaPatchInteriorIndexCount > 0) {
+                    val intBuf = mesh.vulvaPatchInteriorIndexBuffer
+                    intBuf.position(0)
+                    GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, session.vulvaPatchInteriorIboId)
+                    GLES20.glBufferData(
+                        GLES20.GL_ELEMENT_ARRAY_BUFFER,
+                        mesh.vulvaPatchInteriorIndexCount * 2,
+                        intBuf,
+                        GLES20.GL_STATIC_DRAW
+                    )
+                }
+                if (mesh.vulvaPatchSeamIndexCount > 0) {
+                    val seamBuf = mesh.vulvaPatchSeamIndexBuffer
+                    seamBuf.position(0)
+                    GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, session.vulvaPatchSeamIboId)
+                    GLES20.glBufferData(
+                        GLES20.GL_ELEMENT_ARRAY_BUFFER,
+                        mesh.vulvaPatchSeamIndexCount * 2,
+                        seamBuf,
+                        GLES20.GL_STATIC_DRAW
+                    )
+                }
+            }
+        }
+
         fun drawMeshList(meshes: List<DynamicGlMesh>, materialType: Float) {
             GLES20.glUniform1f(uMaterialTypeLoc, materialType)
             meshes.forEach { glMesh ->
@@ -759,6 +795,13 @@ class VulvaGlTextureView(
                 val useSmoothBodyHole = legsMode && materialType < 0.5f &&
                     currentDeform.betaSmoothBodyHoleCutoff && glMesh === mesh.blossomBodyMesh
                 GLES20.glUniform1f(uBetaSmoothBodyHoleLoc, if (useSmoothBodyHole) 1.0f else 0.0f)
+                val useNaturalPelvicFinish = currentDeform.betaV2NaturalPelvicFinish && materialType < 0.5f &&
+                    (glMesh === mesh.blossomBodyMesh ||
+                        glMesh === mesh.blossomVulvaPatchMesh ||
+                        glMesh === mesh.pelvisMesh ||
+                        glMesh === mesh.labiaHoodArchMesh ||
+                        glMesh === mesh.glansMesh)
+                GLES20.glUniform1f(uBetaV2NaturalPelvicFinishLoc, if (useNaturalPelvicFinish) 1.0f else 0.0f)
 
                 val vboEntry = ensureMeshBuffers(glMesh)
                 GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vboEntry.vboId)
@@ -790,48 +833,68 @@ class VulvaGlTextureView(
 
                 val useSeamAPolyOffset = legsMode && currentDeform.betaSmoothVulvaSeam &&
                     glMesh === mesh.blossomVulvaPatchMesh
-                if (useSeamAPolyOffset) {
-                    GLES20.glEnable(GLES20.GL_POLYGON_OFFSET_FILL)
-                    GLES20.glPolygonOffset(SEAM_A_PATCH_POLY_OFFSET_FACTOR, SEAM_A_PATCH_POLY_OFFSET_UNITS)
-                }
-                if (useArchSoftEdge) {
-                    // Pass 1: Opaque interior core (writes depth for clean self-occlusion)
-                    GLES20.glUniform1f(uArchAlphaPassLoc, 1.0f)
-                    if (useArchWarmFix) {
-                        if (mesh.labiaHoodArchCoreIndexCount > 0) {
-                            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, session.archCoreIboId)
-                            GLES20.glDrawElements(GLES20.GL_TRIANGLES, mesh.labiaHoodArchCoreIndexCount, GLES20.GL_UNSIGNED_SHORT, 0)
-                        }
-                    } else {
-                        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, vboEntry.iboId)
-                        GLES20.glDrawElements(GLES20.GL_TRIANGLES, glMesh.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
-                    }
-
-                    // Pass 2: Feathered outer ~20% skirt alpha-blended cleanly onto underlying vulva patch
-                    GLES20.glUniform1f(uArchAlphaPassLoc, 2.0f)
-                    GLES20.glEnable(GLES20.GL_BLEND)
-                    GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-                    GLES20.glDepthMask(false)
-                    if (useArchWarmFix) {
-                        if (mesh.labiaHoodArchSkirtIndexCount > 0) {
-                            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, session.archSkirtIboId)
-                            GLES20.glDrawElements(GLES20.GL_TRIANGLES, mesh.labiaHoodArchSkirtIndexCount, GLES20.GL_UNSIGNED_SHORT, 0)
-                        }
-                    } else {
-                        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, vboEntry.iboId)
-                        GLES20.glDrawElements(GLES20.GL_TRIANGLES, glMesh.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
-                    }
-                    GLES20.glDepthMask(true)
-                    GLES20.glDisable(GLES20.GL_BLEND)
+                val useSeamOnlyPolyOffset = useSeamAPolyOffset && currentDeform.betaV2SeamOnlyPolyOffset
+                if (useSeamOnlyPolyOffset) {
+                    // Vulva Beta v2 Toggle 1: draw interior patch triangles (edgeR < 0.88) WITHOUT polygon
+                    // offset so oblique views never pull the recessed patch forward through labiaHoodArchMesh
+                    // or glansMesh; apply Seam A polygon offset strictly to the outer seam ring (edgeR >= 0.88).
+                    ensureVulvaPatchSplitBuffers()
                     GLES20.glUniform1f(uArchAlphaPassLoc, 0.0f)
+                    if (mesh.vulvaPatchInteriorIndexCount > 0) {
+                        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, session.vulvaPatchInteriorIboId)
+                        GLES20.glDrawElements(GLES20.GL_TRIANGLES, mesh.vulvaPatchInteriorIndexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+                    }
+                    if (mesh.vulvaPatchSeamIndexCount > 0) {
+                        GLES20.glEnable(GLES20.GL_POLYGON_OFFSET_FILL)
+                        GLES20.glPolygonOffset(SEAM_A_PATCH_POLY_OFFSET_FACTOR, SEAM_A_PATCH_POLY_OFFSET_UNITS)
+                        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, session.vulvaPatchSeamIboId)
+                        GLES20.glDrawElements(GLES20.GL_TRIANGLES, mesh.vulvaPatchSeamIndexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+                        GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL)
+                    }
                 } else {
-                    GLES20.glUniform1f(uArchAlphaPassLoc, 0.0f)
-                    val iboId = if (useArchWarmFix) session.archCcwIboId else vboEntry.iboId
-                    GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, iboId)
-                    GLES20.glDrawElements(GLES20.GL_TRIANGLES, glMesh.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
-                }
-                if (useSeamAPolyOffset) {
-                    GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL)
+                    if (useSeamAPolyOffset) {
+                        GLES20.glEnable(GLES20.GL_POLYGON_OFFSET_FILL)
+                        GLES20.glPolygonOffset(SEAM_A_PATCH_POLY_OFFSET_FACTOR, SEAM_A_PATCH_POLY_OFFSET_UNITS)
+                    }
+                    if (useArchSoftEdge) {
+                        // Pass 1: Opaque interior core (writes depth for clean self-occlusion)
+                        GLES20.glUniform1f(uArchAlphaPassLoc, 1.0f)
+                        if (useArchWarmFix) {
+                            if (mesh.labiaHoodArchCoreIndexCount > 0) {
+                                GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, session.archCoreIboId)
+                                GLES20.glDrawElements(GLES20.GL_TRIANGLES, mesh.labiaHoodArchCoreIndexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+                            }
+                        } else {
+                            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, vboEntry.iboId)
+                            GLES20.glDrawElements(GLES20.GL_TRIANGLES, glMesh.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+                        }
+
+                        // Pass 2: Feathered outer ~20% skirt alpha-blended cleanly onto underlying vulva patch
+                        GLES20.glUniform1f(uArchAlphaPassLoc, 2.0f)
+                        GLES20.glEnable(GLES20.GL_BLEND)
+                        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                        GLES20.glDepthMask(false)
+                        if (useArchWarmFix) {
+                            if (mesh.labiaHoodArchSkirtIndexCount > 0) {
+                                GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, session.archSkirtIboId)
+                                GLES20.glDrawElements(GLES20.GL_TRIANGLES, mesh.labiaHoodArchSkirtIndexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+                            }
+                        } else {
+                            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, vboEntry.iboId)
+                            GLES20.glDrawElements(GLES20.GL_TRIANGLES, glMesh.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+                        }
+                        GLES20.glDepthMask(true)
+                        GLES20.glDisable(GLES20.GL_BLEND)
+                        GLES20.glUniform1f(uArchAlphaPassLoc, 0.0f)
+                    } else {
+                        GLES20.glUniform1f(uArchAlphaPassLoc, 0.0f)
+                        val iboId = if (useArchWarmFix) session.archCcwIboId else vboEntry.iboId
+                        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, iboId)
+                        GLES20.glDrawElements(GLES20.GL_TRIANGLES, glMesh.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+                    }
+                    if (useSeamAPolyOffset) {
+                        GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL)
+                    }
                 }
             }
         }
@@ -912,6 +975,15 @@ class VulvaGlTextureView(
                 session.archCcwIboId = 0
                 session.archCoreIboId = 0
                 session.archSkirtIboId = 0
+            }
+            if (session.vulvaPatchInteriorIboId != 0) {
+                val patchSplitIds = intArrayOf(
+                    session.vulvaPatchInteriorIboId,
+                    session.vulvaPatchSeamIboId
+                )
+                GLES20.glDeleteBuffers(patchSplitIds.size, patchSplitIds, 0)
+                session.vulvaPatchInteriorIboId = 0
+                session.vulvaPatchSeamIboId = 0
             }
             if (session.programId != 0) {
                 GLES20.glDeleteProgram(session.programId)
@@ -1240,6 +1312,7 @@ class VulvaGlTextureView(
             uniform float uArchAlphaPass;
             uniform float uBetaWarmTransitionZone;
             uniform float uBetaRefineInnerLabia;
+            uniform float uBetaV2NaturalPelvicFinish;
 
             float hash31(vec3 p) {
                 p = fract(p * vec3(0.1031, 0.11369, 0.13787));
@@ -1807,9 +1880,19 @@ class VulvaGlTextureView(
                 float terminator = exp(-abs(NdotL1 - 0.02) * 3.6) * (0.28 + 0.34 * mucosa + 0.14 * jointSss);
 
                 // Thin-tissue forward/back translucency (illuminates thin labia minora & hood margins!)
+                // Vulva Beta v2 Toggle 4: strictly pelvic-scoped satin-velvet finish reducing waxy rim/specular polish
+                // while preserving natural pinpoint mucosal moisture (bit-identical to v13.0 when uniform == 0.0).
+                float pelvicFinishMask = uBetaV2NaturalPelvicFinish *
+                    smoothstep(-1.18, -0.82, vRestPos.y) *
+                    (1.0 - smoothstep(0.82, 1.18, vRestPos.y)) *
+                    (1.0 - smoothstep(0.62, 0.96, ax));
+                float nonArchPelvicMucosa = pelvicFinishMask * mucosa * (1.0 - labiaInnerMask);
+                float pelvicCutaneousFinish = pelvicFinishMask * (1.0 - mucosa);
+
                 vec3 Hback = normalize(-Lkey + N * 0.48);
                 float thinTransmit = pow(clamp(dot(V, Hback), 0.0, 1.0), 2.8) * (0.10 + 0.36 * mucosa + 0.05 * jointSss);
-                float grazingTrans = pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 2.3) * (0.14 + 0.34 * mucosa + 0.08 * jointSss);
+                float grazingTrans = pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 2.3) * (0.14 + 0.34 * mucosa + 0.08 * jointSss) *
+                    (1.0 - pelvicFinishMask * 0.28);
 
                 // Dual-lobe matte-velvet specular BRDF with gentle regional roughness variation (ZERO oily gloss or sparkle!)
                 vec3 H1 = normalize(Lkey + V);
@@ -1838,21 +1921,23 @@ class VulvaGlTextureView(
                 float oilBreakup = mix(0.79, 1.19, nMicro * 0.65 + nMelanin * 0.35) * oilBreakupBase;
                 float labiaOilBreakup = mix(oilBreakup, 0.92 * oilBreakupBase, 0.65 * labiaInnerMask);
                 float microRough = mix(-3.0, 3.2, nMid * 0.55 + nMicro * 0.45);
-                float broadExp = max(12.0, mix(18.0, 29.0, clamp(wetness + naturalSheen * 0.22, 0.0, 1.0)) + microRough * (1.0 - mucosa) + 22.0 * labiaInnerMask);
-                float broadAmp = mix(0.070, 0.148, wetness) * (0.88 + 0.24 * naturalSheen) * (1.0 - 0.56 * labiaInnerMask);
+                float broadExp = max(12.0, mix(18.0, 29.0, clamp(wetness + naturalSheen * 0.22, 0.0, 1.0)) + microRough * (1.0 - mucosa) + 22.0 * labiaInnerMask - 3.0 * pelvicCutaneousFinish);
+                float pelvicBroadTrim = (1.0 - pelvicCutaneousFinish * 0.28) * (1.0 - nonArchPelvicMucosa * 0.26) * (1.0 - pelvicFinishMask * labiaInnerMask * 0.12);
+                float broadAmp = mix(0.070, 0.148, wetness) * (0.88 + 0.24 * naturalSheen) * (1.0 - 0.56 * labiaInnerMask) * pelvicBroadTrim;
                 float broadSpec = pow(NdotH1, broadExp) * broadAmp * labiaOilBreakup;
                 // Secondary tight crisp highlight strictly reserved for naturally moist inner mucosa & clitoral glans
                 float moistMask = smoothstep(0.075, 0.18, wetness);
-                float wetKeyExp = mix(78.0, 162.0, wetness) + 86.0 * labiaInnerMask;
-                float wetFillExp = 92.0 + 74.0 * labiaInnerMask;
-                float wetSpecGain = 1.0 - 0.56 * labiaInnerMask;
+                float wetKeyExp = mix(78.0, 162.0, wetness) + 86.0 * labiaInnerMask + 32.0 * nonArchPelvicMucosa;
+                float wetFillExp = 92.0 + 74.0 * labiaInnerMask + 24.0 * nonArchPelvicMucosa;
+                float wetSpecGain = (1.0 - 0.56 * labiaInnerMask) * (1.0 - nonArchPelvicMucosa * 0.34) * (1.0 - pelvicFinishMask * labiaInnerMask * 0.12);
                 float wetSharpSpec = (pow(NdotH1, wetKeyExp) * wetness * 0.54 +
                                       pow(NdotH2, wetFillExp) * wetness * 0.15) * wetSpecGain * moistMask * faceMatteDamp * areolaMatteDamp;
 
                 // Soft studio rim light + subtle matte-velvet peach-fuzz Fresnel wrap across dry skin silhouettes
                 float viewRim = clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0);
                 float fresnel = pow(viewRim, 3.4);
-                float rimLight = fresnel * (0.26 + 0.24 * mucosa) * (0.45 + 0.55 * max(dot(N, Lrim), 0.0));
+                float rimLight = fresnel * (0.26 + 0.24 * mucosa) * (0.45 + 0.55 * max(dot(N, Lrim), 0.0)) *
+                    (1.0 - pelvicFinishMask * 0.42);
                 float velvetWrap = pow(viewRim, 2.2) * (1.0 - mucosa) * (1.0 - hairCoverage * 0.80) * 0.052;
 
                 // Colored Hemoglobin AO Bounce: prevents crevices from looking muddy gray & softens hip/lip/body contrast

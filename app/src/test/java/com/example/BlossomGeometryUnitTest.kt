@@ -1,5 +1,6 @@
 package com.example
 
+import com.example.ui.components.BlossomArmIkRig
 import com.example.ui.components.BlossomBodyBuilder
 import com.example.ui.components.BlossomSdfBodyBuilder
 import com.example.ui.components.BlossomUpperBodyBuilder
@@ -8,9 +9,12 @@ import com.example.ui.components.VulvaAnatomySceneMesh
 import com.example.ui.components.VulvaDeformationState
 import com.example.ui.components.VulvaGlTextureView
 import com.example.ui.components.computeBlinkIntervalRangeMs
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.sqrt
 
 class BlossomGeometryUnitTest {
@@ -1698,6 +1702,363 @@ class BlossomGeometryUnitTest {
         assertTrue("Resting upper arm must remain undisturbed (< 0.001), got ${armOff[2]}", abs(armOff[2]) < 0.001f)
         assertTrue("Vulva must remain undisturbed (< 0.001), got ${vulvaOff[2]}", abs(vulvaOff[2]) < 0.001f)
         assertTrue("Stomach breathing must remain visibly smooth (dZ >= 0.085), got ${stomachOff[2]}", stomachOff[2] >= 0.085f)
+    }
+
+    private data class VulvaArchDiagnosticReport(
+        val poseName: String,
+        val totalTriangles: Int,
+        val degenerateTriangles: Int,
+        val windingInvertedCcwCount: Int,
+        val outerSkirtNonMonotonicSteps: Int,
+        val innerWallNonMonotonicSteps: Int,
+        val midlineCrossingVertices: Int,
+        val glansInterpenetratingVertices: Int,
+        val opaqueArchBelowPatchVertices: Int,
+        val visibleArchBelowPatchVertices: Int,
+        val maxArchOvalR: Float
+    )
+
+    private fun inspectLabiaHoodArchDiagnostics(
+        scene: VulvaAnatomySceneMesh,
+        state: VulvaDeformationState,
+        poseName: String
+    ): VulvaArchDiagnosticReport {
+        val data = scene.labiaHoodArchMesh.vertexData
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val cols = scene.archCols
+        val rows = scene.archRows
+        val alphas = scene.labiaHoodArchAlphaData
+        val ccwBuf = scene.labiaHoodArchCcwIndexBuffer
+        ccwBuf.position(0)
+
+        var totalTris = 0
+        var degenTris = 0
+        var invertedWinding = 0
+        val idxCount = scene.labiaHoodArchMesh.indexCount
+        var t = 0
+        while (t + 2 < idxCount) {
+            val i0 = ccwBuf.get(t).toInt() and 0xFFFF
+            val i1 = ccwBuf.get(t + 1).toInt() and 0xFFFF
+            val i2 = ccwBuf.get(t + 2).toInt() and 0xFFFF
+            t += 3
+            totalTris++
+
+            val b0 = i0 * stride
+            val b1 = i1 * stride
+            val b2 = i2 * stride
+            val e1x = data[b1] - data[b0]
+            val e1y = data[b1 + 1] - data[b0 + 1]
+            val e1z = data[b1 + 2] - data[b0 + 2]
+            val e2x = data[b2] - data[b0]
+            val e2y = data[b2 + 1] - data[b0 + 1]
+            val e2z = data[b2 + 2] - data[b0 + 2]
+            val fx = e1y * e2z - e1z * e2y
+            val fy = e1z * e2x - e1x * e2z
+            val fz = e1x * e2y - e1y * e2x
+            val fLen = sqrt(fx * fx + fy * fy + fz * fz)
+            if (fLen < 1e-8f) {
+                degenTris++
+                continue
+            }
+            // In the XY anatomical front view, an outward-wound CCW triangle on the arch manifold
+            // has positive geometric Z-component (fz > 0) unless the surface folded back over itself.
+            if (fz < -1e-7f) {
+                invertedWinding++
+            }
+        }
+
+        // Compute outward row normal O(r) from the centerline (c = 0..cols-1) to verify lateral monotonicity
+        val glansCenterY = 0.254f
+        val glansBaseZ = scene.sampleBodySurfaceZForTest(0f, glansCenterY, state, includeLithotomy = true) - 0.008f
+        val glansRx = 0.034f + state.hoodRetract * 0.004f
+        val glansRy = 0.045f + state.hoodRetract * 0.005f
+        val glansRz = 0.042f
+
+        var outerNonMono = 0
+        var innerNonMono = 0
+        var midlineCross = 0
+        var glansClip = 0
+        var opaqueBelowPatch = 0
+        var visibleBelowPatch = 0
+        var maxArchOvalR = 0f
+
+        for (r in 0 until rows) {
+            val arcS = (r.toFloat() / (rows - 1)) * 2f - 1f
+            val absS = abs(arcS)
+            val signS = if (arcS < 0f) -1f else 1f
+            val isLeft = arcS < 0f
+            val crestU = if (isLeft) 0.37f else 0.35f
+
+            // Estimate row outward direction from c = 0 -> c = cols-1 (guaranteed radially outward)
+            val bStart = (r * cols) * stride
+            val bEnd = (r * cols + cols - 1) * stride
+            var ox = data[bEnd] - data[bStart]
+            var oy = data[bEnd + 1] - data[bStart + 1]
+            val oLen = sqrt(ox * ox + oy * oy).coerceAtLeast(1e-6f)
+            ox /= oLen
+            oy /= oLen
+
+            for (c in 0 until cols) {
+                val u = c.toFloat() / (cols - 1)
+                val vIdx = r * cols + c
+                val b = vIdx * stride
+                val px = data[b]
+                val py = data[b + 1]
+                val pz = data[b + 2]
+                val alpha = alphas[vIdx]
+
+                val ovalR = sqrt((px / 0.64f) * (px / 0.64f) + ((py + 0.06f) / 1.02f) * ((py + 0.06f) / 1.02f))
+                if (ovalR > maxArchOvalR) maxArchOvalR = ovalR
+
+                if (c > 0) {
+                    val bPrev = (vIdx - 1) * stride
+                    val dpx = px - data[bPrev]
+                    val dpy = py - data[bPrev + 1]
+                    val stepOut = dpx * ox + dpy * oy
+                    if (stepOut < -1e-5f) {
+                        val uPrev = (c - 1).toFloat() / (cols - 1)
+                        if (uPrev >= crestU) {
+                            outerNonMono++
+                        } else {
+                            innerNonMono++
+                        }
+                    }
+                }
+
+                if (absS >= 0.06f && px * signS < -0.0005f) {
+                    midlineCross++
+                }
+
+                if (alpha > 0.05f && pz > glansBaseZ) {
+                    val gx = px / glansRx
+                    val gy = (py - glansCenterY) / glansRy
+                    val gz = (pz - glansBaseZ) / glansRz
+                    if (gx * gx + gy * gy + gz * gz < 0.98f) {
+                        glansClip++
+                    }
+                }
+
+                if (alpha > 0.05f && u >= 0.16f && u < 0.90f) {
+                    val groundZ = scene.sampleBodySurfaceZForTest(px, py, state, includeLithotomy = true)
+                    if (pz < groundZ - 0.0005f) {
+                        visibleBelowPatch++
+                        if (alpha >= 0.995f) {
+                            opaqueBelowPatch++
+                        }
+                    }
+                }
+            }
+        }
+
+        return VulvaArchDiagnosticReport(
+            poseName = poseName,
+            totalTriangles = totalTris,
+            degenerateTriangles = degenTris,
+            windingInvertedCcwCount = invertedWinding,
+            outerSkirtNonMonotonicSteps = outerNonMono,
+            innerWallNonMonotonicSteps = innerNonMono,
+            midlineCrossingVertices = midlineCross,
+            glansInterpenetratingVertices = glansClip,
+            opaqueArchBelowPatchVertices = opaqueBelowPatch,
+            visibleArchBelowPatchVertices = visibleBelowPatch,
+            maxArchOvalR = maxArchOvalR
+        )
+    }
+
+    @Test
+    fun vulvaBetaV2DiagnosticsAndIndependentToggleInvariantsHold() {
+        val scene = VulvaAnatomySceneMesh()
+
+        // 1. Exact v13.0 baseline bit-identity check (all 4 Beta v2 toggles OFF by default, and round-trip ON -> OFF)
+        val defaultState = VulvaDeformationState()
+        assertFalse(defaultState.betaV2SeamOnlyPolyOffset)
+        assertFalse(defaultState.betaV2NonInvertingLabiaFold)
+        assertFalse(defaultState.betaV2AlignedSulcus)
+        assertFalse(defaultState.betaV2NaturalPelvicFinish)
+        scene.update(defaultState, includeLithotomyBody = true)
+        val baselineArchCopy = scene.labiaHoodArchMesh.vertexData.copyOf()
+        val baselinePatchCopy = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+        val baselineGlansCopy = scene.glansMesh.vertexData.copyOf()
+        val baselineAlphaCopy = scene.labiaHoodArchAlphaData.copyOf()
+
+        // Toggle all 4 Beta v2 switches ON, then back OFF, and verify exact 0.0f bit-identity
+        scene.update(
+            defaultState.copy(
+                betaV2SeamOnlyPolyOffset = true,
+                betaV2NonInvertingLabiaFold = true,
+                betaV2AlignedSulcus = true,
+                betaV2NaturalPelvicFinish = true
+            ),
+            includeLithotomyBody = true
+        )
+        scene.update(defaultState, includeLithotomyBody = true)
+        assertTrue("Arch vertices must revert bit-for-bit to v13.0 when Beta v2 toggles are OFF", baselineArchCopy.contentEquals(scene.labiaHoodArchMesh.vertexData))
+        assertTrue("Vulva patch vertices must revert bit-for-bit to v13.0 when Beta v2 toggles are OFF", baselinePatchCopy.contentEquals(scene.blossomVulvaPatchMesh.vertexData))
+        assertTrue("Glans vertices must revert bit-for-bit to v13.0 when Beta v2 toggles are OFF", baselineGlansCopy.contentEquals(scene.glansMesh.vertexData))
+        assertTrue("Arch alpha buffer must revert bit-for-bit to v13.0 when Beta v2 toggles are OFF", baselineAlphaCopy.contentEquals(scene.labiaHoodArchAlphaData))
+
+        // 2. Toggle 1: verify exact disjoint vulva-patch interior/seam triangle partition & safety margin
+        val edgeR = scene.getVulvaPatchEdgeRForTest()
+        val totalPatchIndices = scene.blossomVulvaPatchMesh.indexCount
+        assertEquals(
+            "Interior + seam index counts must partition blossomVulvaPatchMesh exactly",
+            totalPatchIndices,
+            scene.vulvaPatchInteriorIndexCount + scene.vulvaPatchSeamIndexCount
+        )
+        assertTrue("Interior partition must be non-empty", scene.vulvaPatchInteriorIndexCount > 0)
+        assertTrue("Seam partition must be non-empty", scene.vulvaPatchSeamIndexCount > 0)
+        scene.vulvaPatchInteriorIndexBuffer.position(0)
+        var i = 0
+        while (i + 2 < scene.vulvaPatchInteriorIndexCount) {
+            val v0 = scene.vulvaPatchInteriorIndexBuffer.get(i).toInt() and 0xFFFF
+            val v1 = scene.vulvaPatchInteriorIndexBuffer.get(i + 1).toInt() and 0xFFFF
+            val v2 = scene.vulvaPatchInteriorIndexBuffer.get(i + 2).toInt() and 0xFFFF
+            val maxR = max(edgeR[v0], max(edgeR[v1], edgeR[v2]))
+            assertTrue("Interior triangle maxEdgeR must be < 0.88f, got $maxR", maxR < VulvaAnatomySceneMesh.VULVA_PATCH_SEAM_OFFSET_EDGE_R)
+            i += 3
+        }
+        scene.vulvaPatchSeamIndexBuffer.position(0)
+        var s = 0
+        while (s + 2 < scene.vulvaPatchSeamIndexCount) {
+            val v0 = scene.vulvaPatchSeamIndexBuffer.get(s).toInt() and 0xFFFF
+            val v1 = scene.vulvaPatchSeamIndexBuffer.get(s + 1).toInt() and 0xFFFF
+            val v2 = scene.vulvaPatchSeamIndexBuffer.get(s + 2).toInt() and 0xFFFF
+            val maxR = max(edgeR[v0], max(edgeR[v1], edgeR[v2]))
+            assertTrue("Seam triangle maxEdgeR must be >= 0.88f, got $maxR", maxR >= VulvaAnatomySceneMesh.VULVA_PATCH_SEAM_OFFSET_EDGE_R)
+            s += 3
+        }
+
+        // 3. Automated geometry diagnostics across 5 critical poses: Baseline (v13.0) vs Toggle 1 & Toggle 2
+        val testPoses = listOf(
+            "Rest(0/0)" to VulvaDeformationState(),
+            "SelfSpread(0.74/0.78)" to VulvaDeformationState(
+                leftOuter = BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET,
+                rightOuter = BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET,
+                leftInner = BlossomArmIkRig.SELF_SPREAD_INNER_TARGET,
+                rightInner = BlossomArmIkRig.SELF_SPREAD_INNER_TARGET
+            ),
+            "FullSpread(1.0/1.0)" to VulvaDeformationState(
+                leftOuter = 1.0f, rightOuter = 1.0f, leftInner = 1.0f, rightInner = 1.0f
+            ),
+            "AsymSpread(L1/R0)" to VulvaDeformationState(
+                leftOuter = 1.0f, leftInner = 1.0f, rightOuter = 0.0f, rightInner = 0.0f
+            ),
+            "HoodRetract(1.0)" to VulvaDeformationState(hoodRetract = 1.0f),
+            "FullSpread+Hood(1.0)" to VulvaDeformationState(
+                leftOuter = 1.0f, rightOuter = 1.0f, leftInner = 1.0f, rightInner = 1.0f, hoodRetract = 1.0f
+            )
+        )
+
+        var baselineSpreadOuterInversions = 0
+        var baselineMidlineCrossingsTotal = 0
+        var baselineGlansClipsTotal = 0
+
+        for ((poseName, basePose) in testPoses) {
+            // A. Baseline (v13.0) diagnostic measurement
+            scene.update(basePose, includeLithotomyBody = true)
+            val baseRep = inspectLabiaHoodArchDiagnostics(scene, basePose, "$poseName [v13.0]")
+            println("DIAG $baseRep")
+            if (poseName.startsWith("SelfSpread") || poseName.startsWith("FullSpread")) {
+                baselineSpreadOuterInversions += baseRep.outerSkirtNonMonotonicSteps
+            }
+            baselineMidlineCrossingsTotal += baseRep.midlineCrossingVertices
+            baselineGlansClipsTotal += baseRep.glansInterpenetratingVertices
+
+            // Arch stays strictly inside ovalR < 0.85 even at full spread, validating the edgeR = 0.88 seam split!
+            assertTrue(
+                "$poseName baseline arch maxOvalR must stay safely inside 0.88 seam ring, got ${baseRep.maxArchOvalR}",
+                baseRep.maxArchOvalR < 0.85f
+            )
+
+            // B. Toggle 1 ONLY (betaV2SeamOnlyPolyOffset = true)
+            val t1Pose = basePose.copy(betaV2SeamOnlyPolyOffset = true)
+            scene.update(t1Pose, includeLithotomyBody = true)
+            val t1Rep = inspectLabiaHoodArchDiagnostics(scene, t1Pose, "$poseName [Toggle1]")
+            println("DIAG $t1Rep")
+            assertTrue(
+                "$poseName baseline must exhibit visible tipSink below patch (> 0), got ${baseRep.visibleArchBelowPatchVertices}",
+                baseRep.visibleArchBelowPatchVertices > 0
+            )
+            assertEquals(
+                "$poseName Toggle 1 must keep all visible arch vertices (alpha > 0.05, u in 0.16..0.90) above vulva patch",
+                0,
+                t1Rep.visibleArchBelowPatchVertices
+            )
+            assertEquals(
+                "$poseName Toggle 1 must keep all opaque arch vertices above vulva patch",
+                0,
+                t1Rep.opaqueArchBelowPatchVertices
+            )
+
+            // C. Toggle 2 ONLY (betaV2NonInvertingLabiaFold = true)
+            val t2Pose = basePose.copy(betaV2NonInvertingLabiaFold = true)
+            scene.update(t2Pose, includeLithotomyBody = true)
+            val t2Rep = inspectLabiaHoodArchDiagnostics(scene, t2Pose, "$poseName [Toggle2]")
+            println("DIAG $t2Rep")
+            assertValidMesh(scene.labiaHoodArchMesh)
+            assertEquals("$poseName Toggle 2 must have 0 outer-skirt fold-over steps", 0, t2Rep.outerSkirtNonMonotonicSteps)
+            assertEquals("$poseName Toggle 2 must have 0 inner-wall fold-over steps", 0, t2Rep.innerWallNonMonotonicSteps)
+            assertEquals("$poseName Toggle 2 must have 0 CCW triangle winding inversions", 0, t2Rep.windingInvertedCcwCount)
+            assertEquals("$poseName Toggle 2 must have 0 midline crossing vertices", 0, t2Rep.midlineCrossingVertices)
+            assertEquals("$poseName Toggle 2 must have 0 glans interpenetrating vertices", 0, t2Rep.glansInterpenetratingVertices)
+            assertTrue(
+                "$poseName Toggle 2 arch maxOvalR must remain safely inside 0.88 seam ring, got ${t2Rep.maxArchOvalR}",
+                t2Rep.maxArchOvalR < 0.85f
+            )
+
+            // D. Toggle 1 + Toggle 2 combined
+            val t12Pose = basePose.copy(betaV2SeamOnlyPolyOffset = true, betaV2NonInvertingLabiaFold = true)
+            scene.update(t12Pose, includeLithotomyBody = true)
+            val t12Rep = inspectLabiaHoodArchDiagnostics(scene, t12Pose, "$poseName [Toggle1+2]")
+            assertEquals("$poseName Toggle 1+2 must have 0 CCW winding inversions", 0, t12Rep.windingInvertedCcwCount)
+            assertEquals("$poseName Toggle 1+2 must have 0 opaque arch vertices below patch", 0, t12Rep.opaqueArchBelowPatchVertices)
+        }
+
+        // Confirm the diagnostic detector genuinely detects the baseline defects we diagnosed!
+        assertTrue(
+            "Detector must actually catch baseline outer-skirt fold-over in spread poses (got $baselineSpreadOuterInversions)",
+            baselineSpreadOuterInversions > 0
+        )
+        assertTrue(
+            "Detector must actually catch baseline midline crossing vertices (got $baselineMidlineCrossingsTotal)",
+            baselineMidlineCrossingsTotal > 0
+        )
+        assertTrue(
+            "Detector must actually catch baseline glans interpenetration (got $baselineGlansClipsTotal)",
+            baselineGlansClipsTotal > 0
+        )
+
+        // 4. Toggle 3 (betaV2AlignedSulcus): verify outward alignment & complete independence from Toggle 2
+        val spreadBase = VulvaDeformationState(
+            leftOuter = BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET,
+            rightOuter = BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET,
+            leftInner = BlossomArmIkRig.SELF_SPREAD_INNER_TARGET,
+            rightInner = BlossomArmIkRig.SELF_SPREAD_INNER_TARGET
+        )
+        val spreadSulcusOnly = spreadBase.copy(betaV2AlignedSulcus = true, betaV2NonInvertingLabiaFold = false)
+        val spreadSulcusAndFold = spreadBase.copy(betaV2AlignedSulcus = true, betaV2NonInvertingLabiaFold = true)
+        // Old sulcus sat directly under arch base at x = 0.242; aligned sulcus shifts outward to ~0.350 (between minora & majora crest 0.430)
+        val oldPosBase = scene.evaluateVulvaDetailForTest(0.242f, 0.0f, spreadBase)
+        val oldPosAligned = scene.evaluateVulvaDetailForTest(0.242f, 0.0f, spreadSulcusOnly)
+        val newPosBase = scene.evaluateVulvaDetailForTest(0.350f, 0.0f, spreadBase)
+        val newPosAligned = scene.evaluateVulvaDetailForTest(0.350f, 0.0f, spreadSulcusOnly)
+        val newPosAlignedWithT2 = scene.evaluateVulvaDetailForTest(0.350f, 0.0f, spreadSulcusAndFold)
+        assertTrue(
+            "Toggle 3 must relieve the recessed trough directly under the arch base at x=0.242 (dz ${oldPosAligned[0]} > ${oldPosBase[0]}, ao ${oldPosAligned[3]} > ${oldPosBase[3]})",
+            oldPosAligned[0] > oldPosBase[0] + 0.010f && oldPosAligned[3] > oldPosBase[3] + 0.05f
+        )
+        assertTrue(
+            "Toggle 3 must place a gentle groove cleanly at the interlabial space x=0.350 (dz ${newPosAligned[0]} < ${newPosBase[0]})",
+            newPosAligned[0] < newPosBase[0] - 0.008f
+        )
+        assertEquals(
+            "Toggle 3 sulcus evaluation must be 100% independent of Toggle 2 (identical dz)",
+            newPosAligned[0], newPosAlignedWithT2[0], 1e-6f
+        )
+        assertEquals(
+            "Toggle 3 sulcus evaluation must be 100% independent of Toggle 2 (identical ao)",
+            newPosAligned[3], newPosAlignedWithT2[3], 1e-6f
+        )
     }
 
     /**
