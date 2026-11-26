@@ -207,8 +207,13 @@ internal object BlossomTouchHitResolver {
 
         // 2. PRIORITY 2 — Snug 3D-Projected Left & Right Breasts (matches raised mound, isolated from upper arms!)
         val sizeNorm = deform.breastSize.coerceIn(0f, 1f)
-        val worldBreastR = 0.50f + 0.12f * sizeNorm
-        val breastZ = BlossomBodyBuilder.mattressSurfaceZ(BlossomUpperBodyBuilder.BREAST_CENTER_Y) + 1.48f + 0.24f * sizeNorm
+        val boostRamp = if (deform.betaBreastSizeBoost) {
+            val t = ((sizeNorm - 0.08f) / 0.20f).coerceIn(0f, 1f)
+            t * t * (3f - 2f * t)
+        } else 0f
+        val worldBreastR = (0.50f + 0.12f * sizeNorm) * (1f + 0.08f * boostRamp)
+        val breastZ = BlossomBodyBuilder.mattressSurfaceZ(BlossomUpperBodyBuilder.BREAST_CENTER_Y) +
+            1.48f + 0.24f * sizeNorm + 0.07f * boostRamp
         val supineShiftX = 0.04f * sizeNorm
         val leftBreastW = floatArrayOf(
             -(BlossomUpperBodyBuilder.BREAST_CENTER_AX + supineShiftX) + deform.leftBreastX * 0.22f,

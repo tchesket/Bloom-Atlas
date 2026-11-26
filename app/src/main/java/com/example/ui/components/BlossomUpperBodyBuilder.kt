@@ -1151,15 +1151,19 @@ internal object BlossomUpperBodyBuilder {
         // True 3D volume-proportional scaling: X/Y base footprint AND Z projection grow together harmoniously!
         val supineFlattenZ = 1f - 0.13f * gravityMobility
         val supineBroaden = 1f / sqrt(supineFlattenZ)
+        // Beta toggle (betaBreastSizeBoost): increases breast size ~15% at every setting except the most petite (sizeNorm <= 0.08)
+        val breastBoostRamp = if (state.betaBreastSizeBoost) smoothStep(0.08f, 0.28f, sizeNorm) else 0f
+        val boostXY = 1f + 0.085f * breastBoostRamp
+        val boostZ = 1f + 0.155f * breastBoostRamp
         val sizeBloom = ((sizeNorm - 0.45f) / 0.55f).coerceIn(0f, 1f)
-        val footprintScaleX = (0.72f + sizeNorm * 0.48f) * (0.95f + 0.05f * supineBroaden)
-        val footprintScaleY = (0.72f + sizeNorm * 0.48f) * (0.95f + 0.05f * supineBroaden)
-        val moundZScale = (0.60f + sizeNorm * 0.52f) * supineFlattenZ
+        val footprintScaleX = (0.72f + sizeNorm * 0.48f) * (0.95f + 0.05f * supineBroaden) * boostXY
+        val footprintScaleY = (0.72f + sizeNorm * 0.48f) * (0.95f + 0.05f * supineBroaden) * boostXY
+        val moundZScale = (0.60f + sizeNorm * 0.52f) * supineFlattenZ * boostZ
 
         // Gentle outer seam-guarantee collar envelope (reaches exact zero cleanly by edgeR <= 0.90)
         // while letting the continuous cos^p teardrop dome govern the entire organic side profile!
-        val collarStart = 0.50f + 0.18f * sizeNorm
-        val collarEnd = 0.84f + 0.06f * sizeNorm
+        val collarStart = (0.50f + 0.18f * sizeNorm + 0.03f * breastBoostRamp).coerceAtMost(0.72f)
+        val collarEnd = (0.84f + 0.06f * sizeNorm + 0.015f * breastBoostRamp).coerceAtMost(0.915f)
         val collarPow = (1.35f - 0.20f * sizeNorm).toDouble()
 
         fun updateSide(sideCache: BreastSideCache, shiftX: Float, shiftY: Float, sideOffsetVerts: Int) {

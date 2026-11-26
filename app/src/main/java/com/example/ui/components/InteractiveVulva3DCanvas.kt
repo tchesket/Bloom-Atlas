@@ -39,6 +39,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PanTool
@@ -69,6 +70,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -224,9 +226,14 @@ fun InteractiveVulva3DCanvas(
     val livingWarmth = remember { Animatable(0f) }
     var posturalSettleTrigger by remember { mutableIntStateOf(0) }
     var lastManualHeadDragMs by remember { mutableStateOf(0L) }
-    // Unified touch-engagement stimulus (0 = calm rest, ~0.55 = breast/vulva touch, 1.0 = clitoris/hood touch)
+    // Unified touch-engagement stimulus & realistic cardio-respiratory heart rate (66..142 BPM)
     var touchStimulus by remember { mutableFloatStateOf(0f) }
     var lastStimulusTouchMs by remember { mutableStateOf(0L) }
+    var heartRateBpm by remember { mutableFloatStateOf(VulvaGlTextureView.RESTING_HEART_RATE_BPM) }
+    var heartRateSensitivity by remember { mutableFloatStateOf(0f) }
+    var heartRateDrive by remember { mutableFloatStateOf(0f) }
+    var lastHeartStimMs by remember { mutableStateOf(0L) }
+    val heartPulseScale = remember { Animatable(1f) }
     // Animated self-spread hand/arm IK pose (0 = relaxed at sides, 1 = hands holding labia open)
     var blossomSpreadPoseActive by remember { mutableStateOf(false) }
     val selfSpreadPose = remember { Animatable(0f) }
@@ -245,19 +252,22 @@ fun InteractiveVulva3DCanvas(
     var showAdvancedRendering by remember { mutableStateOf(false) }
     var legacyVulvaMode by remember { mutableStateOf(false) }
     // Floating always-on-top 3-Tab Beta Lab overlay:
-    //  Tab 0 (Vulva): all 7 promoted ON by default, vestibular concavity default 30%
+    //  Tab 0 (Vulva): Beta v2 is now baked live; holds 5 independent Beta v3 anatomical realism toggles + Breast Size Boost (all OFF by default)
     //  Tab 1 (Life):  all 6 promoted ON by default
-    //  Tab 2 (Life+): 7 new experimental realism features, all OFF by default
+    //  Tab 2 (Life+): 7 subtle realism features + Heart Rate HUD toggle (all OFF by default)
     var showBetaMenu by remember { mutableStateOf(false) }
     var betaMenuTab by remember { mutableIntStateOf(0) } // 0 = Vulva, 1 = Life, 2 = Life+
-    var betaV2SeamOnlyPolyOffset by remember { mutableStateOf(true) }
-    var betaV2NonInvertingLabiaFold by remember { mutableStateOf(true) }
-    var betaV2AlignedSulcus by remember { mutableStateOf(true) }
-    var betaV2NaturalPelvicFinish by remember { mutableStateOf(true) }
-    var betaV2BalancedUpperVulvaDepth by remember { mutableStateOf(true) }
-    var betaV2BalancedUpperVulvaDepthWithCrest by remember { mutableStateOf(true) }
-    var betaV2AdjustableVestibularConcavity by remember { mutableStateOf(true) }
-    var betaV2VestibularConcavity by remember { mutableFloatStateOf(0.30f) }
+    var betaV3OrganicContinuity by remember { mutableStateOf(false) }
+    var betaV3ContinuityStrength by remember { mutableFloatStateOf(0.65f) }
+    var betaV3SoftPigmentation by remember { mutableStateOf(false) }
+    var betaV3PigmentStrength by remember { mutableFloatStateOf(0.70f) }
+    var betaV3AnatomicalAsymmetry by remember { mutableStateOf(false) }
+    var betaV3AsymmetryStrength by remember { mutableFloatStateOf(0.65f) }
+    var betaV3RegionalSurfaceDetail by remember { mutableStateOf(false) }
+    var betaV3SurfaceStrength by remember { mutableFloatStateOf(0.65f) }
+    var betaV3NaturalLighting by remember { mutableStateOf(false) }
+    var betaV3LightingStrength by remember { mutableFloatStateOf(0.70f) }
+    var betaBreastSizeBoost by remember { mutableStateOf(false) }
     // Lifelike Beta (Tab 2) toggles (promoted ON by default)
     var betaLifeEyeMicrosaccades by remember { mutableStateOf(true) }
     var betaLifeDoubleBlinking by remember { mutableStateOf(true) }
@@ -273,6 +283,7 @@ fun InteractiveVulva3DCanvas(
     var betaLife2PosturalSettling by remember { mutableStateOf(false) }
     var betaLife2BreathFaceCoupling by remember { mutableStateOf(false) }
     var betaLife2LivingWarmth by remember { mutableStateOf(false) }
+    var betaLife2ShowHeartRate by remember { mutableStateOf(false) }
     var activePreset by remember { mutableStateOf<CameraAnglePreset?>(CameraAnglePreset.EXAM_FRONT) }
     val initialCam = remember { CameraAnglePreset.EXAM_FRONT.resolveCamera(blossomBodyEnabled = true) }
     val camYaw = remember { Animatable(initialCam.yawDeg) }
@@ -296,15 +307,30 @@ fun InteractiveVulva3DCanvas(
     val latestShowFullBody by rememberUpdatedState(showExperimentalLegs)
     val latestBlossomSpreadPoseActive by rememberUpdatedState(blossomSpreadPoseActive)
     val latestTouchStimulus by rememberUpdatedState(touchStimulus)
+    val latestHeartRateBpm by rememberUpdatedState(heartRateBpm)
     val latestBetaLifeDoubleBlinking by rememberUpdatedState(betaLifeDoubleBlinking)
     val latestBetaLife2AsymmetricBlinking by rememberUpdatedState(betaLife2AsymmetricBlinking)
     val latestBetaLife2GazeAnticipation by rememberUpdatedState(betaLife2GazeAnticipation)
     val latestBetaLife2PosturalSettling by rememberUpdatedState(betaLife2PosturalSettling)
 
-    fun registerPhysiologicalStimulus(level: Float) {
+    fun registerPhysiologicalStimulus(level: Float, isDragMotion: Boolean = false) {
         val clamped = level.coerceIn(0f, 1f)
-        lastStimulusTouchMs = System.currentTimeMillis()
+        val nowMs = System.currentTimeMillis()
+        lastStimulusTouchMs = nowMs
         touchStimulus = max(touchStimulus, clamped)
+        lastHeartStimMs = nowMs
+        // Weight sensitivity smoothly upward toward the most sensitive active contact zone
+        heartRateSensitivity = max(heartRateSensitivity * 0.86f, clamped)
+        heartRateDrive = max(heartRateDrive, if (isDragMotion) 1.0f else 0.58f)
+        if (!isDragMotion) {
+            // Subtle immediate autonomic pulse bump on tap/contact scaled by zone sensitivity
+            val tapCeiling = VulvaGlTextureView.RESTING_HEART_RATE_BPM +
+                (VulvaGlTextureView.MAX_HEART_RATE_BPM - VulvaGlTextureView.RESTING_HEART_RATE_BPM) * (0.18f + 0.82f * clamped)
+            val tapBump = 0.6f + 2.4f * clamped
+            if (heartRateBpm < tapCeiling) {
+                heartRateBpm = (heartRateBpm + tapBump).coerceAtMost(tapCeiling)
+            }
+        }
     }
 
     fun springBackTissue(resetLegs: Boolean = false) {
@@ -446,22 +472,67 @@ fun InteractiveVulva3DCanvas(
         }
     }
 
-    // Smoothly settle touch-engagement stimulus back to calm baseline ~3.5s after tactile contact ends
+    // Smoothly integrate physiological heart rate & settle touch-engagement stimulus back to calm baseline
     LaunchedEffect(showExperimentalLegs) {
         if (!showExperimentalLegs) {
             touchStimulus = 0f
+            heartRateBpm = VulvaGlTextureView.RESTING_HEART_RATE_BPM
+            heartRateSensitivity = 0f
+            heartRateDrive = 0f
+            return@LaunchedEffect
+        }
+        var lastTickMs = System.currentTimeMillis()
+        while (true) {
+            delay(65L)
+            val nowMs = System.currentTimeMillis()
+            val dtSec = ((nowMs - lastTickMs) / 1000f).coerceIn(0.01f, 0.25f)
+            lastTickMs = nowMs
+
+            val currentStim = touchStimulus
+            if (currentStim > 0.001f) {
+                val idleMs = nowMs - lastStimulusTouchMs
+                if (idleMs > 950L) {
+                    touchStimulus = (currentStim - 0.019f).coerceAtLeast(0f)
+                }
+            }
+
+            val secsSinceHeartStim = ((nowMs - lastHeartStimMs).coerceAtLeast(0L)) / 1000f
+            if (secsSinceHeartStim > 0.28f && heartRateDrive > 0f) {
+                heartRateDrive = (heartRateDrive - dtSec * 2.2f).coerceAtLeast(0f)
+            }
+            if (secsSinceHeartStim > 1.2f && heartRateSensitivity > 0f) {
+                heartRateSensitivity = (heartRateSensitivity - dtSec * 0.18f).coerceAtLeast(0f)
+            }
+            heartRateBpm = VulvaGlTextureView.stepHeartRateBpm(
+                currentBpm = heartRateBpm,
+                dtSec = dtSec,
+                targetSensitivityGain = heartRateSensitivity,
+                activeDrive = heartRateDrive,
+                secondsSinceLastStim = secsSinceHeartStim
+            )
+        }
+    }
+
+    // Gentle beat-synchronized pulse for the optional top-left Heart Rate HUD badge
+    LaunchedEffect(showExperimentalLegs, betaLife2ShowHeartRate) {
+        if (!showExperimentalLegs || !betaLife2ShowHeartRate) {
+            heartPulseScale.snapTo(1f)
             return@LaunchedEffect
         }
         while (true) {
-            delay(100L)
-            val current = touchStimulus
-            if (current > 0.001f) {
-                val idleMs = System.currentTimeMillis() - lastStimulusTouchMs
-                if (idleMs > 950L) {
-                    val next = (current - 0.030f).coerceAtLeast(0f)
-                    touchStimulus = next
-                }
-            }
+            val bpm = latestHeartRateBpm.coerceIn(
+                VulvaGlTextureView.RESTING_HEART_RATE_BPM,
+                VulvaGlTextureView.MAX_HEART_RATE_BPM
+            )
+            val beatPeriodMs = (60_000f / bpm).roundToInt().coerceIn(380, 1050)
+            val hrNorm = VulvaGlTextureView.heartRateExertionNorm(bpm)
+            val systoleScale = 1.12f + 0.08f * hrNorm
+            val systoleMs = (beatPeriodMs * 0.18f).roundToInt().coerceIn(75, 160)
+            val diastoleMs = (beatPeriodMs * 0.28f).roundToInt().coerceIn(110, 240)
+            heartPulseScale.animateTo(systoleScale, tween(systoleMs, easing = FastOutSlowInEasing))
+            heartPulseScale.animateTo(1.0f, tween(diastoleMs, easing = FastOutSlowInEasing))
+            val pauseMs = (beatPeriodMs - systoleMs - diastoleMs).coerceAtLeast(90).toLong()
+            delay(pauseMs)
         }
     }
 
@@ -853,12 +924,15 @@ fun InteractiveVulva3DCanvas(
                 delay(420L)
                 continue
             }
-            val stim = latestTouchStimulus.coerceIn(0f, 1f)
-            val deepBeat = rng.nextFloat() < 0.24f
-            val inhaleMs = ((if (deepBeat) 1950 else 1480) + rng.nextInt(420) - (stim * 340f).roundToInt()).coerceAtLeast(850)
-            val exhaleMs = ((if (deepBeat) 2450 else 1920) + rng.nextInt(540) - (stim * 360f).roundToInt()).coerceAtLeast(980)
-            val peakNostril = ((if (deepBeat) 0.84f else 0.48f) + stim * 0.24f + rng.nextFloat() * 0.14f).coerceIn(0.32f, 1.0f)
-            val peakLip = ((if (deepBeat) 0.24f else 0.11f) + stim * 0.18f).coerceIn(0f, 0.42f)
+            val stim = max(
+                latestTouchStimulus.coerceIn(0f, 1f),
+                VulvaGlTextureView.heartRateExertionNorm(latestHeartRateBpm)
+            )
+            val deepBeat = rng.nextFloat() < (0.24f + stim * 0.18f)
+            val inhaleMs = ((if (deepBeat) 1950 else 1480) + rng.nextInt(380) - (stim * 620f).roundToInt()).coerceAtLeast(620)
+            val exhaleMs = ((if (deepBeat) 2450 else 1920) + rng.nextInt(460) - (stim * 740f).roundToInt()).coerceAtLeast(720)
+            val peakNostril = ((if (deepBeat) 0.84f else 0.48f) + stim * 0.34f + rng.nextFloat() * 0.12f).coerceIn(0.32f, 1.0f)
+            val peakLip = ((if (deepBeat) 0.24f else 0.11f) + stim * 0.26f).coerceIn(0f, 0.52f)
 
             val jInN = launch { nostrilBreath.animateTo(peakNostril, tween(inhaleMs, easing = FastOutSlowInEasing)) }
             val jInL = launch { breathLipEase.animateTo(peakLip * 0.35f, tween(inhaleMs, easing = FastOutSlowInEasing)) }
@@ -870,11 +944,11 @@ fun InteractiveVulva3DCanvas(
                 breathLipEase.animateTo(0f, tween((exhaleMs * 0.58f).roundToInt(), easing = FastOutSlowInEasing))
             }
             jExN.join(); jExL.join()
-            delay((280 + rng.nextInt(460)).toLong())
+            delay(((280 + rng.nextInt(420)) * (1f - 0.65f * stim)).roundToInt().coerceAtLeast(80).toLong())
         }
     }
 
-    // Tab 3 Lifelike+: Subtle capillary warmth across cheeks, ears & upper chest (calm organic ebb + touch response)
+    // Tab 3 Lifelike+: Subtle capillary warmth across cheeks, ears & upper chest (calm organic ebb + heart-rate response)
     LaunchedEffect(showExperimentalLegs, betaLife2LivingWarmth) {
         if (!showExperimentalLegs || !betaLife2LivingWarmth) {
             if (!showExperimentalLegs) {
@@ -886,8 +960,11 @@ fun InteractiveVulva3DCanvas(
         }
         val rng = kotlin.random.Random(System.currentTimeMillis() xor 0x4D2A8F1EL)
         while (true) {
-            val stim = latestTouchStimulus.coerceIn(0f, 1f)
-            val targetWarmth = (0.24f + rng.nextFloat() * 0.14f + stim * 0.50f).coerceIn(0.20f, 0.90f)
+            val stim = max(
+                latestTouchStimulus.coerceIn(0f, 1f),
+                VulvaGlTextureView.heartRateExertionNorm(latestHeartRateBpm)
+            )
+            val targetWarmth = (0.24f + rng.nextFloat() * 0.14f + stim * 0.56f).coerceIn(0.20f, 0.96f)
             val durMs = if (stim > 0.2f) 1100 + rng.nextInt(500) else 2400 + rng.nextInt(1800)
             livingWarmth.animateTo(targetWarmth, tween(durMs, easing = FastOutSlowInEasing))
             delay((600 + rng.nextInt(900)).toLong())
@@ -1072,14 +1149,17 @@ fun InteractiveVulva3DCanvas(
         rightGluteX = rightGluteX.value,
         rightGluteY = rightGluteY.value,
         legacyVulvaMode = legacyVulvaMode,
-        betaV2SeamOnlyPolyOffset = betaV2SeamOnlyPolyOffset,
-        betaV2NonInvertingLabiaFold = betaV2NonInvertingLabiaFold,
-        betaV2AlignedSulcus = betaV2AlignedSulcus,
-        betaV2NaturalPelvicFinish = betaV2NaturalPelvicFinish,
-        betaV2BalancedUpperVulvaDepth = betaV2BalancedUpperVulvaDepth,
-        betaV2BalancedUpperVulvaDepthWithCrest = betaV2BalancedUpperVulvaDepthWithCrest,
-        betaV2AdjustableVestibularConcavity = betaV2AdjustableVestibularConcavity,
-        betaV2VestibularConcavity = betaV2VestibularConcavity,
+        betaV3OrganicContinuity = betaV3OrganicContinuity,
+        betaV3ContinuityStrength = betaV3ContinuityStrength,
+        betaV3SoftPigmentation = betaV3SoftPigmentation,
+        betaV3PigmentStrength = betaV3PigmentStrength,
+        betaV3AnatomicalAsymmetry = betaV3AnatomicalAsymmetry,
+        betaV3AsymmetryStrength = betaV3AsymmetryStrength,
+        betaV3RegionalSurfaceDetail = betaV3RegionalSurfaceDetail,
+        betaV3SurfaceStrength = betaV3SurfaceStrength,
+        betaV3NaturalLighting = betaV3NaturalLighting,
+        betaV3LightingStrength = betaV3LightingStrength,
+        betaBreastSizeBoost = betaBreastSizeBoost,
         eyeGazeX = (eyeGazeX.value + anticipationGazeX.value).coerceIn(-1f, 1f),
         eyeGazeY = (eyeGazeY.value + anticipationGazeY.value).coerceIn(-1f, 1f),
         headRollOffset = idleHeadRoll.value + settleHeadRoll.value,
@@ -1167,6 +1247,7 @@ fun InteractiveVulva3DCanvas(
                         glView.dramaticSideLight = dramaticSideLight
                         glView.showExperimentalLegs = showExperimentalLegs
                         glView.touchStimulus = touchStimulus
+                        glView.heartRateBpm = heartRateBpm
                         glView.requestFrame()
                     },
                     onRelease = { glView ->
@@ -1306,6 +1387,7 @@ fun InteractiveVulva3DCanvas(
                                             rightBreastX = rightBreastX.value,
                                             rightBreastY = rightBreastY.value,
                                             breastSize = breastSize,
+                                            betaBreastSizeBoost = betaBreastSizeBoost,
                                             leftLegSpread = leftLegSpread.value,
                                             rightLegSpread = rightLegSpread.value,
                                             selfSpreadPose = selfSpreadPose.value,
@@ -1365,16 +1447,22 @@ fun InteractiveVulva3DCanvas(
                                                     }
                                                     TouchTargetZone.LEFT_BREAST,
                                                     TouchTargetZone.RIGHT_BREAST -> {
-                                                        registerPhysiologicalStimulus(0.55f)
+                                                        registerPhysiologicalStimulus(0.54f, isDragMotion = false)
                                                         if (latestHapticsEnabled) {
                                                             hapticsEngine.triggerTap(SensitivityTier.HIGH)
                                                         }
                                                     }
+                                                    TouchTargetZone.LEFT_GLUTE,
+                                                    TouchTargetZone.RIGHT_GLUTE -> {
+                                                        registerPhysiologicalStimulus(0.26f, isDragMotion = false)
+                                                        if (latestHapticsEnabled) {
+                                                            hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                                        }
+                                                    }
                                                     TouchTargetZone.LEFT_LEG,
                                                     TouchTargetZone.RIGHT_LEG,
-                                                    TouchTargetZone.LEFT_GLUTE,
-                                                    TouchTargetZone.RIGHT_GLUTE,
                                                     TouchTargetZone.HEAD -> {
+                                                        registerPhysiologicalStimulus(0.18f, isDragMotion = false)
                                                         if (latestHapticsEnabled) {
                                                             hapticsEngine.triggerTap(SensitivityTier.MODERATE)
                                                         }
@@ -1386,9 +1474,13 @@ fun InteractiveVulva3DCanvas(
                                                             deform = liveDeform,
                                                             parts = latestParts
                                                         )
-                                                        val isClitoralHit = hit?.id == "ext_glans" || hit?.id == "ext_hood" ||
-                                                            hit?.sensitivityTier == SensitivityTier.ULTRA
-                                                        registerPhysiologicalStimulus(if (isClitoralHit) 1.0f else 0.62f)
+                                                        val vulvaSens = when {
+                                                            hit?.id == "ext_glans" -> 1.00f
+                                                            hit?.id == "ext_hood" || hit?.sensitivityTier == SensitivityTier.ULTRA -> 0.86f
+                                                            hit?.sensitivityTier == SensitivityTier.HIGH -> 0.68f
+                                                            else -> 0.44f
+                                                        }
+                                                        registerPhysiologicalStimulus(vulvaSens, isDragMotion = false)
                                                         if (hit != null) {
                                                             lastHitPartId = hit.id
                                                             trigger3DSensory(hit, startLocal.x, startLocal.y, isDrag = false)
@@ -1409,7 +1501,7 @@ fun InteractiveVulva3DCanvas(
                                                         dLeftBreastX += rawDx * breastGain
                                                         dLeftBreastY += -rawDy * breastGain
                                                         if (hypot(rawDx, rawDy) > 0.002f) {
-                                                            registerPhysiologicalStimulus(0.58f)
+                                                            registerPhysiologicalStimulus(0.58f, isDragMotion = true)
                                                         }
                                                         val nowMs = System.currentTimeMillis()
                                                         if (hypot(rawDx, rawDy) > 0.005f && nowMs - lastDragFeedbackMs >= 110L) {
@@ -1424,7 +1516,7 @@ fun InteractiveVulva3DCanvas(
                                                         dRightBreastX += rawDx * breastGain
                                                         dRightBreastY += -rawDy * breastGain
                                                         if (hypot(rawDx, rawDy) > 0.002f) {
-                                                            registerPhysiologicalStimulus(0.58f)
+                                                            registerPhysiologicalStimulus(0.58f, isDragMotion = true)
                                                         }
                                                         val nowMs = System.currentTimeMillis()
                                                         if (hypot(rawDx, rawDy) > 0.005f && nowMs - lastDragFeedbackMs >= 110L) {
@@ -1437,6 +1529,9 @@ fun InteractiveVulva3DCanvas(
                                                     TouchTargetZone.LEFT_LEG -> {
                                                         val legGain = (1.55f / zoomScale.coerceAtLeast(0.16f)).coerceIn(2.4f, 8.0f)
                                                         dLeftLeg += (-rawDx) * legGain
+                                                        if (abs(rawDx) > 0.003f) {
+                                                            registerPhysiologicalStimulus(0.20f, isDragMotion = true)
+                                                        }
                                                         val nowMs = System.currentTimeMillis()
                                                         if (abs(rawDx) > 0.005f && nowMs - lastDragFeedbackMs >= 120L) {
                                                             lastDragFeedbackMs = nowMs
@@ -1448,6 +1543,9 @@ fun InteractiveVulva3DCanvas(
                                                     TouchTargetZone.RIGHT_LEG -> {
                                                         val legGain = (1.55f / zoomScale.coerceAtLeast(0.16f)).coerceIn(2.4f, 8.0f)
                                                         dRightLeg += rawDx * legGain
+                                                        if (abs(rawDx) > 0.003f) {
+                                                            registerPhysiologicalStimulus(0.20f, isDragMotion = true)
+                                                        }
                                                         val nowMs = System.currentTimeMillis()
                                                         if (abs(rawDx) > 0.005f && nowMs - lastDragFeedbackMs >= 120L) {
                                                             lastDragFeedbackMs = nowMs
@@ -1460,6 +1558,9 @@ fun InteractiveVulva3DCanvas(
                                                         val gluteGain = (1.50f / zoomScale.coerceAtLeast(0.20f)).coerceIn(2.4f, 6.8f)
                                                         dLeftGluteX += rawDx * gluteGain
                                                         dLeftGluteY += -rawDy * gluteGain
+                                                        if (hypot(rawDx, rawDy) > 0.003f) {
+                                                            registerPhysiologicalStimulus(0.28f, isDragMotion = true)
+                                                        }
                                                         val nowMs = System.currentTimeMillis()
                                                         if (hypot(rawDx, rawDy) > 0.006f && nowMs - lastDragFeedbackMs >= 125L) {
                                                             lastDragFeedbackMs = nowMs
@@ -1472,6 +1573,9 @@ fun InteractiveVulva3DCanvas(
                                                         val gluteGain = (1.50f / zoomScale.coerceAtLeast(0.20f)).coerceIn(2.4f, 6.8f)
                                                         dRightGluteX += rawDx * gluteGain
                                                         dRightGluteY += -rawDy * gluteGain
+                                                        if (hypot(rawDx, rawDy) > 0.003f) {
+                                                            registerPhysiologicalStimulus(0.28f, isDragMotion = true)
+                                                        }
                                                         val nowMs = System.currentTimeMillis()
                                                         if (hypot(rawDx, rawDy) > 0.006f && nowMs - lastDragFeedbackMs >= 125L) {
                                                             lastDragFeedbackMs = nowMs
@@ -1530,9 +1634,13 @@ fun InteractiveVulva3DCanvas(
                                                                 deform = liveDeform,
                                                                 parts = latestParts
                                                             )
-                                                            val isClitDrag = inHoodZone || dragHit?.id == "ext_glans" ||
-                                                                dragHit?.id == "ext_hood" || dragHit?.sensitivityTier == SensitivityTier.ULTRA
-                                                            registerPhysiologicalStimulus(if (isClitDrag) 1.0f else 0.64f)
+                                                            val dragSens = when {
+                                                                dragHit?.id == "ext_glans" -> 1.00f
+                                                                inHoodZone || dragHit?.id == "ext_hood" || dragHit?.sensitivityTier == SensitivityTier.ULTRA -> 0.88f
+                                                                dragHit?.sensitivityTier == SensitivityTier.HIGH -> 0.70f
+                                                                else -> 0.46f
+                                                            }
+                                                            registerPhysiologicalStimulus(dragSens, isDragMotion = true)
                                                             if (hypot(dxNorm, dyNorm) > 0.004f && nowMs - lastDragFeedbackMs >= 85L &&
                                                                 dragHit != null && (dragHit.id != lastHitPartId || nowMs - lastDragFeedbackMs >= 135L)
                                                             ) {
@@ -1700,15 +1808,73 @@ fun InteractiveVulva3DCanvas(
                     }
                 }
 
+                // Optional Live Heart Rate (BPM) HUD Pill anchored top-left over the 3D viewport
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showExperimentalLegs && betaLife2ShowHeartRate,
+                    enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = 0.92f),
+                    exit = fadeOut(tween(140)) + scaleOut(tween(140), targetScale = 0.94f),
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(10.dp)
+                ) {
+                    val bpmInt = heartRateBpm.roundToInt()
+                    val hrNorm = VulvaGlTextureView.heartRateExertionNorm(heartRateBpm)
+                    val heartTint = Color(
+                        red = 1.0f,
+                        green = (0.48f - 0.18f * hrNorm).coerceIn(0.24f, 0.55f),
+                        blue = (0.56f - 0.24f * hrNorm).coerceIn(0.26f, 0.60f),
+                        alpha = 1.0f
+                    )
+                    Surface(
+                        modifier = Modifier
+                            .testTag("heart_rate_hud_pill")
+                            .semantics {
+                                contentDescription = "Heart rate $bpmInt beats per minute"
+                            },
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color(0xFF1D1416).copy(alpha = 0.80f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            width = 1.dp,
+                            color = heartTint.copy(alpha = 0.32f + 0.38f * hrNorm)
+                        ),
+                        shadowElevation = 4.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Favorite,
+                                contentDescription = null,
+                                tint = heartTint,
+                                modifier = Modifier
+                                    .size(15.dp)
+                                    .scale(heartPulseScale.value)
+                            )
+                            Text(
+                                text = "$bpmInt",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "BPM",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.72f)
+                            )
+                        }
+                    }
+                }
+
                 // Always-on-top Floating Hamburger Beta Menu (Vulva + Life + Life+)
                 val activeVulvaBetaCount = listOf(
-                    betaV2SeamOnlyPolyOffset,
-                    betaV2NonInvertingLabiaFold,
-                    betaV2AlignedSulcus,
-                    betaV2NaturalPelvicFinish,
-                    betaV2BalancedUpperVulvaDepth,
-                    betaV2BalancedUpperVulvaDepthWithCrest,
-                    betaV2AdjustableVestibularConcavity
+                    betaV3OrganicContinuity,
+                    betaV3SoftPigmentation,
+                    betaV3AnatomicalAsymmetry,
+                    betaV3RegionalSurfaceDetail,
+                    betaV3NaturalLighting,
+                    betaBreastSizeBoost
                 ).count { it }
                 val activeLifelikeBetaCount = listOf(
                     betaLifeEyeMicrosaccades,
@@ -1725,7 +1891,8 @@ fun InteractiveVulva3DCanvas(
                     betaLife2SubtleSwallowing,
                     betaLife2PosturalSettling,
                     betaLife2BreathFaceCoupling,
-                    betaLife2LivingWarmth
+                    betaLife2LivingWarmth,
+                    betaLife2ShowHeartRate
                 ).count { it }
                 val totalActiveBetaCount = activeVulvaBetaCount + activeLifelikeBetaCount + activeLifelike2BetaCount
 
@@ -1841,14 +2008,17 @@ fun InteractiveVulva3DCanvas(
                                             .heightIn(min = 48.dp)
                                             .clip(RoundedCornerShape(12.dp))
                                             .clickable {
-                                                betaV2SeamOnlyPolyOffset = false
-                                                betaV2NonInvertingLabiaFold = false
-                                                betaV2AlignedSulcus = false
-                                                betaV2NaturalPelvicFinish = false
-                                                betaV2BalancedUpperVulvaDepth = false
-                                                betaV2BalancedUpperVulvaDepthWithCrest = false
-                                                betaV2AdjustableVestibularConcavity = false
-                                                betaV2VestibularConcavity = 0.30f
+                                                betaV3OrganicContinuity = false
+                                                betaV3ContinuityStrength = 0.65f
+                                                betaV3SoftPigmentation = false
+                                                betaV3PigmentStrength = 0.70f
+                                                betaV3AnatomicalAsymmetry = false
+                                                betaV3AsymmetryStrength = 0.65f
+                                                betaV3RegionalSurfaceDetail = false
+                                                betaV3SurfaceStrength = 0.65f
+                                                betaV3NaturalLighting = false
+                                                betaV3LightingStrength = 0.70f
+                                                betaBreastSizeBoost = false
                                                 betaLifeEyeMicrosaccades = false
                                                 betaLifeDoubleBlinking = false
                                                 betaLifeHeadRepositioning = false
@@ -1862,6 +2032,7 @@ fun InteractiveVulva3DCanvas(
                                                 betaLife2PosturalSettling = false
                                                 betaLife2BreathFaceCoupling = false
                                                 betaLife2LivingWarmth = false
+                                                betaLife2ShowHeartRate = false
                                                 if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
                                             }
                                             .testTag("beta_reset_all_button")
@@ -1928,151 +2099,138 @@ fun InteractiveVulva3DCanvas(
                                     .verticalScroll(panelScroll)
                             ) {
                                 if (betaMenuTab == 0) {
+                                    Text(
+                                        text = "Anatomical realism pass v3 & proportion options (OFF by default)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                    )
                                     VulvaBetaToggleRow(
-                                        title = "1. Seam-only depth offset",
-                                        subtitle = "Restricts patch polygon offset to the outer seam ring and keeps lower tips above the patch",
-                                        checked = betaV2SeamOnlyPolyOffset,
-                                        tag = "toggle_beta_v2_seam_poly_offset",
+                                        title = "1. Organic tissue continuity",
+                                        subtitle = "Softens labial cushion slopes, commissure bridges & sulcus transitions",
+                                        checked = betaV3OrganicContinuity,
+                                        tag = "toggle_beta_v3_organic_continuity",
                                         compact = true,
                                         onToggle = {
-                                            betaV2SeamOnlyPolyOffset = !betaV2SeamOnlyPolyOffset
+                                            betaV3OrganicContinuity = !betaV3OrganicContinuity
                                             if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
                                         }
                                     )
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 12.dp),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
-                                    )
-                                    VulvaBetaToggleRow(
-                                        title = "2. Non-inverting fold geometry",
-                                        subtitle = "Expands outer labial skirt dynamically when parted and prevents midline/glans clipping",
-                                        checked = betaV2NonInvertingLabiaFold,
-                                        tag = "toggle_beta_v2_non_inverting_fold",
-                                        compact = true,
-                                        onToggle = {
-                                            betaV2NonInvertingLabiaFold = !betaV2NonInvertingLabiaFold
-                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
-                                        }
-                                    )
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 12.dp),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
-                                    )
-                                    VulvaBetaToggleRow(
-                                        title = "3. Aligned interlabial sulcus",
-                                        subtitle = "Shifts and softens the interlabial groove cleanly between inner and outer labia",
-                                        checked = betaV2AlignedSulcus,
-                                        tag = "toggle_beta_v2_aligned_sulcus",
-                                        compact = true,
-                                        onToggle = {
-                                            betaV2AlignedSulcus = !betaV2AlignedSulcus
-                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
-                                        }
-                                    )
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 12.dp),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
-                                    )
-                                    VulvaBetaToggleRow(
-                                        title = "4. Natural satin-velvet finish",
-                                        subtitle = "Damps grazing rim glare and broad specular polish on pelvic folds only",
-                                        checked = betaV2NaturalPelvicFinish,
-                                        tag = "toggle_beta_v2_natural_pelvic_finish",
-                                        compact = true,
-                                        onToggle = {
-                                            betaV2NaturalPelvicFinish = !betaV2NaturalPelvicFinish
-                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
-                                        }
-                                    )
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 12.dp),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
-                                    )
-                                    VulvaBetaToggleRow(
-                                        title = "5. Balanced upper vulva depth (Step 1)",
-                                        subtitle = "Gently tapers the upper vestibular floor above the urethra to reduce oblique recession",
-                                        checked = betaV2BalancedUpperVulvaDepth,
-                                        tag = "toggle_beta_v2_balanced_upper_depth",
-                                        compact = true,
-                                        onToggle = {
-                                            betaV2BalancedUpperVulvaDepth = !betaV2BalancedUpperVulvaDepth
-                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
-                                        }
-                                    )
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 12.dp),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
-                                    )
-                                    VulvaBetaToggleRow(
-                                        title = "6. Upper depth + hood crest (Steps 1 & 2)",
-                                        subtitle = "Enables Step 1 floor taper plus a subtle anterior clitoral hood fullness boost",
-                                        checked = betaV2BalancedUpperVulvaDepthWithCrest,
-                                        tag = "toggle_beta_v2_balanced_upper_depth_with_crest",
-                                        compact = true,
-                                        onToggle = {
-                                            betaV2BalancedUpperVulvaDepthWithCrest = !betaV2BalancedUpperVulvaDepthWithCrest
-                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
-                                        }
-                                    )
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 12.dp),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
-                                    )
-                                    VulvaBetaToggleRow(
-                                        title = "7. Adjustable vestibular concavity",
-                                        subtitle = "Softens uniform basin concavity & steep edges while preserving vaginal canal depth",
-                                        checked = betaV2AdjustableVestibularConcavity,
-                                        tag = "toggle_beta_v2_vestibular_concavity",
-                                        compact = true,
-                                        onToggle = {
-                                            betaV2AdjustableVestibularConcavity = !betaV2AdjustableVestibularConcavity
-                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
-                                        }
-                                    )
-                                    AnimatedVisibility(visible = betaV2AdjustableVestibularConcavity) {
-                                        val pct = (betaV2VestibularConcavity * 100f).roundToInt()
-                                        val concLabel = when {
-                                            pct <= 15 -> "Flattest"
-                                            pct <= 40 -> "Shallow"
-                                            pct <= 70 -> "Soft"
-                                            pct < 98 -> "Deep"
-                                            else -> "Baseline"
-                                        }
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(start = 14.dp, end = 14.dp, bottom = 8.dp)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = "Concavity · $concLabel",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = MaterialTheme.colorScheme.primary
-                                                )
-                                                Text(
-                                                    text = "$pct%",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                            Slider(
-                                                value = betaV2VestibularConcavity,
-                                                onValueChange = { betaV2VestibularConcavity = it },
-                                                valueRange = 0f..1f,
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .testTag("slider_beta_v2_vestibular_concavity")
-                                                    .semantics {
-                                                        contentDescription = "Adjust vestibular concavity, currently $pct percent, $concLabel"
-                                                    }
-                                            )
-                                        }
+                                    AnimatedVisibility(visible = betaV3OrganicContinuity) {
+                                        BetaStrengthSliderRow(
+                                            label = "Continuity strength",
+                                            value = betaV3ContinuityStrength,
+                                            tag = "slider_beta_v3_continuity_strength",
+                                            onValueChange = { betaV3ContinuityStrength = it }
+                                        )
                                     }
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "2. Soft spatial pigmentation",
+                                        subtitle = "Organically varies mucocutaneous edges & subtle vascular/melanin tones",
+                                        checked = betaV3SoftPigmentation,
+                                        tag = "toggle_beta_v3_soft_pigmentation",
+                                        compact = true,
+                                        onToggle = {
+                                            betaV3SoftPigmentation = !betaV3SoftPigmentation
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    AnimatedVisibility(visible = betaV3SoftPigmentation) {
+                                        BetaStrengthSliderRow(
+                                            label = "Pigmentation blend",
+                                            value = betaV3PigmentStrength,
+                                            tag = "slider_beta_v3_pigment_strength",
+                                            onValueChange = { betaV3PigmentStrength = it }
+                                        )
+                                    }
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "3. Subtle anatomical asymmetry",
+                                        subtitle = "Natural bilateral fullness, lobe contour & fold variation",
+                                        checked = betaV3AnatomicalAsymmetry,
+                                        tag = "toggle_beta_v3_anatomical_asymmetry",
+                                        compact = true,
+                                        onToggle = {
+                                            betaV3AnatomicalAsymmetry = !betaV3AnatomicalAsymmetry
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    AnimatedVisibility(visible = betaV3AnatomicalAsymmetry) {
+                                        BetaStrengthSliderRow(
+                                            label = "Asymmetry strength",
+                                            value = betaV3AsymmetryStrength,
+                                            tag = "slider_beta_v3_asymmetry_strength",
+                                            onValueChange = { betaV3AsymmetryStrength = it }
+                                        )
+                                    }
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "4. Regional curvature & material",
+                                        subtitle = "Differentiates outer skin grain, transitional satin, moist mucosa & glans",
+                                        checked = betaV3RegionalSurfaceDetail,
+                                        tag = "toggle_beta_v3_regional_surface",
+                                        compact = true,
+                                        onToggle = {
+                                            betaV3RegionalSurfaceDetail = !betaV3RegionalSurfaceDetail
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    AnimatedVisibility(visible = betaV3RegionalSurfaceDetail) {
+                                        BetaStrengthSliderRow(
+                                            label = "Surface detail strength",
+                                            value = betaV3SurfaceStrength,
+                                            tag = "slider_beta_v3_surface_strength",
+                                            onValueChange = { betaV3SurfaceStrength = it }
+                                        )
+                                    }
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "5. Natural lighting & shadows",
+                                        subtitle = "Softens pelvic shadow penumbras with warm cavity bounce while keeping landmarks crisp",
+                                        checked = betaV3NaturalLighting,
+                                        tag = "toggle_beta_v3_natural_lighting",
+                                        compact = true,
+                                        onToggle = {
+                                            betaV3NaturalLighting = !betaV3NaturalLighting
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    AnimatedVisibility(visible = betaV3NaturalLighting) {
+                                        BetaStrengthSliderRow(
+                                            label = "Lighting softness",
+                                            value = betaV3LightingStrength,
+                                            tag = "slider_beta_v3_lighting_strength",
+                                            onValueChange = { betaV3LightingStrength = it }
+                                        )
+                                    }
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "Breast size boost (+15%)",
+                                        subtitle = "Increases breast size ~15% across slider settings except the most petite",
+                                        checked = betaBreastSizeBoost,
+                                        tag = "toggle_beta_breast_size_boost",
+                                        compact = true,
+                                        onToggle = {
+                                            betaBreastSizeBoost = !betaBreastSizeBoost
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
                                 } else if (betaMenuTab == 1) {
                                     Text(
                                         text = "Subtle, irregular micro-behaviors (promoted ON by default)",
@@ -2271,6 +2429,21 @@ fun InteractiveVulva3DCanvas(
                                         compact = true,
                                         onToggle = {
                                             betaLife2LivingWarmth = !betaLife2LivingWarmth
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "Show heart rate (BPM)",
+                                        subtitle = "Displays Blossom's live stimulation-linked heart rate in the top-left corner",
+                                        checked = betaLife2ShowHeartRate,
+                                        tag = "toggle_beta_life2_show_heart_rate",
+                                        compact = true,
+                                        onToggle = {
+                                            betaLife2ShowHeartRate = !betaLife2ShowHeartRate
                                             if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
                                         }
                                     )
@@ -2718,6 +2891,51 @@ private fun VulvaBetaToggleRow(
         Switch(
             checked = checked,
             onCheckedChange = null
+        )
+    }
+}
+
+@Composable
+private fun BetaStrengthSliderRow(
+    label: String,
+    value: Float,
+    tag: String,
+    onValueChange: (Float) -> Unit
+) {
+    val pct = (value.coerceIn(0f, 1f) * 100f).roundToInt()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 12.dp, bottom = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "$pct%",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        Slider(
+            value = value.coerceIn(0f, 1f),
+            onValueChange = onValueChange,
+            valueRange = 0f..1f,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(tag)
+                .semantics {
+                    contentDescription = "$label, $pct percent"
+                }
         )
     }
 }
