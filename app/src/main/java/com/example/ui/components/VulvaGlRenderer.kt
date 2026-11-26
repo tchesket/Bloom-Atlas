@@ -123,6 +123,15 @@ class VulvaGlTextureView(
     var heartRateBpm: Float = RESTING_HEART_RATE_BPM
 
     @Volatile
+    var peakBreathActive: Boolean = false
+
+    @Volatile
+    var postPeakSighToken: Int = 0
+
+    @Volatile
+    var postPeakSighCount: Int = 2
+
+    @Volatile
     private var lastAppliedDeformation: VulvaDeformationState? = null
 
     @Volatile
@@ -207,6 +216,7 @@ class VulvaGlTextureView(
     private var uBetaV3RegionalMaterialLoc = -1
     private var uBetaV3LabialVestibuleBlendLoc = -1
     private var uBetaV3IntricateLabiaFoldsLoc = -1
+    private var uBetaV3MedialRootContinuityLoc = -1
     private var uIsLabiaArchMeshLoc = -1
 
     private var surfaceWidth = 1
@@ -233,6 +243,12 @@ class VulvaGlTextureView(
     private var breathCycleDepthMul = 1.0f
     private var breathCycleIsSigh = false
     private var cyclesUntilNextSigh = 2
+    private var lastPeakBreathActive = false
+    private var peakCycleFreqHz = 0.78f
+    private var peakCycleDepthMul = 1.48f
+    private var lastHandledPostPeakSighToken = 0
+    private var pendingPostPeakSighs = 0
+    private var inPostPeakSigh = false
 
     private val breathTicker = Runnable {
         val session = synchronized(sessionLock) {
@@ -552,6 +568,7 @@ class VulvaGlTextureView(
         uBetaV3RegionalMaterialLoc = GLES20.glGetUniformLocation(program, "uBetaV3RegionalMaterial")
         uBetaV3LabialVestibuleBlendLoc = GLES20.glGetUniformLocation(program, "uBetaV3LabialVestibuleBlend")
         uBetaV3IntricateLabiaFoldsLoc = GLES20.glGetUniformLocation(program, "uBetaV3IntricateLabiaFolds")
+        uBetaV3MedialRootContinuityLoc = GLES20.glGetUniformLocation(program, "uBetaV3MedialRootContinuity")
         uIsLabiaArchMeshLoc = GLES20.glGetUniformLocation(program, "uIsLabiaArchMesh")
 
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
@@ -648,34 +665,109 @@ class VulvaGlTextureView(
             }
         }
         val activeBreathFreq = breathFrequencyHzForHeartRate(liveBpm, smoothedStimulus)
+        val peakActiveNow = legsMode && peakBreathActive
+        if (peakActiveNow != lastPeakBreathActive) {
+            lastPeakBreathActive = peakActiveNow
+            if (peakActiveNow) {
+                pendingPostPeakSighs = 0
+                inPostPeakSigh = false
+                breathCycleIsSigh = false
+                peakCycleFreqHz = 0.64f + breathRng.nextFloat() * 0.32f
+                peakCycleDepthMul = 1.28f + breathRng.nextFloat() * 0.46f
+            }
+        }
+        val sighTokenNow = postPeakSighToken
+        if (sighTokenNow != lastHandledPostPeakSighToken) {
+            lastHandledPostPeakSighToken = sighTokenNow
+            if (legsMode && !peakActiveNow) {
+                pendingPostPeakSighs = postPeakSighCount.coerceIn(2, 3)
+                inPostPeakSigh = true
+                breathPhase = 0f
+                breathCycleIsSigh = true
+                breathCycleFreqMul = 0.48f + breathRng.nextFloat() * 0.08f
+                breathCycleDepthMul = 1.82f + breathRng.nextFloat() * 0.18f
+            }
+        }
         if (legsMode) {
-            if (!deepBreathsEnabled) {
-                breathPhase = (breathPhase + dtSec * activeBreathFreq) % 1.0f
-            } else {
-                // During elevated heart rate, taper random slow-sigh intervals toward steadier rapid exertion breaths
-                val effCycleFreqMul = 1.0f + (breathCycleFreqMul - 1.0f) * (1.0f - 0.65f * liveHrNorm)
-                val nextPhase = breathPhase + dtSec * activeBreathFreq * effCycleFreqMul
-                if (nextPhase >= 1.0f) {
-                    breathPhase = nextPhase % 1.0f
-                    cyclesUntilNextSigh--
-                    if (cyclesUntilNextSigh <= 0 && liveHrNorm < 0.55f) {
-                        breathCycleIsSigh = true
-                        breathCycleFreqMul = 0.64f + breathRng.nextFloat() * 0.12f
-                        breathCycleDepthMul = 1.56f + breathRng.nextFloat() * 0.34f
-                        cyclesUntilNextSigh = 4 + breathRng.nextInt(5)
+            when {
+                peakActiveNow -> {
+                    // Peak ~10s exertion episode: very fast, very heavy, irregular breath speed & fullness
+                    val nextPhase = breathPhase + dtSec * peakCycleFreqHz
+                    if (nextPhase >= 1.0f) {
+                        breathPhase = nextPhase % 1.0f
+                        peakCycleFreqHz = 0.60f + breathRng.nextFloat() * 0.38f
+                        peakCycleDepthMul = 1.22f + breathRng.nextFloat() * 0.56f
                     } else {
-                        breathCycleIsSigh = false
-                        breathCycleFreqMul = 0.89f + breathRng.nextFloat() * 0.22f
-                        breathCycleDepthMul = 0.86f + breathRng.nextFloat() * 0.28f
-                        if (cyclesUntilNextSigh <= 0) cyclesUntilNextSigh = 3 + breathRng.nextInt(3)
+                        breathPhase = nextPhase
                     }
-                } else {
-                    breathPhase = nextPhase
+                }
+                inPostPeakSigh -> {
+                    // Post-peak afterglow: 2 or 3 powerful, slow recovery sighs (~0.18–0.22 Hz each)
+                    val sighFreqHz = (0.205f * (0.88f + 0.24f * (breathCycleFreqMul - 0.48f) / 0.08f)).coerceIn(0.16f, 0.24f)
+                    val nextPhase = breathPhase + dtSec * sighFreqHz
+                    if (nextPhase >= 1.0f) {
+                        breathPhase = nextPhase % 1.0f
+                        pendingPostPeakSighs--
+                        if (pendingPostPeakSighs > 0) {
+                            breathCycleIsSigh = true
+                            breathCycleFreqMul = 0.48f + breathRng.nextFloat() * 0.08f
+                            breathCycleDepthMul = 1.78f + breathRng.nextFloat() * 0.22f
+                        } else {
+                            inPostPeakSigh = false
+                            breathCycleIsSigh = false
+                            breathCycleFreqMul = 0.92f + breathRng.nextFloat() * 0.16f
+                            breathCycleDepthMul = 0.94f + breathRng.nextFloat() * 0.18f
+                            cyclesUntilNextSigh = 3 + breathRng.nextInt(4)
+                        }
+                    } else {
+                        breathPhase = nextPhase
+                    }
+                }
+                !deepBreathsEnabled -> {
+                    breathPhase = (breathPhase + dtSec * activeBreathFreq) % 1.0f
+                }
+                else -> {
+                    // During elevated heart rate, taper random slow-sigh intervals toward steadier rapid exertion breaths
+                    val effCycleFreqMul = 1.0f + (breathCycleFreqMul - 1.0f) * (1.0f - 0.65f * liveHrNorm)
+                    val nextPhase = breathPhase + dtSec * activeBreathFreq * effCycleFreqMul
+                    if (nextPhase >= 1.0f) {
+                        breathPhase = nextPhase % 1.0f
+                        cyclesUntilNextSigh--
+                        if (cyclesUntilNextSigh <= 0 && liveHrNorm < 0.55f) {
+                            breathCycleIsSigh = true
+                            breathCycleFreqMul = 0.64f + breathRng.nextFloat() * 0.12f
+                            breathCycleDepthMul = 1.56f + breathRng.nextFloat() * 0.34f
+                            cyclesUntilNextSigh = 4 + breathRng.nextInt(5)
+                        } else {
+                            breathCycleIsSigh = false
+                            breathCycleFreqMul = 0.89f + breathRng.nextFloat() * 0.22f
+                            breathCycleDepthMul = 0.86f + breathRng.nextFloat() * 0.28f
+                            if (cyclesUntilNextSigh <= 0) cyclesUntilNextSigh = 3 + breathRng.nextInt(3)
+                        }
+                    } else {
+                        breathPhase = nextPhase
+                    }
                 }
             }
         }
         val breathDisp = when {
             !legsMode -> Pair(0f, 0f)
+            peakActiveNow -> evaluateHeartRateBreathingDisplacement(
+                phaseCycles = breathPhase,
+                bpm = liveBpm,
+                stimulus = 1f,
+                isSighCycle = false,
+                depthMultiplier = peakCycleDepthMul,
+                peakMode = true
+            )
+            inPostPeakSigh -> evaluateHeartRateBreathingDisplacement(
+                phaseCycles = breathPhase,
+                bpm = liveBpm,
+                stimulus = smoothedStimulus,
+                isSighCycle = true,
+                depthMultiplier = breathCycleDepthMul,
+                forcePowerfulSigh = true
+            )
             !deepBreathsEnabled -> evaluateHeartRateBreathingDisplacement(
                 phaseCycles = breathPhase,
                 bpm = liveBpm,
@@ -711,6 +803,10 @@ class VulvaGlTextureView(
         GLES20.glUniform1f(
             uBetaV3IntricateLabiaFoldsLoc,
             if (currentDeform.betaV3IntricateLabiaFolds) currentDeform.betaV3LabiaFoldsStrength.coerceIn(0f, 1f) else 0f
+        )
+        GLES20.glUniform1f(
+            uBetaV3MedialRootContinuityLoc,
+            if (currentDeform.betaV3MedialRootContinuity) currentDeform.betaV3MedialRootStrength.coerceIn(0f, 1f) else 0f
         )
 
         GLES20.glEnableVertexAttribArray(aPosLoc)
@@ -1318,13 +1414,15 @@ class VulvaGlTextureView(
             dtSec: Float,
             targetSensitivityGain: Float,
             activeDrive: Float,
-            secondsSinceLastStim: Float
+            secondsSinceLastStim: Float,
+            recoveryRateMultiplier: Float = 1f,
+            forceRecovery: Boolean = false
         ): Float {
             val dt = dtSec.coerceIn(0f, 0.25f)
             if (dt <= 0f) return currentBpm.coerceIn(RESTING_HEART_RATE_BPM, MAX_HEART_RATE_BPM)
             val sens = targetSensitivityGain.coerceIn(0f, 1f)
             val drive = activeDrive.coerceIn(0f, 1f)
-            if (drive > 0.01f && sens > 0.01f) {
+            if (!forceRecovery && drive > 0.01f && sens > 0.01f) {
                 val ceilingBpm = RESTING_HEART_RATE_BPM +
                     (MAX_HEART_RATE_BPM - RESTING_HEART_RATE_BPM) * (0.18f + 0.82f * sens)
                 if (currentBpm < ceilingBpm) {
@@ -1338,8 +1436,9 @@ class VulvaGlTextureView(
                     .coerceIn(RESTING_HEART_RATE_BPM, MAX_HEART_RATE_BPM)
             }
             // Brief ~1.2s sympathetic inertia after touch stops, then smooth parasympathetic recovery
-            val recoveryRamp = ((secondsSinceLastStim - 1.1f) / 1.4f).coerceIn(0.10f, 1f)
-            val tauSec = 17.0f
+            // (post-peak 6s recovery passes recoveryRateMultiplier = 2.0f, forceRecovery = true for 2x cooldown)
+            val recoveryRamp = if (forceRecovery) 1f else ((secondsSinceLastStim - 1.1f) / 1.4f).coerceIn(0.10f, 1f)
+            val tauSec = 17.0f / recoveryRateMultiplier.coerceAtLeast(0.1f)
             val decayAlpha = 1f - kotlin.math.exp(-dt * recoveryRamp / tauSec)
             val next = currentBpm + (RESTING_HEART_RATE_BPM - currentBpm) * decayAlpha
             return if (next - RESTING_HEART_RATE_BPM < 0.05f) RESTING_HEART_RATE_BPM else next
@@ -1393,10 +1492,12 @@ class VulvaGlTextureView(
             bpm: Float,
             stimulus: Float = 0f,
             isSighCycle: Boolean = false,
-            depthMultiplier: Float = 1f
+            depthMultiplier: Float = 1f,
+            peakMode: Boolean = false,
+            forcePowerfulSigh: Boolean = false
         ): Pair<Float, Float> {
             val hrNorm = heartRateExertionNorm(bpm)
-            if (hrNorm <= 1e-4f) {
+            if (hrNorm <= 1e-4f && !peakMode && !forcePowerfulSigh) {
                 return if (!isSighCycle && kotlin.math.abs(depthMultiplier - 1f) <= 1e-4f) {
                     evaluateBreathingDisplacement(phaseCycles, stimulus)
                 } else {
@@ -1404,24 +1505,39 @@ class VulvaGlTextureView(
                 }
             }
             val s = stimulus.coerceIn(0f, 1f)
-            val baseMul = depthMultiplier.coerceIn(0.75f, 2.0f)
-            val effCycleMul = 1f + (baseMul - 1f) * (1f - 0.65f * hrNorm)
-            val exertionDepth = kotlin.math.max(1.0f + 0.24f * s, 1.0f + 0.78f * hrNorm) * effCycleMul
-            val abdomenWave = if (isSighCycle) {
+            val baseMul = depthMultiplier.coerceIn(0.75f, 2.05f)
+            val effCycleMul = if (peakMode || forcePowerfulSigh) {
+                baseMul
+            } else {
+                1f + (baseMul - 1f) * (1f - 0.65f * hrNorm)
+            }
+            val exertionDepth = when {
+                forcePowerfulSigh -> (1.0f + 0.16f * hrNorm) * effCycleMul
+                peakMode -> (1.0f + 0.72f * kotlin.math.max(hrNorm, 0.90f)) * effCycleMul
+                else -> kotlin.math.max(1.0f + 0.24f * s, 1.0f + 0.78f * hrNorm) * effCycleMul
+            }
+            val useSighWave = isSighCycle || forcePowerfulSigh
+            val abdomenWave = if (useSighWave) {
                 evaluateSighBreathWave(phaseCycles, true)
             } else {
-                evaluateExertionBreathWave(phaseCycles, hrNorm)
+                evaluateExertionBreathWave(phaseCycles, if (peakMode) 1f else hrNorm)
             }
-            val chestLag = (if (isSighCycle) 0.028f else 0.04f) * (1f - 0.55f * hrNorm)
-            val chestWave = if (isSighCycle) {
+            val chestLag = (if (useSighWave) 0.028f else 0.04f) * (1f - 0.55f * (if (peakMode) 1f else hrNorm))
+            val chestWave = if (useSighWave) {
                 evaluateSighBreathWave(phaseCycles - chestLag, true)
             } else {
-                evaluateExertionBreathWave(phaseCycles - chestLag, hrNorm)
+                evaluateExertionBreathWave(phaseCycles - chestLag, if (peakMode) 1f else hrNorm)
             }
             // High heart rate recruits stronger upper-thoracic (chest) breathing effort
-            val chestBoost = (if (isSighCycle) 1.12f else 1.0f) * (1.0f + 0.28f * hrNorm)
-            val chestRise = (chestWave * 0.072f * exertionDepth * chestBoost).coerceAtMost(0.195f)
-            val abdomenRise = (abdomenWave * 0.096f * exertionDepth).coerceAtMost(0.215f)
+            val chestBoost = when {
+                forcePowerfulSigh -> 1.24f
+                peakMode -> 1.32f
+                else -> (if (isSighCycle) 1.12f else 1.0f) * (1.0f + 0.28f * hrNorm)
+            }
+            val maxChest = if (peakMode || forcePowerfulSigh) 0.220f else 0.195f
+            val maxAbdomen = if (peakMode || forcePowerfulSigh) 0.240f else 0.215f
+            val chestRise = (chestWave * 0.072f * exertionDepth * chestBoost).coerceAtMost(maxChest)
+            val abdomenRise = (abdomenWave * 0.096f * exertionDepth).coerceAtMost(maxAbdomen)
             return Pair(chestRise, abdomenRise)
         }
 
@@ -1688,6 +1804,7 @@ class VulvaGlTextureView(
             uniform float uBetaV3RegionalMaterial;
             uniform float uBetaV3LabialVestibuleBlend;
             uniform float uBetaV3IntricateLabiaFolds;
+            uniform float uBetaV3MedialRootContinuity;
             uniform float uIsLabiaArchMesh;
 
             float hash31(vec3 p) {
@@ -2241,13 +2358,21 @@ class VulvaGlTextureView(
                 // Attenuate labia-arch-only darkening/browning strictly where the medial base meets the vestibule,
                 // and harmonize both sides of the junction into the exact same warm mucosal rose tone.
                 float v3BlendStr = uBetaV3LabialVestibuleBlend * pelvicRegionMask;
+                float v3MedRootStr = uBetaV3MedialRootContinuity * pelvicRegionMask;
                 float vestBaseMask = uIsLabiaArchMesh *
                     smoothstep(0.42, 0.88, mucosaColor) *
                     (1.0 - smoothstep(0.16, 0.52, pigmentColor));
+                // Beta v3 Option 7 (Medial Labial Root Color Continuity): prevent vestBaseMask from
+                // starving when mucosal weighting dips at the medial labial root, strictly excluding the free rim.
+                float medRootBaseMask = uIsLabiaArchMesh *
+                    smoothstep(0.16, 0.70, mucosaColor) *
+                    (1.0 - smoothstep(0.20, 0.56, pigmentColor)) *
+                    smoothstep(0.20, 0.58, wetness);
+                vestBaseMask = max(vestBaseMask, medRootBaseMask * v3MedRootStr);
                 // Seam F (uBetaWarmTransitionZone): deepen the newly front-lit labiaHoodArchMesh by ~1 warm skin-tone
                 // shade (proportional across light and dark skin tones), fading cleanly to 0 along the outer Seam E skirt.
                 float seamFShadeFade = smoothstep(0.0, 0.55, archAlpha) * smoothstep(0.06, 0.28, mucosaColor + pigmentColor * 0.65);
-                seamFShadeFade *= (1.0 - vestBaseMask * v3BlendStr * 0.94);
+                seamFShadeFade *= (1.0 - vestBaseMask * max(v3BlendStr, v3MedRootStr) * 0.94);
                 vec3 seamFShadeTarget = mix(albedo * vec3(0.84, 0.77, 0.72), uSkinShadow * vec3(0.96, 0.90, 0.86), 0.24 * (1.0 - mucosaColor));
                 albedo = mix(albedo, seamFShadeTarget, uBetaWarmTransitionZone * seamFShadeFade);
                 // 3G (uBetaRefineInnerLabia): very faint natural warm rose-brown tissue tint on inner labia,
@@ -2255,7 +2380,7 @@ class VulvaGlTextureView(
                 float innerLabiaFade = smoothstep(0.05, 0.42, mucosaColor);
                 float freeEdgeWeight = smoothstep(0.14, 0.56, pigmentColor) * smoothstep(0.06, 0.34, mucosaColor);
                 float roseBrownStrength = uBetaRefineInnerLabia * clamp(innerLabiaFade * 0.11 + freeEdgeWeight * 0.19, 0.0, 0.28);
-                roseBrownStrength *= (1.0 - vestBaseMask * v3BlendStr * 0.92);
+                roseBrownStrength *= (1.0 - vestBaseMask * max(v3BlendStr, v3MedRootStr) * 0.92);
                 vec3 warmRoseBrown = mix(uSkinShadow * vec3(0.84, 0.64, 0.56), uMucosaDeep * vec3(0.96, 0.78, 0.70), 0.38);
                 albedo = mix(albedo, warmRoseBrown, roseBrownStrength);
                 if (v3BlendStr > 0.001) {
@@ -2267,6 +2392,18 @@ class VulvaGlTextureView(
                         (1.0 - smoothstep(0.84, 0.97, wetness)) *
                         smoothstep(0.24, 0.68, ao);
                     albedo = mix(albedo, vestibuleHarmonyTone, vestOuterRim * v3BlendStr * 0.34);
+                }
+                if (v3MedRootStr > 0.001) {
+                    // Localized medial-root tone continuity: removes residual pale cutaneous bleed right at
+                    // the labia minora–vestibule junction without globally darkening the labia or altering lighting.
+                    vec3 rootVestTone = mix(mucosaVar, uMucosaDeep, (1.0 - clamp(ao, 0.50, 1.0)) * 0.24);
+                    float paleBleedBand = medRootBaseMask * (1.0 - smoothstep(0.66, 0.96, mucosaColor));
+                    albedo = mix(albedo, rootVestTone, clamp((paleBleedBand * 0.92 + medRootBaseMask * 0.42) * v3MedRootStr, 0.0, 0.92));
+                    float patchRootBand = (1.0 - uIsLabiaArchMesh) *
+                        smoothstep(0.22, 0.74, mucosaColor) *
+                        (1.0 - smoothstep(0.76, 0.98, mucosaColor)) *
+                        smoothstep(0.24, 0.66, ao);
+                    albedo = mix(albedo, rootVestTone, patchRootBand * v3MedRootStr * 0.52);
                 }
                 if (v3PigStr > 0.001) {
                     // Organic subcutaneous vascular transition & gentle non-uniform melanin tone modulation (safely clamped at 3x)

@@ -2378,7 +2378,7 @@ internal object BlossomUpperBodyBuilder {
         nostrilBreath: Float = 0f
     ) {
         val turn = headTurn.coerceIn(-1f, 1f)
-        val pitch = headPitch.coerceIn(0f, 1f)
+        val pitch = headPitch.coerceIn(-1f, 1f)
         val blinkLBase = eyeBlink.coerceIn(0f, 1f)
         val blinkRBase = (blinkLBase + eyeBlinkRightOffset).coerceIn(0f, 1f)
         val gazeX = eyeGazeX.coerceIn(-1f, 1f)
@@ -2587,7 +2587,7 @@ internal object BlossomUpperBodyBuilder {
             mesh.commitVertices()
         }
 
-        if (abs(turn) < 1e-4f && pitch < 1e-4f && abs(rollExtra) < 1e-4f) {
+        if (abs(turn) < 1e-4f && abs(pitch) < 1e-4f && abs(rollExtra) < 1e-4f) {
             restoreMesh(headMesh, headWork)
             restoreMesh(eyesMesh, eyesWork)
             restoreMesh(hairMesh, cache.hairRestPosNorm)
@@ -2606,7 +2606,8 @@ internal object BlossomUpperBodyBuilder {
             return
         }
 
-        val fullPitch = pitch * 0.21f // 0..12 deg gentle downward chin-tuck nod from resting pose
+        // +pitch (0..1): 0..12 deg downward chin-tuck nod; -pitch (-1..0): 0..-19.5 deg backward head tilt
+        val fullPitch = if (pitch >= 0f) pitch * 0.21f else pitch * 0.34f
         val fullYaw = turn * 0.488f // +/- 28 deg natural comfortable cervical rotation
         val fullRoll = -turn * 0.068f + rollExtra // +/- 3.9 deg gentle headrest pillow roll + optional subtle tilt
 

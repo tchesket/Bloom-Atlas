@@ -14,7 +14,10 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.rememberScrollableState
+import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -75,6 +78,9 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -86,6 +92,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -103,13 +110,19 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * Vulva soft-tissue elasticity Beta slider helpers (Version 19.0 Pre-Graduation Milestone):
+ * Vulva soft-tissue elasticity Beta slider helpers (Version 21.0):
  *  - `0f` = OFF / exact pre-elastic baseline
- *  - `0.40f` = v19.0 default (+40% elastic resistance -> 0.60 max spread, matching Blossom's self-spread IK cap)
- *  - `0.60f` = new v19.0 maximum (+60% elastic resistance -> 0.40 max spread)
+ *  - `0.50f` = v21.0 default (+50% elastic resistance -> 0.50 max spread, matching Blossom's self-spread IK cap)
+ *  - `0.60f` = maximum (+60% elastic resistance -> 0.40 max spread)
  */
-internal const val VULVA_ELASTIC_DEFAULT_RESISTANCE = 0.40f
+internal const val VULVA_ELASTIC_DEFAULT_RESISTANCE = 0.50f
 internal const val VULVA_ELASTIC_MAX_RESISTANCE = 0.60f
+internal const val VULVA_ELASTIC_CURVE_REF = 0.40f
+
+/** Peak 140 BPM physiological exertion episode timings (v21.0). */
+internal const val PEAK_EPISODE_TRIGGER_BPM = 140f
+internal const val PEAK_EPISODE_DURATION_MS = 10_000L
+internal const val PEAK_FAST_RECOVERY_DURATION_MS = 6_000L
 
 internal fun vulvaElasticPullScale(resistance: Float): Float {
     val r = resistance.coerceIn(0f, VULVA_ELASTIC_MAX_RESISTANCE)
@@ -134,7 +147,7 @@ internal fun vulvaElasticSpringStiffness(resistance: Float): Float {
 internal fun vulvaElasticStep(current: Float, delta: Float, maxLimit: Float, resistance: Float): Float {
     val r = resistance.coerceIn(0f, VULVA_ELASTIC_MAX_RESISTANCE)
     val resist = if (delta > 0f && r > 0.0001f) {
-        val normR = (r / VULVA_ELASTIC_DEFAULT_RESISTANCE).coerceIn(0f, 1.50f)
+        val normR = (r / VULVA_ELASTIC_CURVE_REF).coerceIn(0f, 1.50f)
         val frac = (current / maxLimit.coerceAtLeast(0.05f)).coerceIn(0f, 1f)
         (1f - (0.32f * normR) * frac).coerceAtLeast(0.42f)
     } else {
@@ -281,6 +294,18 @@ fun InteractiveVulva3DCanvas(
     var heartRateDrive by sessionState.heartRateDriveState
     var lastHeartStimMs by sessionState.lastHeartStimMsState
     val heartPulseScale = remember { Animatable(1f) }
+    // Peak 140 BPM exertion climax episode & post-peak recovery channels (persisted across scroll)
+    var peakEpisodeActive by sessionState.peakEpisodeActiveState
+    var peakEpisodeEndMs by sessionState.peakEpisodeEndMsState
+    var peakRecoveryFastEndMs by sessionState.peakRecoveryFastEndMsState
+    var peakRefractoryUntilMs by sessionState.peakRefractoryUntilMsState
+    var postPeakSighToken by sessionState.postPeakSighTokenState
+    var postPeakSighCount by sessionState.postPeakSighCountState
+    val peakHeadPitch = remember(sessionState) { Animatable(sessionState.peakHeadPitch) }
+    val peakHeadTurn = remember(sessionState) { Animatable(sessionState.peakHeadTurn) }
+    val peakHeadRoll = remember(sessionState) { Animatable(sessionState.peakHeadRoll) }
+    val peakLegShakeL = remember(sessionState) { Animatable(sessionState.peakLegShakeL) }
+    val peakLegShakeR = remember(sessionState) { Animatable(sessionState.peakLegShakeR) }
     // Animated self-spread hand/arm IK pose (0 = relaxed at sides, 1 = hands holding labia open)
     var blossomSpreadPoseActive by sessionState.blossomSpreadPoseActiveState
     val selfSpreadPose = remember(sessionState) { Animatable(sessionState.selfSpreadPose) }
@@ -316,6 +341,8 @@ fun InteractiveVulva3DCanvas(
     var betaV3LabialBlendStrength by sessionState.betaV3LabialBlendStrengthState
     var betaV3IntricateLabiaFolds by sessionState.betaV3IntricateLabiaFoldsState
     var betaV3LabiaFoldsStrength by sessionState.betaV3LabiaFoldsStrengthState
+    var betaV3MedialRootContinuity by sessionState.betaV3MedialRootContinuityState
+    var betaV3MedialRootStrength by sessionState.betaV3MedialRootStrengthState
     var betaVulvaElasticityEnabled by sessionState.betaVulvaElasticityEnabledState
     var betaVulvaElasticity by sessionState.betaVulvaElasticityState
     var betaBreastSizeBoostEnabled by sessionState.betaBreastSizeBoostEnabledState
@@ -388,6 +415,11 @@ fun InteractiveVulva3DCanvas(
         sessionState.nostrilBreath = nostrilBreath.value
         sessionState.breathLipEase = breathLipEase.value
         sessionState.livingWarmth = livingWarmth.value
+        sessionState.peakHeadPitch = peakHeadPitch.value
+        sessionState.peakHeadTurn = peakHeadTurn.value
+        sessionState.peakHeadRoll = peakHeadRoll.value
+        sessionState.peakLegShakeL = peakLegShakeL.value
+        sessionState.peakLegShakeR = peakLegShakeR.value
         sessionState.selfSpreadPose = selfSpreadPose.value
         sessionState.camYaw = camYaw.value
         sessionState.camPitch = camPitch.value
@@ -426,12 +458,15 @@ fun InteractiveVulva3DCanvas(
     val latestBetaLife2PosturalSettling by rememberUpdatedState(betaLife2PosturalSettling)
     val latestBetaVulvaElasticity by rememberUpdatedState(activeVulvaElasticity)
     val latestBetaBreastSizeBoost by rememberUpdatedState(activeBreastSizeBoost)
+    val latestPeakEpisodeActive by rememberUpdatedState(peakEpisodeActive)
 
     fun registerPhysiologicalStimulus(level: Float, isDragMotion: Boolean = false) {
         val clamped = level.coerceIn(0f, 1f)
         val nowMs = System.currentTimeMillis()
         lastStimulusTouchMs = nowMs
         touchStimulus = max(touchStimulus, clamped)
+        // During the 6-second post-peak 2x recovery cooldown, let heart rate drop cleanly without touch bumps
+        if (nowMs < peakRecoveryFastEndMs) return
         lastHeartStimMs = nowMs
         // Weight sensitivity smoothly upward toward the most sensitive active contact zone
         heartRateSensitivity = max(heartRateSensitivity * 0.86f, clamped)
@@ -451,7 +486,7 @@ fun InteractiveVulva3DCanvas(
         val elasticRes = latestBetaVulvaElasticity.coerceIn(0f, VULVA_ELASTIC_MAX_RESISTANCE)
         val activeMaxSpread = vulvaElasticMaxSpread(elasticRes)
         val tissueSpring = spring<Float>(
-            dampingRatio = 0.76f + 0.06f * (elasticRes / VULVA_ELASTIC_DEFAULT_RESISTANCE).coerceIn(0f, 1.5f),
+            dampingRatio = 0.76f + 0.06f * (elasticRes / VULVA_ELASTIC_CURVE_REF).coerceIn(0f, 1.5f),
             stiffness = vulvaElasticSpringStiffness(elasticRes)
         )
         val breastSpring = spring<Float>(
@@ -505,6 +540,13 @@ fun InteractiveVulva3DCanvas(
             coroutineScope.launch { settleHeadRoll.animateTo(0f, positionalSpring) }
             coroutineScope.launch { settleLegL.animateTo(0f, positionalSpring) }
             coroutineScope.launch { settleLegR.animateTo(0f, positionalSpring) }
+            peakEpisodeActive = false
+            peakRecoveryFastEndMs = 0L
+            coroutineScope.launch { peakHeadPitch.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { peakHeadTurn.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { peakHeadRoll.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { peakLegShakeL.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { peakLegShakeR.animateTo(0f, positionalSpring) }
         }
     }
 
@@ -602,15 +644,19 @@ fun InteractiveVulva3DCanvas(
         }
     }
 
-    // Smoothly integrate physiological heart rate & settle touch-engagement stimulus back to calm baseline
+    // Smoothly integrate physiological heart rate, trigger 10s peak exertion climax at >= 140 BPM,
+    // and execute 6-second 2× fast recovery followed by normal recovery.
     LaunchedEffect(showExperimentalLegs) {
         if (!showExperimentalLegs) {
             touchStimulus = 0f
             heartRateBpm = VulvaGlTextureView.RESTING_HEART_RATE_BPM
             heartRateSensitivity = 0f
             heartRateDrive = 0f
+            peakEpisodeActive = false
+            peakRecoveryFastEndMs = 0L
             return@LaunchedEffect
         }
+        val peakRng = kotlin.random.Random(System.currentTimeMillis() xor 0x3D9E51A7L)
         var lastTickMs = System.currentTimeMillis()
         while (true) {
             delay(65L)
@@ -626,6 +672,24 @@ fun InteractiveVulva3DCanvas(
                 }
             }
 
+            // Trigger 10-second peak climax episode when heart rate reaches 140 BPM
+            if (!peakEpisodeActive && heartRateBpm >= PEAK_EPISODE_TRIGGER_BPM && nowMs >= peakRefractoryUntilMs) {
+                peakEpisodeActive = true
+                peakEpisodeEndMs = nowMs + PEAK_EPISODE_DURATION_MS
+            }
+            // End peak episode after 10 seconds -> trigger 2–3 powerful slow sighs & 6s 2× HR recovery
+            if (peakEpisodeActive && nowMs >= peakEpisodeEndMs) {
+                peakEpisodeActive = false
+                postPeakSighCount = 2 + peakRng.nextInt(2)
+                postPeakSighToken++
+                peakRecoveryFastEndMs = nowMs + PEAK_FAST_RECOVERY_DURATION_MS
+                peakRefractoryUntilMs = nowMs + PEAK_FAST_RECOVERY_DURATION_MS + 1_500L
+                heartRateDrive = 0f
+                heartRateSensitivity = 0f
+                lastHeartStimMs = nowMs - 3_000L
+            }
+
+            val inFastPostPeakRecovery = !peakEpisodeActive && nowMs < peakRecoveryFastEndMs
             val secsSinceHeartStim = ((nowMs - lastHeartStimMs).coerceAtLeast(0L)) / 1000f
             if (secsSinceHeartStim > 0.28f && heartRateDrive > 0f) {
                 heartRateDrive = (heartRateDrive - dtSec * 2.2f).coerceAtLeast(0f)
@@ -633,14 +697,199 @@ fun InteractiveVulva3DCanvas(
             if (secsSinceHeartStim > 1.2f && heartRateSensitivity > 0f) {
                 heartRateSensitivity = (heartRateSensitivity - dtSec * 0.18f).coerceAtLeast(0f)
             }
-            heartRateBpm = VulvaGlTextureView.stepHeartRateBpm(
-                currentBpm = heartRateBpm,
-                dtSec = dtSec,
-                targetSensitivityGain = heartRateSensitivity,
-                activeDrive = heartRateDrive,
-                secondsSinceLastStim = secsSinceHeartStim
-            )
+            heartRateBpm = if (peakEpisodeActive) {
+                // Keep heart rate sustained in peak 140..142 BPM band throughout the 10-second episode
+                heartRateBpm.coerceIn(PEAK_EPISODE_TRIGGER_BPM, VulvaGlTextureView.MAX_HEART_RATE_BPM)
+            } else {
+                VulvaGlTextureView.stepHeartRateBpm(
+                    currentBpm = heartRateBpm,
+                    dtSec = dtSec,
+                    targetSensitivityGain = heartRateSensitivity,
+                    activeDrive = heartRateDrive,
+                    secondsSinceLastStim = secsSinceHeartStim,
+                    recoveryRateMultiplier = if (inFastPostPeakRecovery) 2.0f else 1.0f,
+                    forceRecovery = inFastPostPeakRecovery
+                )
+            }
         }
+    }
+
+    // Coordinated ~10-second Peak Exertion Sequence (triggered at >= 140 BPM):
+    //  - Legs: quickly slam shut at start, then shake erratically & independently for the remainder of the 10s
+    //  - Head: first looks straight down (~1.1s), then leans all the way back with quick, small erratic side-to-side shifts
+    //  - Blinking: rapid cadence, mostly double blinks, plus 2 randomly placed 1–2s sustained eye-closures
+    //  - Post-10s: smoothly eases all channels back to normal (while renderer runs 2–3 powerful slow sighs)
+    var wasPeakEpisodeActive by remember(sessionState) { mutableStateOf(sessionState.peakEpisodeActive) }
+    LaunchedEffect(showExperimentalLegs, peakEpisodeActive) {
+        if (!showExperimentalLegs) {
+            peakHeadPitch.snapTo(0f)
+            peakHeadTurn.snapTo(0f)
+            peakHeadRoll.snapTo(0f)
+            peakLegShakeL.snapTo(0f)
+            peakLegShakeR.snapTo(0f)
+            wasPeakEpisodeActive = false
+            return@LaunchedEffect
+        }
+        if (!peakEpisodeActive) {
+            val headReturnSpec = tween<Float>(durationMillis = 1050, easing = FastOutSlowInEasing)
+            val shakeStopSpec = tween<Float>(durationMillis = 420, easing = FastOutSlowInEasing)
+            coroutineScope.launch { peakHeadPitch.animateTo(0f, headReturnSpec) }
+            coroutineScope.launch { peakHeadTurn.animateTo(0f, headReturnSpec) }
+            coroutineScope.launch { peakHeadRoll.animateTo(0f, headReturnSpec) }
+            coroutineScope.launch { peakLegShakeL.animateTo(0f, shakeStopSpec) }
+            coroutineScope.launch { peakLegShakeR.animateTo(0f, shakeStopSpec) }
+            if (wasPeakEpisodeActive) {
+                wasPeakEpisodeActive = false
+                // Gently relax legs from tightly slammed shut back toward comfortable neutral rest
+                val legRelaxSpec = tween<Float>(durationMillis = 1700, easing = FastOutSlowInEasing)
+                coroutineScope.launch { leftLegSpread.animateTo(0f, legRelaxSpec) }
+                coroutineScope.launch { rightLegSpread.animateTo(0f, legRelaxSpec) }
+            }
+            return@LaunchedEffect
+        }
+
+        wasPeakEpisodeActive = true
+        val startMs = System.currentTimeMillis()
+        val endMs = peakEpisodeEndMs.coerceAtLeast(startMs + 1_000L)
+        val totalWindowMs = (endMs - startMs).coerceAtLeast(1_500L)
+        val headRng = kotlin.random.Random(startMs xor 0x41B2C3D4L)
+        val legLRng = kotlin.random.Random(startMs xor 0x19F8E7D6L)
+        val legRRng = kotlin.random.Random(startMs xor 0x72A4B6C8L)
+        val blinkRng = kotlin.random.Random(startMs xor 0x55C3E1A9L)
+
+        // 1. Legs: immediately snap/close shut from whatever position they're in, then shake erratically & independently
+        val legsJob = launch {
+            val slamDur = 235
+            val jCloseL = launch { leftLegSpread.animateTo(-0.28f, tween(slamDur, easing = FastOutSlowInEasing)) }
+            val jCloseR = launch { rightLegSpread.animateTo(-0.28f, tween(slamDur + 25, easing = FastOutSlowInEasing)) }
+            val jClearL = launch { settleLegL.animateTo(0f, tween(140)) }
+            val jClearR = launch { settleLegR.animateTo(0f, tween(140)) }
+            jCloseL.join(); jCloseR.join(); jClearL.join(); jClearR.join()
+
+            val leftShakeJob = launch {
+                while (System.currentTimeMillis() < endMs) {
+                    val burstAmp = 0.025f + legLRng.nextFloat() * 0.090f
+                    val upDur = 60 + legLRng.nextInt(95)
+                    val downDur = 65 + legLRng.nextInt(105)
+                    peakLegShakeL.animateTo(burstAmp, tween(upDur, easing = FastOutSlowInEasing))
+                    val returnFloor = legLRng.nextFloat() * 0.022f
+                    peakLegShakeL.animateTo(returnFloor, tween(downDur, easing = FastOutSlowInEasing))
+                    if (legLRng.nextFloat() < 0.28f) {
+                        delay((45 + legLRng.nextInt(110)).toLong())
+                    }
+                }
+            }
+            val rightShakeJob = launch {
+                delay((35 + legRRng.nextInt(70)).toLong())
+                while (System.currentTimeMillis() < endMs) {
+                    val burstAmp = 0.025f + legRRng.nextFloat() * 0.090f
+                    val upDur = 58 + legRRng.nextInt(100)
+                    val downDur = 62 + legRRng.nextInt(110)
+                    peakLegShakeR.animateTo(burstAmp, tween(upDur, easing = FastOutSlowInEasing))
+                    val returnFloor = legRRng.nextFloat() * 0.022f
+                    peakLegShakeR.animateTo(returnFloor, tween(downDur, easing = FastOutSlowInEasing))
+                    if (legRRng.nextFloat() < 0.28f) {
+                        delay((40 + legRRng.nextInt(115)).toLong())
+                    }
+                }
+            }
+            leftShakeJob.join()
+            rightShakeJob.join()
+        }
+
+        // 2. Head: look straight down first (~1.1s), then lean all the way back for remainder of 10s,
+        //    with small, quick, erratic side-to-side movements throughout
+        val headPitchJob = launch {
+            launch { headPitch.animateTo(0f, tween(220, easing = FastOutSlowInEasing)) }
+            launch { idleHeadPitch.animateTo(0f, tween(220, easing = FastOutSlowInEasing)) }
+            // Phase 1: Look straight down (+1.0f) briefly at the start of the 10s episode
+            peakHeadPitch.animateTo(1.0f, tween(260, easing = FastOutSlowInEasing))
+            delay(840L)
+            if (System.currentTimeMillis() < endMs) {
+                // Phase 2: Lean head all the way back (-1.0f) for the remainder of the 10s
+                peakHeadPitch.animateTo(-1.0f, tween(520, easing = FastOutSlowInEasing))
+                while (System.currentTimeMillis() < endMs) {
+                    val subtleHeave = -0.89f - headRng.nextFloat() * 0.11f
+                    peakHeadPitch.animateTo(subtleHeave, tween(260 + headRng.nextInt(240), easing = FastOutSlowInEasing))
+                }
+            }
+        }
+        val headSideJob = launch {
+            var sideSign = if (headRng.nextBoolean()) 1f else -1f
+            while (System.currentTimeMillis() < endMs) {
+                sideSign = if (headRng.nextFloat() < 0.78f) -sideSign else sideSign
+                // Small, quick, erratic side-to-side shifts (not dramatic wide swings)
+                val turnTarget = sideSign * (0.09f + headRng.nextFloat() * 0.13f)
+                val rollTarget = -sideSign * (0.025f + headRng.nextFloat() * 0.032f)
+                val moveDur = 125 + headRng.nextInt(165)
+                val jT = launch { peakHeadTurn.animateTo(turnTarget, tween(moveDur, easing = FastOutSlowInEasing)) }
+                val jR = launch { peakHeadRoll.animateTo(rollTarget, tween(moveDur + 20, easing = FastOutSlowInEasing)) }
+                jT.join(); jR.join()
+                delay((35 + headRng.nextInt(105)).toLong())
+            }
+        }
+
+        // 3. Peak blinking: much faster cadence, mostly double blinks, plus 2 randomly placed 1–2s sustained closures
+        val peakBlinkJob = launch {
+            val hold1AtMs = startMs + (totalWindowMs * (0.18f + blinkRng.nextFloat() * 0.22f)).toLong()
+            val hold2AtMs = startMs + (totalWindowMs * (0.56f + blinkRng.nextFloat() * 0.22f)).toLong()
+            var hold1Done = false
+            var hold2Done = false
+
+            suspend fun runPeakBlink(amp: Float, closeMs: Int, holdMs: Long, openMs: Int) {
+                val asym = latestBetaLife2AsymmetricBlinking
+                if (!asym) {
+                    eyeBlink.animateTo(amp, tween(closeMs, easing = FastOutSlowInEasing))
+                    delay(holdMs)
+                    eyeBlink.animateTo(0f, tween(openMs, easing = FastOutSlowInEasing))
+                    if (eyeBlinkR.value > 0.001f) eyeBlinkR.snapTo(0f)
+                    return
+                }
+                val leadLeft = blinkRng.nextFloat() < 0.54f
+                val staggerMs = (8 + blinkRng.nextInt(12)).toLong()
+                val jL = launch {
+                    if (!leadLeft) delay(staggerMs)
+                    eyeBlink.animateTo(amp, tween(closeMs, easing = FastOutSlowInEasing))
+                    delay(holdMs)
+                    eyeBlink.animateTo(0f, tween(openMs, easing = FastOutSlowInEasing))
+                }
+                val jR = launch {
+                    if (leadLeft) delay(staggerMs)
+                    eyeBlinkR.animateTo(amp, tween(closeMs, easing = FastOutSlowInEasing))
+                    delay(holdMs)
+                    eyeBlinkR.animateTo(0f, tween(openMs, easing = FastOutSlowInEasing))
+                }
+                jL.join(); jR.join()
+            }
+
+            while (System.currentTimeMillis() < endMs) {
+                val now = System.currentTimeMillis()
+                val triggerHold1 = !hold1Done && now >= hold1AtMs
+                val triggerHold2 = !hold2Done && hold1Done && now >= hold2AtMs
+                if (triggerHold1 || triggerHold2) {
+                    if (triggerHold1) hold1Done = true else hold2Done = true
+                    val shutMs = (1150 + blinkRng.nextInt(750)).toLong()
+                    val clampedShutMs = shutMs.coerceAtMost((endMs - System.currentTimeMillis()).coerceAtLeast(250L))
+                    runPeakBlink(amp = 1f, closeMs = 85, holdMs = clampedShutMs, openMs = 150)
+                } else {
+                    val closeMs = 54 + blinkRng.nextInt(22)
+                    val holdMs = (16 + blinkRng.nextInt(18)).toLong()
+                    val openMs = 92 + blinkRng.nextInt(38)
+                    runPeakBlink(1f, closeMs, holdMs, openMs)
+                    // Mostly double blinks (~78%) during peak exertion
+                    if (blinkRng.nextFloat() < 0.78f && System.currentTimeMillis() < endMs) {
+                        delay((75 + blinkRng.nextInt(65)).toLong())
+                        runPeakBlink(0.92f + blinkRng.nextFloat() * 0.08f, 52 + blinkRng.nextInt(18), 16L + blinkRng.nextInt(16), 90 + blinkRng.nextInt(34))
+                    }
+                }
+                delay((170 + blinkRng.nextInt(250)).toLong())
+            }
+        }
+
+        legsJob.join()
+        headPitchJob.join()
+        headSideJob.join()
+        peakBlinkJob.join()
     }
 
     // Gentle beat-synchronized pulse for the optional top-left Heart Rate HUD badge
@@ -692,9 +941,10 @@ fun InteractiveVulva3DCanvas(
                 return
             }
             val leadLeft = rng.nextFloat() < 0.54f
-            val staggerMs = (16 + rng.nextInt(23)).toLong()
-            val closeJitter = (rng.nextInt(19) - 9)
-            val openJitter = (rng.nextInt(25) - 12)
+            // v21.0: 50% tighter L/R asymmetric stagger (8–19ms instead of 16–38ms)
+            val staggerMs = (8 + rng.nextInt(12)).toLong()
+            val closeJitter = (rng.nextInt(11) - 5)
+            val openJitter = (rng.nextInt(13) - 6)
             val trailAmp = (amp * (0.95f + rng.nextFloat() * 0.05f)).coerceIn(0f, 1f)
             val leftJob = coroutineScope.launch {
                 if (!leadLeft) delay(staggerMs)
@@ -720,6 +970,11 @@ fun InteractiveVulva3DCanvas(
 
         delay(1600L)
         while (true) {
+            // Yield cleanly to the dedicated 10-second peak blink choreography while active
+            if (latestPeakEpisodeActive) {
+                delay(120L)
+                continue
+            }
             // Skip animating 60 FPS eyelid blinks when zoomed tightly onto the pelvis (face at y ~ 6.35 is off-screen)
             val faceCouldBeVisible = camZoom.value <= 0.62f || camTargetY.value >= 2.2f
             if (faceCouldBeVisible) {
@@ -779,6 +1034,7 @@ fun InteractiveVulva3DCanvas(
             val cadenceSpread = if (latestBetaLifeDoubleBlinking) 0.72f + rng.nextFloat() * 0.50f else 1.0f
             var elapsedWaitMs = 0L
             while (true) {
+                if (latestPeakEpisodeActive) break
                 val range = computeBlinkIntervalRangeMs(latestTouchStimulus)
                 val baseWaitMs = range.first + ((range.last - range.first) * jitter).toLong()
                 val targetWaitMs = (baseWaitMs * cadenceSpread).toLong().coerceAtLeast(850L)
@@ -872,8 +1128,8 @@ fun InteractiveVulva3DCanvas(
         while (true) {
             val faceCouldBeVisible = camZoom.value <= 0.62f || camTargetY.value >= 2.2f
             val recentlyDragged = (System.currentTimeMillis() - lastManualHeadDragMs) < 4200L
-            if (!faceCouldBeVisible || recentlyDragged) {
-                delay(450L)
+            if (!faceCouldBeVisible || recentlyDragged || latestPeakEpisodeActive) {
+                delay(350L)
                 continue
             }
             val settleBack = rng.nextFloat() < 0.30f
@@ -1271,11 +1527,11 @@ fun InteractiveVulva3DCanvas(
         rightBreastX = rightBreastX.value,
         rightBreastY = rightBreastY.value,
         breastSize = breastSize,
-        leftLegSpread = (leftLegSpread.value + settleLegL.value).coerceIn(-0.30f, 1f),
-        rightLegSpread = (rightLegSpread.value + settleLegR.value).coerceIn(-0.30f, 1f),
+        leftLegSpread = (leftLegSpread.value + settleLegL.value + peakLegShakeL.value).coerceIn(-0.30f, 1f),
+        rightLegSpread = (rightLegSpread.value + settleLegR.value + peakLegShakeR.value).coerceIn(-0.30f, 1f),
         selfSpreadPose = selfSpreadPose.value,
-        headTurn = (headTurn.value + idleHeadTurn.value + settleHeadTurn.value).coerceIn(-1f, 1f),
-        headPitch = (headPitch.value + idleHeadPitch.value + settleHeadPitch.value).coerceIn(0f, 1f),
+        headTurn = (headTurn.value + idleHeadTurn.value + settleHeadTurn.value + peakHeadTurn.value).coerceIn(-1f, 1f),
+        headPitch = (headPitch.value + idleHeadPitch.value + settleHeadPitch.value + peakHeadPitch.value).coerceIn(-1f, 1f),
         eyeBlink = eyeBlink.value,
         leftGluteX = leftGluteX.value,
         leftGluteY = leftGluteY.value,
@@ -1294,10 +1550,12 @@ fun InteractiveVulva3DCanvas(
         betaV3LabialBlendStrength = betaV3LabialBlendStrength,
         betaV3IntricateLabiaFolds = betaV3IntricateLabiaFolds,
         betaV3LabiaFoldsStrength = betaV3LabiaFoldsStrength,
+        betaV3MedialRootContinuity = betaV3MedialRootContinuity,
+        betaV3MedialRootStrength = betaV3MedialRootStrength,
         betaBreastSizeBoost = activeBreastSizeBoost,
         eyeGazeX = (eyeGazeX.value + anticipationGazeX.value).coerceIn(-1f, 1f),
         eyeGazeY = (eyeGazeY.value + anticipationGazeY.value).coerceIn(-1f, 1f),
-        headRollOffset = idleHeadRoll.value + settleHeadRoll.value,
+        headRollOffset = idleHeadRoll.value + settleHeadRoll.value + peakHeadRoll.value,
         faceWarmth = faceWarmth.value,
         faceBrow = faceBrow.value,
         faceLipSoft = (faceLipSoft.value + breathLipEase.value).coerceIn(0f, 1f),
@@ -1385,6 +1643,9 @@ fun InteractiveVulva3DCanvas(
                         glView.showExperimentalLegs = showExperimentalLegs
                         glView.touchStimulus = touchStimulus
                         glView.heartRateBpm = heartRateBpm
+                        glView.peakBreathActive = peakEpisodeActive
+                        glView.postPeakSighToken = postPeakSighToken
+                        glView.postPeakSighCount = postPeakSighCount
                         glView.requestFrame()
                     },
                     onRelease = { glView ->
@@ -2021,6 +2282,7 @@ fun InteractiveVulva3DCanvas(
                     betaV3RegionalSurfaceDetail,
                     betaV3LabialVestibuleBlend,
                     betaV3IntricateLabiaFolds,
+                    betaV3MedialRootContinuity,
                     betaVulvaElasticityEnabled && betaVulvaElasticity > 0.005f,
                     betaBreastSizeBoostEnabled && betaBreastSizeBoost > 0.005f
                 ).count { it }
@@ -2113,10 +2375,28 @@ fun InteractiveVulva3DCanvas(
                         .padding(top = 58.dp, end = 8.dp, start = 12.dp, bottom = 8.dp)
                 ) {
                     val panelScroll = rememberScrollState()
+                    // Lock vertical scroll & fling strictly inside the Beta Lab panel so hitting top or
+                    // bottom stops cleanly and never scrolls the parent AnatomyScreen LazyColumn.
+                    val betaPanelScrollBlocker = remember {
+                        object : NestedScrollConnection {
+                            override fun onPostScroll(
+                                consumed: Offset,
+                                available: Offset,
+                                source: NestedScrollSource
+                            ): Offset = available
+
+                            override suspend fun onPostFling(
+                                consumed: Velocity,
+                                available: Velocity
+                            ): Velocity = available
+                        }
+                    }
+                    val headerScrollAbsorber = rememberScrollableState { 0f }
                     Surface(
                         modifier = Modifier
                             .widthIn(max = 222.dp)
                             .heightIn(max = 200.dp)
+                            .nestedScroll(betaPanelScrollBlocker)
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
@@ -2136,81 +2416,91 @@ fun InteractiveVulva3DCanvas(
                                 .fillMaxWidth()
                                 .padding(top = 2.dp, bottom = 4.dp)
                         ) {
-                            // Compact header + quick Reset All (turns toggles OFF while preserving last slider values)
-                            Row(
+                            // Non-scrolling header + 3-tab strip (absorbs vertical drags so parent page stays still)
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                    .scrollable(
+                                        state = headerScrollAbsorber,
+                                        orientation = Orientation.Vertical
+                                    )
                             ) {
-                                Text(
-                                    text = "Beta Lab",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                if (totalActiveBetaCount > 0) {
-                                    Box(
-                                        modifier = Modifier
-                                            .heightIn(min = 48.dp)
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .clickable {
-                                                sessionState.disableAllBetaToggles()
-                                                if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
-                                            }
-                                            .testTag("beta_reset_all_button")
-                                            .semantics {
-                                                contentDescription = "Turn off all active beta toggles"
-                                            },
-                                        contentAlignment = Alignment.Center
-                                    ) {
+                                // Compact header + quick Reset All (turns toggles OFF while preserving last slider values)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Beta Lab",
+                                        style = MaterialTheme.typography.labelLarge.copy(fontSize = 11.sp, lineHeight = 14.sp),
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    if (totalActiveBetaCount > 0) {
                                         Box(
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.80f))
-                                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                                .heightIn(min = 48.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .clickable {
+                                                    sessionState.disableAllBetaToggles()
+                                                    if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                                }
+                                                .testTag("beta_reset_all_button")
+                                                .semantics {
+                                                    contentDescription = "Turn off all active beta toggles"
+                                                },
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Text(
-                                                text = "All off",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.80f))
+                                                    .padding(horizontal = 7.dp, vertical = 3.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "All off",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 11.sp),
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                                )
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                            // 3-Tab Selector: Vulva | Life | Life+
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                BetaMenuTabPill(
-                                    label = if (activeVulvaBetaCount > 0) "Vulva $activeVulvaBetaCount" else "Vulva",
-                                    selected = betaMenuTab == 0,
-                                    tag = "beta_tab_vulva",
-                                    onClick = { betaMenuTab = 0 },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                BetaMenuTabPill(
-                                    label = if (activeLifelikeBetaCount > 0) "Life $activeLifelikeBetaCount" else "Life",
-                                    selected = betaMenuTab == 1,
-                                    tag = "beta_tab_lifelike",
-                                    onClick = { betaMenuTab = 1 },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                BetaMenuTabPill(
-                                    label = if (activeLifelike2BetaCount > 0) "Life+ $activeLifelike2BetaCount" else "Life+",
-                                    selected = betaMenuTab == 2,
-                                    tag = "beta_tab_lifelike_plus",
-                                    onClick = { betaMenuTab = 2 },
-                                    modifier = Modifier.weight(1f)
-                                )
+                                // 3-Tab Selector: Vulva | Life | Life+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    BetaMenuTabPill(
+                                        label = if (activeVulvaBetaCount > 0) "Vulva $activeVulvaBetaCount" else "Vulva",
+                                        selected = betaMenuTab == 0,
+                                        tag = "beta_tab_vulva",
+                                        onClick = { betaMenuTab = 0 },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    BetaMenuTabPill(
+                                        label = if (activeLifelikeBetaCount > 0) "Life $activeLifelikeBetaCount" else "Life",
+                                        selected = betaMenuTab == 1,
+                                        tag = "beta_tab_lifelike",
+                                        onClick = { betaMenuTab = 1 },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    BetaMenuTabPill(
+                                        label = if (activeLifelike2BetaCount > 0) "Life+ $activeLifelike2BetaCount" else "Life+",
+                                        selected = betaMenuTab == 2,
+                                        tag = "beta_tab_lifelike_plus",
+                                        onClick = { betaMenuTab = 2 },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                             }
 
                             HorizontalDivider(
@@ -2224,8 +2514,8 @@ fun InteractiveVulva3DCanvas(
                             ) {
                                 if (betaMenuTab == 0) {
                                     Text(
-                                        text = "v19.0 pre-graduation defaults (toggle preserves last slider value)",
-                                        style = MaterialTheme.typography.labelSmall,
+                                        text = "v21.0 tuned defaults (toggles preserve last slider value)",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, lineHeight = 11.sp),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
@@ -2368,6 +2658,29 @@ fun InteractiveVulva3DCanvas(
                                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
                                     )
                                     VulvaBetaToggleRow(
+                                        title = "7. Medial root color continuity",
+                                        subtitle = "Eliminates pale tone band at the inner labia–vestibule junction",
+                                        checked = betaV3MedialRootContinuity,
+                                        tag = "toggle_beta_v3_medial_root_continuity",
+                                        compact = true,
+                                        onToggle = {
+                                            betaV3MedialRootContinuity = !betaV3MedialRootContinuity
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    AnimatedVisibility(visible = betaV3MedialRootContinuity) {
+                                        BetaStrengthSliderRow(
+                                            label = "Medial root continuity",
+                                            value = betaV3MedialRootStrength,
+                                            tag = "slider_beta_v3_medial_root_strength",
+                                            onValueChange = { betaV3MedialRootStrength = it }
+                                        )
+                                    }
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
                                         title = "Vulva elastic resistance",
                                         subtitle = "Firms labial pull resistance & lowers max spread up to 60%",
                                         checked = betaVulvaElasticityEnabled,
@@ -2393,12 +2706,12 @@ fun InteractiveVulva3DCanvas(
                                             ) {
                                                 Text(
                                                     text = "Resistance (max 60%)",
-                                                    style = MaterialTheme.typography.labelSmall,
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp, lineHeight = 10.sp),
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                                 Text(
                                                     text = "+$elasticPct%",
-                                                    style = MaterialTheme.typography.labelSmall,
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 11.sp),
                                                     fontWeight = FontWeight.SemiBold,
                                                     color = MaterialTheme.colorScheme.primary
                                                 )
@@ -2446,12 +2759,12 @@ fun InteractiveVulva3DCanvas(
                                             ) {
                                                 Text(
                                                     text = "Boost amount (max 50%)",
-                                                    style = MaterialTheme.typography.labelSmall,
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp, lineHeight = 10.sp),
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                                 Text(
                                                     text = "+$boostPct%",
-                                                    style = MaterialTheme.typography.labelSmall,
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 11.sp),
                                                     fontWeight = FontWeight.SemiBold,
                                                     color = MaterialTheme.colorScheme.primary
                                                 )
@@ -2472,7 +2785,7 @@ fun InteractiveVulva3DCanvas(
                                 } else if (betaMenuTab == 1) {
                                     Text(
                                         text = "Subtle, irregular micro-behaviors (ON by default)",
-                                        style = MaterialTheme.typography.labelSmall,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, lineHeight = 11.sp),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
@@ -2565,7 +2878,7 @@ fun InteractiveVulva3DCanvas(
                                 } else {
                                     Text(
                                         text = "Next-gen realism (all ON by default except Heart Rate HUD)",
-                                        style = MaterialTheme.typography.labelSmall,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, lineHeight = 11.sp),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
@@ -2586,7 +2899,7 @@ fun InteractiveVulva3DCanvas(
                                     )
                                     VulvaBetaToggleRow(
                                         title = "Asymmetric blinking",
-                                        subtitle = "Slight natural timing difference (16–38ms) between left and right eyelids",
+                                        subtitle = "Slight natural timing difference (8–19ms) between left and right eyelids",
                                         checked = betaLife2AsymmetricBlinking,
                                         tag = "toggle_beta_life2_asymmetric_blinking",
                                         compact = true,
@@ -3079,7 +3392,7 @@ private fun BetaMenuTabPill(
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, lineHeight = 11.sp),
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             color = if (selected) {
                 MaterialTheme.colorScheme.onPrimaryContainer
@@ -3107,7 +3420,7 @@ private fun VulvaBetaToggleRow(
             .fillMaxWidth()
             .heightIn(min = if (compact) 48.dp else 56.dp)
             .clickable(onClick = onToggle)
-            .padding(horizontal = if (compact) 8.dp else 14.dp, vertical = if (compact) 4.dp else 8.dp)
+            .padding(horizontal = if (compact) 8.dp else 14.dp, vertical = if (compact) 3.dp else 8.dp)
             .testTag(tag)
             .semantics {
                 contentDescription = "$title, ${if (checked) "enabled" else "disabled"}. $subtitle"
@@ -3118,20 +3431,28 @@ private fun VulvaBetaToggleRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodyMedium,
+                style = if (compact) {
+                    MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 11.5.sp)
+                } else {
+                    MaterialTheme.typography.bodyMedium
+                },
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
                 text = subtitle,
-                style = if (compact) MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 13.sp) else MaterialTheme.typography.bodySmall,
+                style = if (compact) {
+                    MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp, lineHeight = 10.sp)
+                } else {
+                    MaterialTheme.typography.bodySmall
+                },
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Switch(
             checked = checked,
             onCheckedChange = null,
-            modifier = if (compact) Modifier.scale(0.80f) else Modifier
+            modifier = if (compact) Modifier.scale(0.76f) else Modifier
         )
     }
 }
@@ -3157,12 +3478,12 @@ private fun BetaStrengthSliderRow(
         ) {
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp, lineHeight = 10.sp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
                 text = "$pct%",
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 11.sp),
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary
             )

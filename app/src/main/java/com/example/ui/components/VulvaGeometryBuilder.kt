@@ -107,6 +107,13 @@ data class VulvaDeformationState(
     val betaV3LabialBlendStrength: Float = 0.70f,
     val betaV3IntricateLabiaFolds: Boolean = false,
     val betaV3LabiaFoldsStrength: Float = 0.70f,
+    /**
+     * Vulva Beta v3 Option 7 (Medial Labial Root Color Continuity): strictly localized material
+     * continuity at the labia minora–vestibule root (u -> 0) to eliminate the pale cutaneous bleed
+     * band without altering geometry, normals, lighting, or free-edge pigmentation. OFF by default.
+     */
+    val betaV3MedialRootContinuity: Boolean = false,
+    val betaV3MedialRootStrength: Float = 0.75f,
     val betaBreastSizeBoost: Float = 0f,
     /**
      * Lifelike Beta (Tab 2 & Tab 3) micro-behavior parameters (all 0f / false by default in
@@ -296,6 +303,8 @@ class VulvaAnatomySceneMesh {
     private var lastVulvaBetaV3LabialBlendStrength = Float.NaN
     private var lastVulvaBetaV3IntricateLabiaFolds = false
     private var lastVulvaBetaV3LabiaFoldsStrength = Float.NaN
+    private var lastVulvaBetaV3MedialRootContinuity = false
+    private var lastVulvaBetaV3MedialRootStrength = Float.NaN
     private var lastBetaShortPerineum = false
     private var lastBetaSoftButtockTable = false
     private var lastBetaSmoothVulvaSeam = false
@@ -602,7 +611,10 @@ class VulvaAnatomySceneMesh {
                     state.betaV3LabialBlendStrength != lastVulvaBetaV3LabialBlendStrength) ||
                 state.betaV3IntricateLabiaFolds != lastVulvaBetaV3IntricateLabiaFolds ||
                 (state.betaV3IntricateLabiaFolds &&
-                    state.betaV3LabiaFoldsStrength != lastVulvaBetaV3LabiaFoldsStrength)
+                    state.betaV3LabiaFoldsStrength != lastVulvaBetaV3LabiaFoldsStrength) ||
+                state.betaV3MedialRootContinuity != lastVulvaBetaV3MedialRootContinuity ||
+                (state.betaV3MedialRootContinuity &&
+                    state.betaV3MedialRootStrength != lastVulvaBetaV3MedialRootStrength)
             if (vulvaNeedsUpdate) {
                 updateBlossomVulvaPatch(state)
                 updateClitoralGlans(state, includeLithotomy = true)
@@ -756,7 +768,10 @@ class VulvaAnatomySceneMesh {
                     state.betaV3LabialBlendStrength != lastVulvaBetaV3LabialBlendStrength) ||
                 state.betaV3IntricateLabiaFolds != lastVulvaBetaV3IntricateLabiaFolds ||
                 (state.betaV3IntricateLabiaFolds &&
-                    state.betaV3LabiaFoldsStrength != lastVulvaBetaV3LabiaFoldsStrength)
+                    state.betaV3LabiaFoldsStrength != lastVulvaBetaV3LabiaFoldsStrength) ||
+                state.betaV3MedialRootContinuity != lastVulvaBetaV3MedialRootContinuity ||
+                (state.betaV3MedialRootContinuity &&
+                    state.betaV3MedialRootStrength != lastVulvaBetaV3MedialRootStrength)
             if (pelvisVulvaNeedsUpdate) {
                 updateContouredPelvis(state)
                 updateClitoralGlans(state, includeLithotomy = false)
@@ -800,6 +815,8 @@ class VulvaAnatomySceneMesh {
         lastVulvaBetaV3LabialBlendStrength = state.betaV3LabialBlendStrength
         lastVulvaBetaV3IntricateLabiaFolds = state.betaV3IntricateLabiaFolds
         lastVulvaBetaV3LabiaFoldsStrength = state.betaV3LabiaFoldsStrength
+        lastVulvaBetaV3MedialRootContinuity = state.betaV3MedialRootContinuity
+        lastVulvaBetaV3MedialRootStrength = state.betaV3MedialRootStrength
     }
 
     private fun updateBlossomBreasts(s: VulvaDeformationState) {
@@ -874,6 +891,7 @@ class VulvaAnatomySceneMesh {
         val asymS = if (s.betaV3AnatomicalAsymmetry) s.betaV3AsymmetryStrength.coerceIn(0f, 1f) * 3.0f * v3PatchMask else 0f
         val surfS = if (s.betaV3RegionalSurfaceDetail) s.betaV3SurfaceStrength.coerceIn(0f, 1f) * 3.0f * v3PatchMask else 0f
         val foldS = if (s.betaV3IntricateLabiaFolds) s.betaV3LabiaFoldsStrength.coerceIn(0f, 1f) * v3PatchMask else 0f
+        val medRootS = if (s.betaV3MedialRootContinuity) s.betaV3MedialRootStrength.coerceIn(0f, 1f) * v3PatchMask else 0f
 
         // Teardrop outer labia majora crests framing the continuous inner arch naturally
         // Beta v3 Toggle 3 (Subtle Anatomical Asymmetry): organic left/right fullness & longitudinal peak offset
@@ -1170,6 +1188,15 @@ class VulvaAnatomySceneMesh {
         } else {
             insideVestibule
         }
+        // Beta v3 Option 7: keep the immediate patch-side labial-attachment rim warm mucosal tissue
+        // so the medial labial root never samples pale cutaneous skin underneath (zero dz or AO change).
+        val effectiveVestibuleColorMask = if (medRootS > 1e-5f) {
+            val rootRimBand = (1f - smoothStep(0.62f, 1.38f, vestEllipse)) *
+                smoothBell(y, -0.44f, 0.30f, 0.09f) * medRootS
+            max(vestibuleColorMask, rootRimBand * 0.86f).coerceIn(0f, 1f)
+        } else {
+            vestibuleColorMask
+        }
         val warmInnerLabiaMajora = if (s.betaSoftLabiaInteriorEdge) {
             val warmY = smoothStep(SEAM_C_WARM_MAJORA_Y_OUTER_LO, -0.36f, y) *
                 (1f - smoothStep(0.30f, SEAM_C_WARM_MAJORA_Y_OUTER_HI, y))
@@ -1178,9 +1205,9 @@ class VulvaAnatomySceneMesh {
             smoothStep(0.38f, 0.08f, abs(x)) * smoothBell(y, -0.52f, 0.46f, 0.16f)
         }
         val anusMucosaHint = exp(-aR2 * 3.2f) * 0.24f
-        val mucosa = (vestibuleColorMask * 1.05f + warmInnerLabiaMajora * 0.16f + anusMucosaHint).coerceIn(0f, 1f)
-        val wetness = (vestibuleColorMask * (0.34f + 0.28f * cavityOpen) +
-            exp(-uR2 * 1.8f) * 0.28f * vestibuleColorMask +
+        val mucosa = (effectiveVestibuleColorMask * 1.05f + warmInnerLabiaMajora * 0.16f + anusMucosaHint).coerceIn(0f, 1f)
+        val wetness = (effectiveVestibuleColorMask * (0.34f + 0.28f * cavityOpen) +
+            exp(-uR2 * 1.8f) * 0.28f * effectiveVestibuleColorMask +
             exp(-iR2 * 1.05f) * 0.34f +
             exp(-aR2 * 4.0f) * 0.10f).coerceIn(0f, 0.86f)
 
@@ -1422,6 +1449,7 @@ class VulvaAnatomySceneMesh {
         val surfS = if (s.betaV3RegionalSurfaceDetail) s.betaV3SurfaceStrength.coerceIn(0f, 1f) * 3.0f else 0f
         val blendS = if (s.betaV3LabialVestibuleBlend) s.betaV3LabialBlendStrength.coerceIn(0f, 1f) else 0f
         val foldS = if (s.betaV3IntricateLabiaFolds) s.betaV3LabiaFoldsStrength.coerceIn(0f, 1f) else 0f
+        val medRootS = if (s.betaV3MedialRootContinuity) s.betaV3MedialRootStrength.coerceIn(0f, 1f) else 0f
 
         for (r in 0 until archRows) {
             val arcS = (r.toFloat() / (archRows - 1)) * 2f - 1f
@@ -1836,7 +1864,13 @@ class VulvaAnatomySceneMesh {
                     // so the base of the labia minora dissolves seamlessly into the vestibule floor with 0 hard line!
                     val innerRootAlpha = if (blendS > 1e-5f) {
                         val medFeather = smoothStep(0.0f, 0.115f, u)
-                        1f - (1f - medFeather) * blendS * labiaMask
+                        val rawAlpha = 1f - (1f - medFeather) * blendS * labiaMask
+                        // Beta v3 Option 7: prevent medial root alpha feathering from exposing lighter underlying skin
+                        if (medRootS > 1e-5f) {
+                            rawAlpha + (1f - rawAlpha) * (0.90f * medRootS * labiaMask)
+                        } else {
+                            rawAlpha
+                        }
                     } else 1f
                     val tipGate = 1f - smoothStep(0.25f, 0.78f, fourchetteTaper)
                     val elevAbovePatch = pz - groundZ
@@ -1850,8 +1884,27 @@ class VulvaAnatomySceneMesh {
                     archAlpha = 1f
                 }
 
-                val finalMucosa = archMucosa * (1f - bodyLerp) + targetMucosa * bodyLerp
-                val finalWetness = archWetness * (1f - bodyLerp) + targetWetness * bodyLerp
+                // Beta v3 Option 7: strictly within the medial labial root zone (u < crestU * 0.88), maintain
+                // warm mucosal continuity in targetMucosa/targetWetness so bodyLerp never drags the root toward
+                // pale cutaneous skin (zero effect on geometry, normals, outer skirt u >= crestU, or free rim).
+                val medialRootZone = if (medRootS > 1e-5f) {
+                    (1f - smoothStep(0f, crestU * 0.88f, u)) * labiaMask * medRootS
+                } else 0f
+                val effectiveTargetMucosa = if (medialRootZone > 1e-5f) {
+                    val medialMucosaFloor = 0.78f + 0.14f * (1f - smoothStep(0f, 0.25f, u))
+                    targetMucosa + (max(targetMucosa, medialMucosaFloor) - targetMucosa) * medialRootZone
+                } else {
+                    targetMucosa
+                }
+                val effectiveTargetWetness = if (medialRootZone > 1e-5f) {
+                    val medialWetFloor = 0.50f + 0.10f * (1f - smoothStep(0f, 0.25f, u))
+                    targetWetness + (max(targetWetness, medialWetFloor) - targetWetness) * medialRootZone
+                } else {
+                    targetWetness
+                }
+
+                val finalMucosa = archMucosa * (1f - bodyLerp) + effectiveTargetMucosa * bodyLerp
+                val finalWetness = archWetness * (1f - bodyLerp) + effectiveTargetWetness * bodyLerp
                 val finalAo = archAo * (1f - bodyLerp) + targetAo * bodyLerp
                 val finalPigment = archPigment * (1f - bodyLerp) + targetPigment * bodyLerp
 

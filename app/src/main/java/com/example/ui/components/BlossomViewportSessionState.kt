@@ -99,6 +99,31 @@ class BlossomViewportSessionState {
     internal val lastHeartStimMsState = mutableLongStateOf(0L)
     var lastHeartStimMs: Long by lastHeartStimMsState
 
+    // --- Peak 140 BPM exertion climax episode & post-peak recovery continuity ---
+    internal val peakEpisodeActiveState = mutableStateOf(false)
+    var peakEpisodeActive: Boolean by peakEpisodeActiveState
+
+    internal val peakEpisodeEndMsState = mutableLongStateOf(0L)
+    var peakEpisodeEndMs: Long by peakEpisodeEndMsState
+
+    internal val peakRecoveryFastEndMsState = mutableLongStateOf(0L)
+    var peakRecoveryFastEndMs: Long by peakRecoveryFastEndMsState
+
+    internal val peakRefractoryUntilMsState = mutableLongStateOf(0L)
+    var peakRefractoryUntilMs: Long by peakRefractoryUntilMsState
+
+    internal val postPeakSighTokenState = mutableIntStateOf(0)
+    var postPeakSighToken: Int by postPeakSighTokenState
+
+    internal val postPeakSighCountState = mutableIntStateOf(2)
+    var postPeakSighCount: Int by postPeakSighCountState
+
+    var peakHeadPitch: Float = 0f
+    var peakHeadTurn: Float = 0f
+    var peakHeadRoll: Float = 0f
+    var peakLegShakeL: Float = 0f
+    var peakLegShakeR: Float = 0f
+
     // --- Appearance, lighting & viewport mode ---
     internal val hairStyleIndexState = mutableIntStateOf(2)
     var hairStyleIndex: Int by hairStyleIndexState
@@ -176,6 +201,12 @@ class BlossomViewportSessionState {
     var betaV3IntricateLabiaFolds: Boolean by betaV3IntricateLabiaFoldsState
     internal val betaV3LabiaFoldsStrengthState = mutableFloatStateOf(0.65f)
     var betaV3LabiaFoldsStrength: Float by betaV3LabiaFoldsStrengthState
+
+    // Beta Option #7 (v21.0): Medial Labial Root Color Continuity — OFF by default for isolated A/B evaluation
+    internal val betaV3MedialRootContinuityState = mutableStateOf(false)
+    var betaV3MedialRootContinuity: Boolean by betaV3MedialRootContinuityState
+    internal val betaV3MedialRootStrengthState = mutableFloatStateOf(0.75f)
+    var betaV3MedialRootStrength: Float by betaV3MedialRootStrengthState
 
     internal val betaVulvaElasticityEnabledState = mutableStateOf(true)
     var betaVulvaElasticityEnabled: Boolean by betaVulvaElasticityEnabledState
@@ -258,6 +289,7 @@ class BlossomViewportSessionState {
         betaV3RegionalSurfaceDetail = false
         betaV3LabialVestibuleBlend = false
         betaV3IntricateLabiaFolds = false
+        betaV3MedialRootContinuity = false
         betaVulvaElasticityEnabled = false
         betaBreastSizeBoostEnabled = false
         betaLifeEyeMicrosaccades = false

@@ -1,4 +1,4 @@
-# Bloom Atlas (Version 19.0 — Pre-Graduation Milestone)
+# Bloom Atlas (Version 21.0)
 
 **Bloom Atlas** is an educational Android application built with Kotlin, Jetpack Compose, Material 3, and a custom real-time OpenGL ES 2.0 procedural 3D anatomy engine.
 
@@ -6,12 +6,12 @@
 
 ## Features
 
-- **Interactive 3D Anatomy Explorer (`Blossom v19.0`)**
+- **Interactive 3D Anatomy Explorer (`Blossom v21.0`)**
   - Procedural full-body reclining anatomical model rendered in real time via a custom `TextureView` + EGL14 / OpenGL ES 2.0 pipeline (no external 3D asset files required).
-  - **Touch Tissue mode**: multi-touch elastic deformation of outer/inner labia (with adjustable soft-tissue elastic resistance up to 60%), clitoral hood retraction, breasts, glutes, positional leg spread, head turn/nod, and an elasticity-aligned animated IK self-spread pose (*"Ask Blossom to Spread"*).
+  - **Touch Tissue mode**: multi-touch elastic deformation of outer/inner labia (default 50% elastic resistance, adjustable up to 60%), clitoral hood retraction, breasts, glutes, positional leg spread, head turn/nod/lean-back, and an elasticity-aligned animated IK self-spread pose (*"Ask Blossom to Spread"*).
   - **Orbit 3D mode**: drag to orbit, pinch to zoom from full-body to macro close-up, and two-finger pan head-to-toe, plus quick camera angle presets.
-  - **Real-time appearance & Beta Lab controls**: compact, translucent always-on-top 3-tab **Beta Lab** (`Vulva`, `Life`, `Life+`) with toggle value memory, skin tone presets, hair color swatches, breast size & boost sliders, pubic hair density slider, studio Exam Light vs. raking Side Light, and sensory haptics.
-  - **Scroll-persistent physiological animations**: chest/abdomen ribcage breathing, micro-saccades, asymmetric/double blinking, gaze anticipation, subtle swallowing, postural settling, living warmth, and 3× slower sympathetic cardio-respiratory heart-rate dynamics — all preserved across scrolling and tab switches via `BlossomViewportSessionState`.
+  - **Real-time appearance & Beta Lab controls**: compact, translucent, scroll-locked always-on-top 3-tab **Beta Lab** (`Vulva`, `Life`, `Life+`) with toggle value memory, medial labial root color continuity (Option #7), skin tone presets, hair color swatches, breast size & boost sliders, pubic hair density slider, studio Exam Light vs. raking Side Light, and sensory haptics.
+  - **Scroll-persistent physiological animations**: chest/abdomen ribcage breathing, micro-saccades, tighter asymmetric (8–19ms) and double blinking, gaze anticipation, subtle swallowing, postural settling, living warmth, 3× slower sympathetic cardio-respiratory heart-rate dynamics, and a coordinated 140 BPM 10-second peak exertion sequence with post-peak recovery sighs and 2× 6-second heart-rate cooldown — all preserved across scrolling and tab switches via `BlossomViewportSessionState`.
   - **Legacy compatibility option**: the pre-Beta v1 look (original vulva, seam, neck, and hair rendering) is preserved behind a collapsed-by-default **Advanced rendering → Legacy vulva** switch at the bottom of the 3D explorer panel.
 - **Guided Learning & Tools**
   - Illustrated anatomy guides, sensitivity & structure breakdowns, cycle wheel explorer, diversity studies, and curated educational resources.
@@ -75,6 +75,11 @@ If you are modifying the 3D anatomy, tweaking colors/shading, or trying to figur
 ---
 
 ## Version Checkpoints
+
+- **Version 21.0 (2026-11-26)**
+  - **Beta Option #7 (*Medial root color continuity*)**: independent, OFF-by-default toggle + strength slider eliminating the localized pale cutaneous tone band at the inner labia–vestibule junction while keeping geometry, normals, lighting, and free-edge pigmentation untouched.
+  - **140 BPM peak exertion sequence & recovery**: ~10s fast/heavy irregular breathing, rapid double blinking with two random 1–2s eye-closures, quick leg closure with independent erratic leg tremble, and head look-down → lean-back with quick small erratic side-to-side motion, followed by 2–3 powerful slow sighs and a 6-second 2× heart-rate cooldown.
+  - **Refined blinking, elasticity & Beta Lab UI**: 50% closer asymmetric blinks (`8–19ms`), 50% default vulva elasticity, ~20% smaller Beta Lab typography, and strict nested scroll lock inside the Beta Lab panel.
 
 - **★ Version 19.0 — Significant Pre-Graduation Milestone (2026-11-26)** *(Pre-baking candidate)*
   - **Promoted Beta Lab defaults**: Vulva options 1–6 (50% / 50% / 85% / 36% / 75% / 65%), vulva elastic resistance at 40% (new 60% max), breast size boost at 45%, all 6 Life behaviors, and all 7 Life+ realism behaviors ON by default (Heart Rate HUD stays OFF by default).

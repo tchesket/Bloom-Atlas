@@ -1,5 +1,21 @@
 # Bloom Atlas — Version History
 
+## Version 21.0 (`versionCode = 21`)
+**Date:** 2026-11-26
+
+- **Beta Option #7 — Medial Labial Root Color Continuity (`VulvaGeometryBuilder.kt`, `VulvaGlRenderer.kt`, `InteractiveVulva3DCanvas.kt`)**
+  - Added an independent, OFF-by-default Beta toggle with an adjustable strength slider (`75%` default when enabled) strictly targeting the pale cutaneous tone band at the labia minora–vestibule root junction (`u -> 0`).
+  - Maintains warm mucosal continuity in `targetMucosa`/`targetWetness`, prevents `innerRootAlpha` from exposing lighter underlying patch skin, preserves mucosal patch coloration along the immediate attachment rim, and unlocks `vestBaseMask` at lower mucosal weights without modifying geometry, normals, lighting, or free-edge pigmentation.
+- **Peak 140 BPM Exertion Sequence & Post-Peak Recovery (`InteractiveVulva3DCanvas.kt`, `VulvaGlRenderer.kt`, `BlossomUpperBodyBuilder.kt`)**
+  - Automatically triggers a coordinated ~10-second peak exertion sequence when heart rate reaches **140 BPM**: very fast, heavy, irregular breathing; rapid blinking (mostly double blinks) with two randomly placed 1–2s sustained eye closures; legs quickly closing shut then trembling erratically and independently; and head looking straight down (~1.1s) before leaning all the way back (`headPitch = -1.0f`) with quick, small erratic side-to-side movements.
+  - Followed immediately by **2–3 powerful, slow recovery sighs**, **2× heart-rate cooldown speed for 6 seconds** returning smoothly to normal recovery rate afterward, and seamless return of head, legs, and blinking to resting behavior.
+- **Refined Asymmetric Blinking, Default Elasticity & Beta Lab Ergonomics (`InteractiveVulva3DCanvas.kt`)**
+  - Tightened left/right asymmetric blink offset by 50% (`8–19ms`, down from `16–38ms`).
+  - Raised default vulva elastic resistance to **50%** (`0.50f`, max `60%`).
+  - Scaled Beta Lab overlay text ~20% smaller and added nested scroll/fling isolation so scrolling to the end of the Beta Lab menu stops cleanly and never scrolls the parent page.
+
+---
+
 ## Version 19.0 (`versionCode = 19`, ★ Significant Pre-Graduation Milestone)
 **Date:** 2026-11-26
 
