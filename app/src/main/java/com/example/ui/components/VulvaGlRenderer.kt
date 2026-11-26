@@ -199,6 +199,7 @@ class VulvaGlTextureView(
     private var uBetaV2NaturalPelvicFinishLoc = -1
     private var uShoulderRelaxLLoc = -1
     private var uShoulderRelaxRLoc = -1
+    private var uBetaLifeWarmthLoc = -1
 
     private var surfaceWidth = 1
     private var surfaceHeight = 1
@@ -537,6 +538,7 @@ class VulvaGlTextureView(
         uBetaV2NaturalPelvicFinishLoc = GLES20.glGetUniformLocation(program, "uBetaV2NaturalPelvicFinish")
         uShoulderRelaxLLoc = GLES20.glGetUniformLocation(program, "uShoulderRelaxL")
         uShoulderRelaxRLoc = GLES20.glGetUniformLocation(program, "uShoulderRelaxR")
+        uBetaLifeWarmthLoc = GLES20.glGetUniformLocation(program, "uBetaLifeWarmth")
 
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glDepthFunc(GLES20.GL_LEQUAL)
@@ -666,6 +668,7 @@ class VulvaGlTextureView(
         GLES20.glUniform1f(uBreathAbdomenLoc, breathDisp.second)
         GLES20.glUniform1f(uShoulderRelaxLLoc, if (legsMode) currentDeform.shoulderRelaxL else 0f)
         GLES20.glUniform1f(uShoulderRelaxRLoc, if (legsMode) currentDeform.shoulderRelaxR else 0f)
+        GLES20.glUniform1f(uBetaLifeWarmthLoc, if (legsMode) currentDeform.livingWarmth.coerceIn(0f, 1f) else 0f)
 
         GLES20.glEnableVertexAttribArray(aPosLoc)
         GLES20.glEnableVertexAttribArray(aNormalLoc)
@@ -1334,6 +1337,36 @@ class VulvaGlTextureView(
             return floatArrayOf(dx, dy, dz)
         }
 
+        /**
+         * Exact CPU mirror of the FRAGMENT_SHADER Tab 3 Lifelike+ subtle capillary warmth mask
+         * (localized strictly to cheek apples, ears/temples, and upper chest/décolletage — 0.0 on
+         * legs, forearms, abdomen, and pelvic/vulvar tissue).
+         */
+        internal fun evaluateLivingWarmthMask(
+            x: Float,
+            y: Float,
+            nz: Float,
+            mucosa: Float = 0f,
+            dryPigmentMask: Float = 0f
+        ): Float {
+            fun glSmoothStep(e0: Float, e1: Float, v: Float): Float {
+                val t = ((v - e0) / (e1 - e0)).coerceIn(0f, 1f)
+                return t * t * (3f - 2f * t)
+            }
+            val ax = kotlin.math.abs(x)
+            val isHead = glSmoothStep(5.40f, 5.62f, y)
+            val cheekDx = (ax - 0.30f) / 0.16f
+            val cheekDy = (y - 6.32f) / 0.17f
+            val cheekFlush = isHead * kotlin.math.exp(-(cheekDx * cheekDx + cheekDy * cheekDy)) *
+                glSmoothStep(0.10f, 0.55f, nz)
+            val earDy = (y - 6.34f) / 0.22f
+            val earFlush = isHead * glSmoothStep(0.44f, 0.62f, ax) * kotlin.math.exp(-(earDy * earDy)) * 0.45f
+            val chestFlush = glSmoothStep(3.45f, 4.15f, y) * (1f - glSmoothStep(4.78f, 5.25f, y)) *
+                (1f - glSmoothStep(0.75f, 1.38f, ax)) * glSmoothStep(0.15f, 0.65f, nz) *
+                (1f - dryPigmentMask * 0.75f) * 0.62f
+            return ((cheekFlush + earFlush + chestFlush) * (1f - mucosa.coerceIn(0f, 1f))).coerceIn(0f, 1f)
+        }
+
         private const val VERTEX_SHADER = """
             attribute vec3 aPos;
             attribute vec3 aNormal;
@@ -1473,6 +1506,7 @@ class VulvaGlTextureView(
             uniform float uBetaWarmTransitionZone;
             uniform float uBetaRefineInnerLabia;
             uniform float uBetaV2NaturalPelvicFinish;
+            uniform float uBetaLifeWarmth;
 
             float hash31(vec3 p) {
                 p = fract(p * vec3(0.1031, 0.11369, 0.13787));
@@ -1932,6 +1966,23 @@ class VulvaGlTextureView(
                 float roseBrownStrength = uBetaRefineInnerLabia * clamp(innerLabiaFade * 0.11 + freeEdgeWeight * 0.19, 0.0, 0.28);
                 vec3 warmRoseBrown = mix(uSkinShadow * vec3(0.84, 0.64, 0.56), uMucosaDeep * vec3(0.96, 0.78, 0.70), 0.38);
                 albedo = mix(albedo, warmRoseBrown, roseBrownStrength);
+
+                // Tab 3 Lifelike+: Subtle living capillary warmth on cheeks, ears & upper chest (0.0 when OFF -> bit-identical)
+                if (uBetaLifeWarmth > 0.001) {
+                    float axW = abs(vRestPos.x);
+                    float cheekFlush = isHeadRegion *
+                        exp(-pow((axW - 0.30) / 0.16, 2.0) - pow((vRestPos.y - 6.32) / 0.17, 2.0)) *
+                        smoothstep(0.10, 0.55, N.z);
+                    float earFlush = isHeadRegion *
+                        smoothstep(0.44, 0.62, axW) * exp(-pow((vRestPos.y - 6.34) / 0.22, 2.0)) * 0.45;
+                    float chestFlush = smoothstep(3.45, 4.15, vRestPos.y) * (1.0 - smoothstep(4.78, 5.25, vRestPos.y)) *
+                        (1.0 - smoothstep(0.75, 1.38, axW)) * smoothstep(0.15, 0.65, N.z) *
+                        (1.0 - dryPigmentMask * 0.75) * 0.62;
+                    float warmthMask = clamp((cheekFlush + earFlush + chestFlush) * (1.0 - mucosa), 0.0, 1.0);
+                    float flushMix = clamp(warmthMask * uBetaLifeWarmth * 0.38, 0.0, 0.24);
+                    vec3 capillaryTone = albedo * vec3(1.045, 0.915, 0.905);
+                    albedo = mix(albedo, capillaryTone, flushMix);
+                }
 
                 // Hair-color-matched sculpted eyebrows (pigment ~0.18..0.56) & crisp dark eyelashes (pigment > 0.68) — zero stray dots!
                 // Fast-path guard: skip 3D brow hair noise on all non-facial/non-brow fragments (bit-for-bit identical result).

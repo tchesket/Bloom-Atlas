@@ -88,10 +88,10 @@ data class VulvaDeformationState(
     val betaV2BalancedUpperVulvaDepth: Boolean = false,
     val betaV2BalancedUpperVulvaDepthWithCrest: Boolean = false,
     val betaV2AdjustableVestibularConcavity: Boolean = false,
-    val betaV2VestibularConcavity: Float = 0.45f,
+    val betaV2VestibularConcavity: Float = 0.30f,
     /**
-     * Lifelike Beta micro-behavior parameters (all 0f / false by default so baseline Version 13.0
-     * geometry, animation, and shading are preserved bit-for-bit when disabled).
+     * Lifelike Beta (Tab 2 & Tab 3) micro-behavior parameters (all 0f / false by default in
+     * VulvaDeformationState so Version 13.0 baseline geometry & shading stay bit-identical).
      */
     val eyeGazeX: Float = 0f,
     val eyeGazeY: Float = 0f,
@@ -101,7 +101,13 @@ data class VulvaDeformationState(
     val faceLipSoft: Float = 0f,
     val betaLifeDeepBreathsSighs: Boolean = false,
     val shoulderRelaxL: Float = 0f,
-    val shoulderRelaxR: Float = 0f
+    val shoulderRelaxR: Float = 0f,
+    // Tab 3 (Lifelike+) live parameters (strictly 0f when disabled)
+    val eyeBlinkRightOffset: Float = 0f,
+    val eyelidGazeTrack: Float = 0f,
+    val swallowPhase: Float = 0f,
+    val nostrilBreath: Float = 0f,
+    val livingWarmth: Float = 0f
 )
 
 class DynamicGlMesh(
@@ -222,12 +228,16 @@ class VulvaAnatomySceneMesh {
     private var lastAppliedHeadTurn = Float.NaN
     private var lastAppliedHeadPitch = Float.NaN
     private var lastAppliedEyeBlink = Float.NaN
+    private var lastAppliedEyeBlinkRightOffset = Float.NaN
+    private var lastAppliedEyelidGazeTrack = Float.NaN
     private var lastAppliedEyeGazeX = Float.NaN
     private var lastAppliedEyeGazeY = Float.NaN
     private var lastAppliedHeadRollOffset = Float.NaN
     private var lastAppliedFaceWarmth = Float.NaN
     private var lastAppliedFaceBrow = Float.NaN
     private var lastAppliedFaceLipSoft = Float.NaN
+    private var lastAppliedSwallowPhase = Float.NaN
+    private var lastAppliedNostrilBreath = Float.NaN
     private var lastAppliedBreastLeftX = Float.NaN
     private var lastAppliedBreastLeftY = Float.NaN
     private var lastAppliedBreastRightX = Float.NaN
@@ -621,12 +631,16 @@ class VulvaAnatomySceneMesh {
             if (state.headTurn != lastAppliedHeadTurn ||
                 state.headPitch != lastAppliedHeadPitch ||
                 state.eyeBlink != lastAppliedEyeBlink ||
+                state.eyeBlinkRightOffset != lastAppliedEyeBlinkRightOffset ||
+                state.eyelidGazeTrack != lastAppliedEyelidGazeTrack ||
                 state.eyeGazeX != lastAppliedEyeGazeX ||
                 state.eyeGazeY != lastAppliedEyeGazeY ||
                 state.headRollOffset != lastAppliedHeadRollOffset ||
                 state.faceWarmth != lastAppliedFaceWarmth ||
                 state.faceBrow != lastAppliedFaceBrow ||
-                state.faceLipSoft != lastAppliedFaceLipSoft
+                state.faceLipSoft != lastAppliedFaceLipSoft ||
+                state.swallowPhase != lastAppliedSwallowPhase ||
+                state.nostrilBreath != lastAppliedNostrilBreath
             ) {
                 BlossomUpperBodyBuilder.applyHeadTurn(
                     bodyMesh = blossomBodyMesh,
@@ -642,17 +656,25 @@ class VulvaAnatomySceneMesh {
                     headRollOffset = state.headRollOffset,
                     faceWarmth = state.faceWarmth,
                     faceBrow = state.faceBrow,
-                    faceLipSoft = state.faceLipSoft
+                    faceLipSoft = state.faceLipSoft,
+                    eyeBlinkRightOffset = state.eyeBlinkRightOffset,
+                    eyelidGazeTrack = state.eyelidGazeTrack,
+                    swallowPhase = state.swallowPhase,
+                    nostrilBreath = state.nostrilBreath
                 )
                 lastAppliedHeadTurn = state.headTurn
                 lastAppliedHeadPitch = state.headPitch
                 lastAppliedEyeBlink = state.eyeBlink
+                lastAppliedEyeBlinkRightOffset = state.eyeBlinkRightOffset
+                lastAppliedEyelidGazeTrack = state.eyelidGazeTrack
                 lastAppliedEyeGazeX = state.eyeGazeX
                 lastAppliedEyeGazeY = state.eyeGazeY
                 lastAppliedHeadRollOffset = state.headRollOffset
                 lastAppliedFaceWarmth = state.faceWarmth
                 lastAppliedFaceBrow = state.faceBrow
                 lastAppliedFaceLipSoft = state.faceLipSoft
+                lastAppliedSwallowPhase = state.swallowPhase
+                lastAppliedNostrilBreath = state.nostrilBreath
             }
         } else {
             val pelvisVulvaNeedsUpdate = lastVulvaLithotomy != false ||

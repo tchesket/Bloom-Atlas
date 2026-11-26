@@ -1971,12 +1971,23 @@ internal object BlossomUpperBodyBuilder {
         val neckWeights: FloatArray,
         val blinkVertIndices: IntArray,
         val blinkClosedPosNorm: FloatArray,
+        val blinkVertIsRight: BooleanArray,
         val smileMorphIndices: IntArray,
         val smileMorphDeltaPosNorm: FloatArray,
         val browMorphIndices: IntArray,
         val browMorphDeltaPosNorm: FloatArray,
         val lipSoftMorphIndices: IntArray,
-        val lipSoftMorphDeltaPosNorm: FloatArray
+        val lipSoftMorphDeltaPosNorm: FloatArray,
+        val upperLidLiftIndices: IntArray,
+        val upperLidLiftIsRight: BooleanArray,
+        val upperLidLiftDeltaPosNorm: FloatArray,
+        val swallowJawIndices: IntArray,
+        val swallowJawDeltaPosNorm: FloatArray,
+        val nostrilMorphIndices: IntArray,
+        val nostrilMorphDeltaPosNorm: FloatArray,
+        val throatNeckLocalIndices: IntArray,
+        val throatNeckY: FloatArray,
+        val throatNeckWeights: FloatArray
     )
 
     fun buildHeadRigCache(
@@ -2008,7 +2019,20 @@ internal object BlossomUpperBodyBuilder {
         val eyeCenterZ = 0.528f
         val blinkIdxBuf = IntArray(headMesh.vertexCount)
         val blinkPosBuf = FloatArray(headMesh.vertexCount * 6)
+        val blinkRightBuf = BooleanArray(headMesh.vertexCount)
         var blinkCount = 0
+
+        val lidLiftIdxBuf = IntArray(headMesh.vertexCount)
+        val lidLiftRightBuf = BooleanArray(headMesh.vertexCount)
+        val lidLiftDeltaBuf = FloatArray(headMesh.vertexCount * 6)
+        var lidLiftCount = 0
+
+        fun localDeltaToWorldPre(dlx: Float, dly: Float, dlz: Float): FloatArray {
+            val sx = dlx * HEAD_SCALE
+            val sy = dly * HEAD_SCALE
+            val sz = dlz * HEAD_SCALE
+            return floatArrayOf(sx, sy * COS_PITCH - sz * SIN_PITCH, sy * SIN_PITCH + sz * COS_PITCH)
+        }
 
         for (i in 0 until headMesh.vertexCount) {
             val s = i * 6
@@ -2079,10 +2103,29 @@ internal object BlossomUpperBodyBuilder {
             }
 
             blinkIdxBuf[blinkCount] = i
+            blinkRightBuf[blinkCount] = lx >= 0f
             val d = blinkCount * 6
             blinkPosBuf[d] = closedW[0]; blinkPosBuf[d + 1] = closedW[1]; blinkPosBuf[d + 2] = closedW[2]
             blinkPosBuf[d + 3] = cnx; blinkPosBuf[d + 4] = cny; blinkPosBuf[d + 5] = cnz
             blinkCount++
+
+            // Subtle upper-eyelid tracking lift for gentle upward gaze (zero fold-over, fades smoothly at rim & crease)
+            if (ly >= upperLidY) {
+                val tAbove = ((ly - upperLidY) / (lidTop - upperLidY).coerceAtLeast(1e-4f)).coerceIn(0f, 1f)
+                val liftEnv = horizW * (1f - smoothStep(0.18f, 0.96f, tAbove)) * smoothStep(0.0f, 0.14f, tAbove + 0.08f)
+                if (liftEnv > 0.01f) {
+                    val dlyUp = 0.0082f * liftEnv
+                    val dlzBack = -0.0024f * liftEnv
+                    val dwUp = localDeltaToWorldPre(0f, dlyUp, dlzBack)
+                    val dnwUp = localDeltaToWorldPre(0f, 0.03f * liftEnv, 0f)
+                    lidLiftIdxBuf[lidLiftCount] = i
+                    lidLiftRightBuf[lidLiftCount] = lx >= 0f
+                    val ld = lidLiftCount * 6
+                    lidLiftDeltaBuf[ld] = dwUp[0]; lidLiftDeltaBuf[ld + 1] = dwUp[1]; lidLiftDeltaBuf[ld + 2] = dwUp[2]
+                    lidLiftDeltaBuf[ld + 3] = dnwUp[0]; lidLiftDeltaBuf[ld + 4] = dnwUp[1]; lidLiftDeltaBuf[ld + 5] = dnwUp[2]
+                    lidLiftCount++
+                }
+            }
         }
 
         // Capture upper cervical neck vertices in blossomBodyMesh (strictly ax < 0.58, y >= 4.92 -> 100% disjoint from arms & legs)
@@ -2107,15 +2150,39 @@ internal object BlossomUpperBodyBuilder {
         val neckIndices = idxBuf.copyOf(count)
         val neckWeights = wBuf.copyOf(count)
         val neckRest = FloatArray(count * 6)
+        val throatLocalIdxBuf = IntArray(count)
+        val throatYBuf = FloatArray(count)
+        val throatWBuf = FloatArray(count)
+        var throatCount = 0
         for (k in 0 until count) {
             val s = neckIndices[k] * stride
             val d = k * 6
-            neckRest[d] = bData[s]; neckRest[d + 1] = bData[s + 1]; neckRest[d + 2] = bData[s + 2]
-            neckRest[d + 3] = bData[s + 3]; neckRest[d + 4] = bData[s + 4]; neckRest[d + 5] = bData[s + 5]
+            val nxPos = bData[s]
+            val nyPos = bData[s + 1]
+            val nzPos = bData[s + 2]
+            val nnx = bData[s + 3]
+            val nny = bData[s + 4]
+            val nnz = bData[s + 5]
+            neckRest[d] = nxPos; neckRest[d + 1] = nyPos; neckRest[d + 2] = nzPos
+            neckRest[d + 3] = nnx; neckRest[d + 4] = nny; neckRest[d + 5] = nnz
+            // Capture anterior mid-throat vertices strictly for subtle swallowing wave (0 on breasts/back/face)
+            val axT = abs(nxPos)
+            if (nyPos in 5.04f..5.74f && axT < 0.24f && nnz > 0.35f) {
+                val tw = (1f - smoothStep(0.06f, 0.24f, axT)) *
+                    smoothStep(0.35f, 0.72f, nnz) *
+                    smoothStep(5.04f, 5.14f, nyPos) *
+                    (1f - smoothStep(5.64f, 5.74f, nyPos))
+                if (tw > 0.005f) {
+                    throatLocalIdxBuf[throatCount] = k
+                    throatYBuf[throatCount] = nyPos
+                    throatWBuf[throatCount] = tw
+                    throatCount++
+                }
+            }
         }
 
         // Precompute sparse subtle facial expression morph targets (all strictly localized to anterior face
-        // above jaw rim y > 5.88 -> 100% disjoint from neck seam beta and zero overhead when weights are 0f!)
+        // above jaw rim y > 5.81 -> 100% disjoint from neck seam beta and zero overhead when weights are 0f!)
         val smileIdxBuf = IntArray(headMesh.vertexCount)
         val smileDeltaBuf = FloatArray(headMesh.vertexCount * 6)
         var smileCount = 0
@@ -2127,6 +2194,14 @@ internal object BlossomUpperBodyBuilder {
         val lipSoftIdxBuf = IntArray(headMesh.vertexCount)
         val lipSoftDeltaBuf = FloatArray(headMesh.vertexCount * 6)
         var lipSoftCount = 0
+
+        val swallowJawIdxBuf = IntArray(headMesh.vertexCount)
+        val swallowJawDeltaBuf = FloatArray(headMesh.vertexCount * 6)
+        var swallowJawCount = 0
+
+        val nostrilIdxBuf = IntArray(headMesh.vertexCount)
+        val nostrilDeltaBuf = FloatArray(headMesh.vertexCount * 6)
+        var nostrilCount = 0
 
         fun localDeltaToWorld(dlx: Float, dly: Float, dlz: Float): FloatArray {
             val sx = dlx * HEAD_SCALE
@@ -2205,6 +2280,41 @@ internal object BlossomUpperBodyBuilder {
                     lipSoftCount++
                 }
             }
+
+            // 4. Tab 3 Lifelike+: Ultra-subtle swallow jaw/chin ease & quiet lip seal (strictly wy > 5.81)
+            if (ly in -0.68f..-0.40f && ax < 0.28f) {
+                val chinEaseW = exp(-((ax / 0.165f).let { it * it } + ((ly + 0.565f) / 0.080f).let { it * it }))
+                val lipSealW = exp(-((ax / 0.140f).let { it * it } + ((ly + 0.468f) / 0.036f).let { it * it }))
+                val dlyS = 0.0042f * lipSealW - 0.0052f * chinEaseW
+                val dlzS = -0.0050f * chinEaseW - 0.0018f * lipSealW
+                if (abs(dlyS) + abs(dlzS) > 1e-4f) {
+                    val dw = localDeltaToWorld(0f, dlyS, dlzS)
+                    val dnw = localDeltaToWorld(0f, -0.03f * chinEaseW, 0.02f * chinEaseW)
+                    swallowJawIdxBuf[swallowJawCount] = i
+                    val d = swallowJawCount * 6
+                    swallowJawDeltaBuf[d] = dw[0]; swallowJawDeltaBuf[d + 1] = dw[1]; swallowJawDeltaBuf[d + 2] = dw[2]
+                    swallowJawDeltaBuf[d + 3] = dnw[0]; swallowJawDeltaBuf[d + 4] = dnw[1]; swallowJawDeltaBuf[d + 5] = dnw[2]
+                    swallowJawCount++
+                }
+            }
+
+            // 5. Tab 3 Lifelike+: Whisper-soft nasal alar wing flare synced with breathing (noseAla centered at ax=0.090, ly=-0.244)
+            if (ly in -0.31f..-0.17f && ax in 0.032f..0.165f && lz > 0.38f) {
+                val alarW = exp(-(((ax - 0.092f) / 0.046f).let { it * it } + ((ly + 0.244f) / 0.042f).let { it * it })) *
+                    smoothStep(0.032f, 0.056f, ax)
+                val dlxN = side * 0.0054f * alarW
+                val dlyN = 0.0022f * alarW
+                val dlzN = 0.0020f * alarW
+                if (abs(dlxN) + abs(dlyN) + abs(dlzN) > 1e-4f) {
+                    val dw = localDeltaToWorld(dlxN, dlyN, dlzN)
+                    val dnw = localDeltaToWorld(side * 0.035f * alarW, 0.015f * alarW, 0f)
+                    nostrilIdxBuf[nostrilCount] = i
+                    val d = nostrilCount * 6
+                    nostrilDeltaBuf[d] = dw[0]; nostrilDeltaBuf[d + 1] = dw[1]; nostrilDeltaBuf[d + 2] = dw[2]
+                    nostrilDeltaBuf[d + 3] = dnw[0]; nostrilDeltaBuf[d + 4] = dnw[1]; nostrilDeltaBuf[d + 5] = dnw[2]
+                    nostrilCount++
+                }
+            }
         }
 
         return HeadRigCache(
@@ -2216,12 +2326,23 @@ internal object BlossomUpperBodyBuilder {
             neckWeights = neckWeights,
             blinkVertIndices = blinkIdxBuf.copyOf(blinkCount),
             blinkClosedPosNorm = blinkPosBuf.copyOf(blinkCount * 6),
+            blinkVertIsRight = blinkRightBuf.copyOf(blinkCount),
             smileMorphIndices = smileIdxBuf.copyOf(smileCount),
             smileMorphDeltaPosNorm = smileDeltaBuf.copyOf(smileCount * 6),
             browMorphIndices = browIdxBuf.copyOf(browCount),
             browMorphDeltaPosNorm = browDeltaBuf.copyOf(browCount * 6),
             lipSoftMorphIndices = lipSoftIdxBuf.copyOf(lipSoftCount),
-            lipSoftMorphDeltaPosNorm = lipSoftDeltaBuf.copyOf(lipSoftCount * 6)
+            lipSoftMorphDeltaPosNorm = lipSoftDeltaBuf.copyOf(lipSoftCount * 6),
+            upperLidLiftIndices = lidLiftIdxBuf.copyOf(lidLiftCount),
+            upperLidLiftIsRight = lidLiftRightBuf.copyOf(lidLiftCount),
+            upperLidLiftDeltaPosNorm = lidLiftDeltaBuf.copyOf(lidLiftCount * 6),
+            swallowJawIndices = swallowJawIdxBuf.copyOf(swallowJawCount),
+            swallowJawDeltaPosNorm = swallowJawDeltaBuf.copyOf(swallowJawCount * 6),
+            nostrilMorphIndices = nostrilIdxBuf.copyOf(nostrilCount),
+            nostrilMorphDeltaPosNorm = nostrilDeltaBuf.copyOf(nostrilCount * 6),
+            throatNeckLocalIndices = throatLocalIdxBuf.copyOf(throatCount),
+            throatNeckY = throatYBuf.copyOf(throatCount),
+            throatNeckWeights = throatWBuf.copyOf(throatCount)
         )
     }
 
@@ -2245,24 +2366,61 @@ internal object BlossomUpperBodyBuilder {
         headRollOffset: Float = 0f,
         faceWarmth: Float = 0f,
         faceBrow: Float = 0f,
-        faceLipSoft: Float = 0f
+        faceLipSoft: Float = 0f,
+        eyeBlinkRightOffset: Float = 0f,
+        eyelidGazeTrack: Float = 0f,
+        swallowPhase: Float = 0f,
+        nostrilBreath: Float = 0f
     ) {
         val turn = headTurn.coerceIn(-1f, 1f)
         val pitch = headPitch.coerceIn(0f, 1f)
-        val blink = eyeBlink.coerceIn(0f, 1f)
+        val blinkLBase = eyeBlink.coerceIn(0f, 1f)
+        val blinkRBase = (blinkLBase + eyeBlinkRightOffset).coerceIn(0f, 1f)
         val gazeX = eyeGazeX.coerceIn(-1f, 1f)
         val gazeY = eyeGazeY.coerceIn(-1f, 1f)
+        val lidTrackW = eyelidGazeTrack.coerceIn(0f, 1f)
+        val downTrackClosure = if (lidTrackW > 1e-4f && gazeY < 0f) {
+            (-gazeY * 0.28f * lidTrackW).coerceIn(0f, 0.30f)
+        } else {
+            0f
+        }
+        val upTrackLift = if (lidTrackW > 1e-4f && gazeY > 0f) {
+            (gazeY * 0.90f * lidTrackW).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+        val effBlinkL = if (downTrackClosure > 1e-4f) {
+            (blinkLBase + downTrackClosure * (1f - blinkLBase)).coerceIn(0f, 1f)
+        } else {
+            blinkLBase
+        }
+        val effBlinkR = if (downTrackClosure > 1e-4f) {
+            (blinkRBase + downTrackClosure * (1f - blinkRBase)).coerceIn(0f, 1f)
+        } else {
+            blinkRBase
+        }
         val rollExtra = headRollOffset.coerceIn(-0.12f, 0.12f)
         val warmth = faceWarmth.coerceIn(0f, 1f)
         val brow = faceBrow.coerceIn(-1f, 1f)
         val lipSoft = faceLipSoft.coerceIn(0f, 1f)
+        val swallowP = swallowPhase.coerceIn(0f, 1f)
+        val hasSwallow = swallowP > 0.001f && swallowP < 0.999f
+        val swallowJawW = if (hasSwallow) {
+            sin(smoothStep(0.04f, 0.62f, swallowP) * PI.toFloat()) * 0.85f
+        } else {
+            0f
+        }
+        val nostrilW = nostrilBreath.coerceIn(0f, 1f)
         val stride = DynamicGlMesh.FLOATS_PER_VERTEX
         val pivotY = HEAD_CENTER_Y - 0.18f
         val pivotZ = HEAD_CENTER_Z - 0.22f
 
-        val hasFacialMorph = warmth > 1e-4f || abs(brow) > 1e-4f || lipSoft > 1e-4f
-        // Build rest-space head buffer with live eyelid blink & optional Lifelike micro-expressions before cervical rotation
-        val headWork = if ((blink > 1e-4f && cache.blinkVertIndices.isNotEmpty()) || hasFacialMorph) {
+        val hasFacialMorph = warmth > 1e-4f || abs(brow) > 1e-4f || lipSoft > 1e-4f ||
+            swallowJawW > 1e-4f || nostrilW > 1e-4f
+        val hasBlink = (effBlinkL > 1e-4f || effBlinkR > 1e-4f) && cache.blinkVertIndices.isNotEmpty()
+        val hasLidLift = upTrackLift > 1e-4f && cache.upperLidLiftIndices.isNotEmpty()
+        // Build rest-space head buffer with live eyelid blink, tracking & optional Lifelike micro-expressions before cervical rotation
+        val headWork = if (hasBlink || hasLidLift || hasFacialMorph) {
             val buf = cache.headRestPosNorm.copyOf()
             if (hasFacialMorph) {
                 fun applySparseMorph(indices: IntArray, deltas: FloatArray, weight: Float) {
@@ -2285,19 +2443,46 @@ internal object BlossomUpperBodyBuilder {
                 applySparseMorph(cache.smileMorphIndices, cache.smileMorphDeltaPosNorm, warmth)
                 applySparseMorph(cache.browMorphIndices, cache.browMorphDeltaPosNorm, brow)
                 applySparseMorph(cache.lipSoftMorphIndices, cache.lipSoftMorphDeltaPosNorm, lipSoft)
+                applySparseMorph(cache.swallowJawIndices, cache.swallowJawDeltaPosNorm, swallowJawW)
+                applySparseMorph(cache.nostrilMorphIndices, cache.nostrilMorphDeltaPosNorm, nostrilW)
             }
-            if (blink > 1e-4f && cache.blinkVertIndices.isNotEmpty()) {
+            if (hasLidLift) {
+                val lIdx = cache.upperLidLiftIndices
+                val lRight = cache.upperLidLiftIsRight
+                val lDelta = cache.upperLidLiftDeltaPosNorm
+                for (k in lIdx.indices) {
+                    val sideBlink = if (lRight[k]) effBlinkR else effBlinkL
+                    val w = upTrackLift * (1f - sideBlink)
+                    if (w <= 1e-4f) continue
+                    val h = lIdx[k] * 6
+                    val d = k * 6
+                    buf[h] += lDelta[d] * w
+                    buf[h + 1] += lDelta[d + 1] * w
+                    buf[h + 2] += lDelta[d + 2] * w
+                    var nx = buf[h + 3] + lDelta[d + 3] * w
+                    var ny = buf[h + 4] + lDelta[d + 4] * w
+                    var nz = buf[h + 5] + lDelta[d + 5] * w
+                    val nLen = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-5f)
+                    buf[h + 3] = nx / nLen
+                    buf[h + 4] = ny / nLen
+                    buf[h + 5] = nz / nLen
+                }
+            }
+            if (hasBlink) {
                 val bIdx = cache.blinkVertIndices
+                val bRight = cache.blinkVertIsRight
                 val bClosed = cache.blinkClosedPosNorm
                 for (k in bIdx.indices) {
+                    val vBlink = if (bRight[k]) effBlinkR else effBlinkL
+                    if (vBlink <= 1e-4f) continue
                     val h = bIdx[k] * 6
                     val b = k * 6
-                    buf[h] = buf[h] + (bClosed[b] - buf[h]) * blink
-                    buf[h + 1] = buf[h + 1] + (bClosed[b + 1] - buf[h + 1]) * blink
-                    buf[h + 2] = buf[h + 2] + (bClosed[b + 2] - buf[h + 2]) * blink
-                    var nx = buf[h + 3] + (bClosed[b + 3] - buf[h + 3]) * blink
-                    var ny = buf[h + 4] + (bClosed[b + 4] - buf[h + 4]) * blink
-                    var nz = buf[h + 5] + (bClosed[b + 5] - buf[h + 5]) * blink
+                    buf[h] = buf[h] + (bClosed[b] - buf[h]) * vBlink
+                    buf[h + 1] = buf[h + 1] + (bClosed[b + 1] - buf[h + 1]) * vBlink
+                    buf[h + 2] = buf[h + 2] + (bClosed[b + 2] - buf[h + 2]) * vBlink
+                    var nx = buf[h + 3] + (bClosed[b + 3] - buf[h + 3]) * vBlink
+                    var ny = buf[h + 4] + (bClosed[b + 4] - buf[h + 4]) * vBlink
+                    var nz = buf[h + 5] + (bClosed[b + 5] - buf[h + 5]) * vBlink
                     val nLen = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-5f)
                     buf[h + 3] = nx / nLen
                     buf[h + 4] = ny / nLen
@@ -2307,6 +2492,37 @@ internal object BlossomUpperBodyBuilder {
             buf
         } else {
             cache.headRestPosNorm
+        }
+
+        // Build optional rest-space anterior throat swallow wave buffer (zero copy & bit-identical when swallowPhase == 0f)
+        val neckWork = if (hasSwallow && cache.throatNeckLocalIndices.isNotEmpty()) {
+            val buf = cache.neckRestPosNorm.copyOf()
+            val riseT = smoothStep(0f, 0.34f, swallowP)
+            val fallT = smoothStep(0.32f, 0.86f, swallowP)
+            val crestY = 5.30f + 0.22f * riseT - 0.42f * fallT
+            val swallowEnv = smoothStep(0f, 0.14f, swallowP) * (1f - smoothStep(0.78f, 1.0f, swallowP))
+            val dirVel = if (swallowP < 0.34f) 1.0f else -0.68f
+            val tIdx = cache.throatNeckLocalIndices
+            val tY = cache.throatNeckY
+            val tW = cache.throatNeckWeights
+            for (t in tIdx.indices) {
+                val dyCrest = (tY[t] - crestY) / 0.105f
+                val wave = exp(-(dyCrest * dyCrest)) * tW[t] * swallowEnv
+                if (wave <= 1e-4f) continue
+                val d = tIdx[t] * 6
+                buf[d + 1] += dirVel * 0.0065f * wave
+                buf[d + 2] += 0.0145f * wave
+                val nx = buf[d + 3]
+                val ny = buf[d + 4] - dyCrest * 0.08f * wave
+                val nz = buf[d + 5]
+                val nLen = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-5f)
+                buf[d + 3] = nx / nLen
+                buf[d + 4] = ny / nLen
+                buf[d + 5] = nz / nLen
+            }
+            buf
+        } else {
+            cache.neckRestPosNorm
         }
 
         // Build rest-space eyes buffer with optional Lifelike eye microsaccade/gaze rotation around each eyeball center
@@ -2374,12 +2590,12 @@ internal object BlossomUpperBodyBuilder {
             for (k in cache.neckBodyIndices.indices) {
                 val s = k * 6
                 val d = cache.neckBodyIndices[k] * stride
-                bData[d] = cache.neckRestPosNorm[s]
-                bData[d + 1] = cache.neckRestPosNorm[s + 1]
-                bData[d + 2] = cache.neckRestPosNorm[s + 2]
-                bData[d + 3] = cache.neckRestPosNorm[s + 3]
-                bData[d + 4] = cache.neckRestPosNorm[s + 4]
-                bData[d + 5] = cache.neckRestPosNorm[s + 5]
+                bData[d] = neckWork[s]
+                bData[d + 1] = neckWork[s + 1]
+                bData[d + 2] = neckWork[s + 2]
+                bData[d + 3] = neckWork[s + 3]
+                bData[d + 4] = neckWork[s + 4]
+                bData[d + 5] = neckWork[s + 5]
             }
             bodyMesh.commitVertices()
             return
@@ -2484,7 +2700,7 @@ internal object BlossomUpperBodyBuilder {
 
         // Smooth cervical twist & nod across upper neck vertices in blossomBodyMesh
         val bData = bodyMesh.vertexData
-        val nRest = cache.neckRestPosNorm
+        val nRest = neckWork
         for (k in cache.neckBodyIndices.indices) {
             val s = k * 6
             val d = cache.neckBodyIndices[k] * stride

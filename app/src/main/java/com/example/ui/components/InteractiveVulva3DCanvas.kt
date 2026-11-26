@@ -196,7 +196,8 @@ fun InteractiveVulva3DCanvas(
     val rightGluteX = remember { Animatable(0f) }
     val rightGluteY = remember { Animatable(0f) }
     val eyeBlink = remember { Animatable(0f) }
-    // Lifelike Beta live micro-behavior channels (all strictly 0f when their respective toggles are OFF)
+    val eyeBlinkR = remember { Animatable(0f) }
+    // Lifelike Beta (Tab 2) live micro-behavior channels
     val eyeGazeX = remember { Animatable(0f) }
     val eyeGazeY = remember { Animatable(0f) }
     val idleHeadTurn = remember { Animatable(0f) }
@@ -207,6 +208,21 @@ fun InteractiveVulva3DCanvas(
     val faceLipSoft = remember { Animatable(0f) }
     val shoulderRelaxL = remember { Animatable(0f) }
     val shoulderRelaxR = remember { Animatable(0f) }
+    // Lifelike+ Beta (Tab 3) live micro-behavior channels (all strictly 0f when their respective toggles are OFF)
+    val anticipationGazeX = remember { Animatable(0f) }
+    val anticipationGazeY = remember { Animatable(0f) }
+    val swallowPhase = remember { Animatable(0f) }
+    val settleHeadTurn = remember { Animatable(0f) }
+    val settleHeadPitch = remember { Animatable(0f) }
+    val settleHeadRoll = remember { Animatable(0f) }
+    val settleShoulderL = remember { Animatable(0f) }
+    val settleShoulderR = remember { Animatable(0f) }
+    val settleLegL = remember { Animatable(0f) }
+    val settleLegR = remember { Animatable(0f) }
+    val nostrilBreath = remember { Animatable(0f) }
+    val breathLipEase = remember { Animatable(0f) }
+    val livingWarmth = remember { Animatable(0f) }
+    var posturalSettleTrigger by remember { mutableIntStateOf(0) }
     var lastManualHeadDragMs by remember { mutableStateOf(0L) }
     // Unified touch-engagement stimulus (0 = calm rest, ~0.55 = breast/vulva touch, 1.0 = clitoris/hood touch)
     var touchStimulus by remember { mutableFloatStateOf(0f) }
@@ -228,24 +244,35 @@ fun InteractiveVulva3DCanvas(
     // Buried compatibility toggle: restores exact pre-Beta v1 vulva, seam, neck, and hair appearance
     var showAdvancedRendering by remember { mutableStateOf(false) }
     var legacyVulvaMode by remember { mutableStateOf(false) }
-    // Floating always-on-top Beta overlay menu (Vulva Beta v2 + Lifelike Beta — all OFF by default to preserve v13.0)
+    // Floating always-on-top 3-Tab Beta Lab overlay:
+    //  Tab 0 (Vulva): all 7 promoted ON by default, vestibular concavity default 30%
+    //  Tab 1 (Life):  all 6 promoted ON by default
+    //  Tab 2 (Life+): 7 new experimental realism features, all OFF by default
     var showBetaMenu by remember { mutableStateOf(false) }
-    var betaMenuTab by remember { mutableIntStateOf(0) } // 0 = Vulva, 1 = Lifelike
-    var betaV2SeamOnlyPolyOffset by remember { mutableStateOf(false) }
-    var betaV2NonInvertingLabiaFold by remember { mutableStateOf(false) }
-    var betaV2AlignedSulcus by remember { mutableStateOf(false) }
-    var betaV2NaturalPelvicFinish by remember { mutableStateOf(false) }
-    var betaV2BalancedUpperVulvaDepth by remember { mutableStateOf(false) }
-    var betaV2BalancedUpperVulvaDepthWithCrest by remember { mutableStateOf(false) }
-    var betaV2AdjustableVestibularConcavity by remember { mutableStateOf(false) }
-    var betaV2VestibularConcavity by remember { mutableFloatStateOf(0.45f) }
-    // Lifelike Beta independent toggles (all OFF by default)
-    var betaLifeEyeMicrosaccades by remember { mutableStateOf(false) }
-    var betaLifeDoubleBlinking by remember { mutableStateOf(false) }
-    var betaLifeHeadRepositioning by remember { mutableStateOf(false) }
-    var betaLifeDeepBreathsSighs by remember { mutableStateOf(false) }
-    var betaLifeShoulderRelaxation by remember { mutableStateOf(false) }
-    var betaLifeFacialExpressions by remember { mutableStateOf(false) }
+    var betaMenuTab by remember { mutableIntStateOf(0) } // 0 = Vulva, 1 = Life, 2 = Life+
+    var betaV2SeamOnlyPolyOffset by remember { mutableStateOf(true) }
+    var betaV2NonInvertingLabiaFold by remember { mutableStateOf(true) }
+    var betaV2AlignedSulcus by remember { mutableStateOf(true) }
+    var betaV2NaturalPelvicFinish by remember { mutableStateOf(true) }
+    var betaV2BalancedUpperVulvaDepth by remember { mutableStateOf(true) }
+    var betaV2BalancedUpperVulvaDepthWithCrest by remember { mutableStateOf(true) }
+    var betaV2AdjustableVestibularConcavity by remember { mutableStateOf(true) }
+    var betaV2VestibularConcavity by remember { mutableFloatStateOf(0.30f) }
+    // Lifelike Beta (Tab 2) toggles (promoted ON by default)
+    var betaLifeEyeMicrosaccades by remember { mutableStateOf(true) }
+    var betaLifeDoubleBlinking by remember { mutableStateOf(true) }
+    var betaLifeHeadRepositioning by remember { mutableStateOf(true) }
+    var betaLifeDeepBreathsSighs by remember { mutableStateOf(true) }
+    var betaLifeShoulderRelaxation by remember { mutableStateOf(true) }
+    var betaLifeFacialExpressions by remember { mutableStateOf(true) }
+    // Lifelike+ Beta (Tab 3) next-gen realism toggles (all OFF by default!)
+    var betaLife2EyelidTracking by remember { mutableStateOf(false) }
+    var betaLife2AsymmetricBlinking by remember { mutableStateOf(false) }
+    var betaLife2GazeAnticipation by remember { mutableStateOf(false) }
+    var betaLife2SubtleSwallowing by remember { mutableStateOf(false) }
+    var betaLife2PosturalSettling by remember { mutableStateOf(false) }
+    var betaLife2BreathFaceCoupling by remember { mutableStateOf(false) }
+    var betaLife2LivingWarmth by remember { mutableStateOf(false) }
     var activePreset by remember { mutableStateOf<CameraAnglePreset?>(CameraAnglePreset.EXAM_FRONT) }
     val initialCam = remember { CameraAnglePreset.EXAM_FRONT.resolveCamera(blossomBodyEnabled = true) }
     val camYaw = remember { Animatable(initialCam.yawDeg) }
@@ -270,6 +297,9 @@ fun InteractiveVulva3DCanvas(
     val latestBlossomSpreadPoseActive by rememberUpdatedState(blossomSpreadPoseActive)
     val latestTouchStimulus by rememberUpdatedState(touchStimulus)
     val latestBetaLifeDoubleBlinking by rememberUpdatedState(betaLifeDoubleBlinking)
+    val latestBetaLife2AsymmetricBlinking by rememberUpdatedState(betaLife2AsymmetricBlinking)
+    val latestBetaLife2GazeAnticipation by rememberUpdatedState(betaLife2GazeAnticipation)
+    val latestBetaLife2PosturalSettling by rememberUpdatedState(betaLife2PosturalSettling)
 
     fun registerPhysiologicalStimulus(level: Float) {
         val clamped = level.coerceIn(0f, 1f)
@@ -327,6 +357,11 @@ fun InteractiveVulva3DCanvas(
             coroutineScope.launch { idleHeadTurn.animateTo(0f, positionalSpring) }
             coroutineScope.launch { idleHeadPitch.animateTo(0f, positionalSpring) }
             coroutineScope.launch { idleHeadRoll.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { settleHeadTurn.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { settleHeadPitch.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { settleHeadRoll.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { settleLegL.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { settleLegR.animateTo(0f, positionalSpring) }
         }
     }
 
@@ -395,6 +430,7 @@ fun InteractiveVulva3DCanvas(
                     }
                 }
             }
+            if (latestBetaLife2PosturalSettling) posturalSettleTrigger++
         }
     }
 
@@ -431,14 +467,56 @@ fun InteractiveVulva3DCanvas(
 
     // Natural involuntary blinking: calm randomized intervals at rest (~3.4–6.2s), smoothly becoming
     // more frequent during breast/vulva touch (~1.8–3.2s) and especially clitoral engagement (~1.1–2.1s).
-    // When Lifelike Beta "Occasional double blinking" is ON, switches to a livelier irregular blink
-    // cadence with more frequent asymmetric double-blinks and occasional soft half-flutters.
+    // Supports Tab 2 "Occasional double blinking" and Tab 3 "Asymmetric blinking" (16–38ms L/R micro-offset).
     LaunchedEffect(showExperimentalLegs) {
         if (!showExperimentalLegs) {
             eyeBlink.snapTo(0f)
+            eyeBlinkR.snapTo(0f)
             return@LaunchedEffect
         }
         val rng = kotlin.random.Random(System.currentTimeMillis())
+
+        suspend fun runSingleBlink(
+            amp: Float,
+            closeMs: Int,
+            holdMs: Long,
+            openMs: Int,
+            asymmetric: Boolean
+        ) {
+            if (!asymmetric) {
+                eyeBlink.animateTo(amp, tween(durationMillis = closeMs, easing = FastOutSlowInEasing))
+                delay(holdMs)
+                eyeBlink.animateTo(0f, tween(durationMillis = openMs, easing = FastOutSlowInEasing))
+                if (eyeBlinkR.value > 0.001f) eyeBlinkR.snapTo(0f)
+                return
+            }
+            val leadLeft = rng.nextFloat() < 0.54f
+            val staggerMs = (16 + rng.nextInt(23)).toLong()
+            val closeJitter = (rng.nextInt(19) - 9)
+            val openJitter = (rng.nextInt(25) - 12)
+            val trailAmp = (amp * (0.95f + rng.nextFloat() * 0.05f)).coerceIn(0f, 1f)
+            val leftJob = coroutineScope.launch {
+                if (!leadLeft) delay(staggerMs)
+                val cMs = (closeMs + if (leadLeft) 0 else closeJitter).coerceAtLeast(48)
+                val oMs = (openMs + if (leadLeft) 0 else openJitter).coerceAtLeast(90)
+                val a = if (leadLeft) amp else trailAmp
+                eyeBlink.animateTo(a, tween(durationMillis = cMs, easing = FastOutSlowInEasing))
+                delay(holdMs)
+                eyeBlink.animateTo(0f, tween(durationMillis = oMs, easing = FastOutSlowInEasing))
+            }
+            val rightJob = coroutineScope.launch {
+                if (leadLeft) delay(staggerMs)
+                val cMs = (closeMs + if (!leadLeft) 0 else closeJitter).coerceAtLeast(48)
+                val oMs = (openMs + if (!leadLeft) 0 else openJitter).coerceAtLeast(90)
+                val a = if (!leadLeft) amp else trailAmp
+                eyeBlinkR.animateTo(a, tween(durationMillis = cMs, easing = FastOutSlowInEasing))
+                delay(holdMs)
+                eyeBlinkR.animateTo(0f, tween(durationMillis = oMs, easing = FastOutSlowInEasing))
+            }
+            leftJob.join()
+            rightJob.join()
+        }
+
         delay(1600L)
         while (true) {
             // Skip animating 60 FPS eyelid blinks when zoomed tightly onto the pelvis (face at y ~ 6.35 is off-screen)
@@ -446,49 +524,53 @@ fun InteractiveVulva3DCanvas(
             if (faceCouldBeVisible) {
                 val stimAtBlink = latestTouchStimulus.coerceIn(0f, 1f)
                 val enhancedDoubleBlink = latestBetaLifeDoubleBlinking
+                val asymBlink = latestBetaLife2AsymmetricBlinking
                 if (!enhancedDoubleBlink) {
                     val closeMs = (75 + (stimAtBlink * 18f)).roundToInt()
                     val holdMs = (28 + (stimAtBlink * 16f)).roundToInt().toLong()
                     val openMs = (135 + (stimAtBlink * 22f)).roundToInt()
-                    eyeBlink.animateTo(1f, tween(durationMillis = closeMs, easing = FastOutSlowInEasing))
-                    delay(holdMs)
-                    eyeBlink.animateTo(0f, tween(durationMillis = openMs, easing = FastOutSlowInEasing))
+                    runSingleBlink(1f, closeMs, holdMs, openMs, asymBlink)
 
                     val doubleBlinkProb = 0.16f + 0.16f * stimAtBlink
                     if (rng.nextFloat() < doubleBlinkProb) {
                         delay(145L)
-                        eyeBlink.animateTo(1f, tween(durationMillis = 70, easing = FastOutSlowInEasing))
-                        delay(22L)
-                        eyeBlink.animateTo(0f, tween(durationMillis = 130, easing = FastOutSlowInEasing))
+                        runSingleBlink(1f, 70, 22L, 130, asymBlink)
                     }
                 } else {
                     val isSoftHalfFlutter = rng.nextFloat() < 0.18f
                     if (isSoftHalfFlutter) {
                         val amp = 0.44f + rng.nextFloat() * 0.20f
-                        eyeBlink.animateTo(amp, tween(durationMillis = 95 + rng.nextInt(40), easing = FastOutSlowInEasing))
-                        delay(24L + rng.nextInt(26))
-                        eyeBlink.animateTo(0f, tween(durationMillis = 155 + rng.nextInt(55), easing = FastOutSlowInEasing))
+                        runSingleBlink(
+                            amp = amp,
+                            closeMs = 95 + rng.nextInt(40),
+                            holdMs = 24L + rng.nextInt(26),
+                            openMs = 155 + rng.nextInt(55),
+                            asymmetric = asymBlink
+                        )
                     } else {
                         val closeMs = (68 + rng.nextInt(30) + (stimAtBlink * 16f)).roundToInt()
                         val holdMs = (22 + rng.nextInt(32) + (stimAtBlink * 14f)).roundToInt().toLong()
                         val openMs = (124 + rng.nextInt(52) + (stimAtBlink * 20f)).roundToInt()
-                        eyeBlink.animateTo(1f, tween(durationMillis = closeMs, easing = FastOutSlowInEasing))
-                        delay(holdMs)
-                        eyeBlink.animateTo(0f, tween(durationMillis = openMs, easing = FastOutSlowInEasing))
+                        runSingleBlink(1f, closeMs, holdMs, openMs, asymBlink)
 
                         val doubleBlinkProb = 0.44f + 0.16f * stimAtBlink
                         if (rng.nextFloat() < doubleBlinkProb) {
                             val gapMs = 95L + rng.nextInt(130)
                             delay(gapMs)
                             val secondAmp = 0.86f + rng.nextFloat() * 0.14f
-                            eyeBlink.animateTo(secondAmp, tween(durationMillis = 64 + rng.nextInt(22), easing = FastOutSlowInEasing))
-                            delay(18L + rng.nextInt(22))
-                            eyeBlink.animateTo(0f, tween(durationMillis = 120 + rng.nextInt(45), easing = FastOutSlowInEasing))
+                            runSingleBlink(
+                                amp = secondAmp,
+                                closeMs = 64 + rng.nextInt(22),
+                                holdMs = 18L + rng.nextInt(22),
+                                openMs = 120 + rng.nextInt(45),
+                                asymmetric = asymBlink
+                            )
                         }
                     }
                 }
-            } else if (eyeBlink.value > 0.001f) {
+            } else if (eyeBlink.value > 0.001f || eyeBlinkR.value > 0.001f) {
                 eyeBlink.snapTo(0f)
+                eyeBlinkR.snapTo(0f)
             }
 
             // Slice wait into 120ms steps so newly starting breast/vulva/clitoris touches shorten the wait immediately
@@ -610,16 +692,205 @@ fun InteractiveVulva3DCanvas(
                 (rng.nextFloat() * 2f - 1f) * 0.42f
             }
             val durMs = 1650 + rng.nextInt(1550)
+            // Tab 3 Lifelike+ Gaze Anticipation: eyes saccade toward the new fixation angle ~180–280ms
+            // before the head glides to follow, then gently counter-rotate (VOR) as the head arrives.
+            val useGazeLead = latestBetaLife2GazeAnticipation
+            if (useGazeLead) {
+                val deltaTurn = nextTurn - idleHeadTurn.value
+                val deltaPitch = nextPitch - idleHeadPitch.value
+                val leadX = (deltaTurn * 2.15f).coerceIn(-0.56f, 0.56f)
+                val leadY = (-deltaPitch * 1.90f).coerceIn(-0.34f, 0.34f)
+                if (abs(leadX) > 0.05f || abs(leadY) > 0.04f) {
+                    val saccDur = 95 + rng.nextInt(50)
+                    val jLx = launch { anticipationGazeX.animateTo(leadX, tween(saccDur, easing = FastOutSlowInEasing)) }
+                    val jLy = launch { anticipationGazeY.animateTo(leadY, tween(saccDur, easing = FastOutSlowInEasing)) }
+                    jLx.join()
+                    jLy.join()
+                    delay((175 + rng.nextInt(115)).toLong())
+                }
+            }
             val spec = tween<Float>(durationMillis = durMs, easing = FastOutSlowInEasing)
             val jt = launch { idleHeadTurn.animateTo(nextTurn, spec) }
             val jp = launch { idleHeadPitch.animateTo(nextPitch, spec) }
             val jr = launch { idleHeadRoll.animateTo(nextRoll, spec) }
+            val jVorX = if (useGazeLead) {
+                launch {
+                    delay((durMs * 0.12f).roundToInt().toLong())
+                    anticipationGazeX.animateTo(0f, tween((durMs * 0.72f).roundToInt().coerceAtLeast(320), easing = FastOutSlowInEasing))
+                }
+            } else null
+            val jVorY = if (useGazeLead) {
+                launch {
+                    delay((durMs * 0.12f).roundToInt().toLong())
+                    anticipationGazeY.animateTo(0f, tween((durMs * 0.72f).roundToInt().coerceAtLeast(320), easing = FastOutSlowInEasing))
+                }
+            } else null
             jt.join()
             jp.join()
             jr.join()
+            jVorX?.join()
+            jVorY?.join()
 
             val restMs = (3800 + rng.nextInt(6800)).toLong()
             delay(restMs)
+        }
+    }
+
+    // Ensure Gaze Anticipation resets cleanly to 0f immediately when toggled OFF
+    LaunchedEffect(showExperimentalLegs, betaLife2GazeAnticipation) {
+        if (!showExperimentalLegs || !betaLife2GazeAnticipation) {
+            if (!showExperimentalLegs) {
+                anticipationGazeX.snapTo(0f)
+                anticipationGazeY.snapTo(0f)
+            } else {
+                coroutineScope.launch { anticipationGazeX.animateTo(0f, tween(240, easing = FastOutSlowInEasing)) }
+                coroutineScope.launch { anticipationGazeY.animateTo(0f, tween(240, easing = FastOutSlowInEasing)) }
+            }
+        }
+    }
+
+    // Tab 3 Lifelike+: Subtle occasional swallowing (delicate anterior throat & submental ease every ~14–28s)
+    LaunchedEffect(showExperimentalLegs, betaLife2SubtleSwallowing) {
+        if (!showExperimentalLegs || !betaLife2SubtleSwallowing) {
+            swallowPhase.snapTo(0f)
+            return@LaunchedEffect
+        }
+        val rng = kotlin.random.Random(System.currentTimeMillis() xor 0x2B4C6D8EL)
+        // Initial brief beat so user can observe a calm swallow soon after enabling, then irregular natural spacing
+        delay((2200 + rng.nextInt(2000)).toLong())
+        while (true) {
+            val neckCouldBeVisible = camZoom.value <= 0.72f || camTargetY.value >= 2.0f
+            if (neckCouldBeVisible) {
+                val durMs = 1100 + rng.nextInt(280)
+                swallowPhase.snapTo(0.001f)
+                swallowPhase.animateTo(1f, tween(durationMillis = durMs, easing = FastOutSlowInEasing))
+                swallowPhase.snapTo(0f)
+            }
+            delay((13500 + rng.nextInt(14500)).toLong())
+        }
+    }
+
+    // Tab 3 Lifelike+: Postural settling (small, coordinated cushion, shoulder & head micro-settle after larger movements)
+    LaunchedEffect(showExperimentalLegs, betaLife2PosturalSettling) {
+        if (!showExperimentalLegs || !betaLife2PosturalSettling) {
+            if (!showExperimentalLegs) {
+                settleHeadTurn.snapTo(0f)
+                settleHeadPitch.snapTo(0f)
+                settleHeadRoll.snapTo(0f)
+                settleShoulderL.snapTo(0f)
+                settleShoulderR.snapTo(0f)
+                settleLegL.snapTo(0f)
+                settleLegR.snapTo(0f)
+            } else {
+                val rSpec = tween<Float>(620, easing = FastOutSlowInEasing)
+                coroutineScope.launch { settleHeadTurn.animateTo(0f, rSpec) }
+                coroutineScope.launch { settleHeadPitch.animateTo(0f, rSpec) }
+                coroutineScope.launch { settleHeadRoll.animateTo(0f, rSpec) }
+                coroutineScope.launch { settleShoulderL.animateTo(0f, rSpec) }
+                coroutineScope.launch { settleShoulderR.animateTo(0f, rSpec) }
+                coroutineScope.launch { settleLegL.animateTo(0f, rSpec) }
+                coroutineScope.launch { settleLegR.animateTo(0f, rSpec) }
+            }
+        }
+    }
+    LaunchedEffect(showExperimentalLegs, betaLife2PosturalSettling, posturalSettleTrigger) {
+        if (!showExperimentalLegs || !betaLife2PosturalSettling || posturalSettleTrigger <= 0) return@LaunchedEffect
+        val rng = kotlin.random.Random(System.currentTimeMillis() xor posturalSettleTrigger.toLong())
+        delay((340 + rng.nextInt(320)).toLong())
+        if (activePointerCount > 0) return@LaunchedEffect
+
+        val durMs = 950 + rng.nextInt(650)
+        val settleSpec = tween<Float>(durationMillis = durMs, easing = FastOutSlowInEasing)
+        val targetShL = 0.12f + rng.nextFloat() * 0.14f
+        val targetShR = 0.10f + rng.nextFloat() * 0.14f
+        val targetHT = (rng.nextFloat() * 2f - 1f) * 0.036f
+        val targetHP = rng.nextFloat() * 0.028f
+        val targetHR = (rng.nextFloat() * 2f - 1f) * 0.028f
+        val targetLegL = if (leftLegSpread.value > 0.08f) (rng.nextFloat() * 2f - 1f) * 0.022f else 0f
+        val targetLegR = if (rightLegSpread.value > 0.08f) (rng.nextFloat() * 2f - 1f) * 0.022f else 0f
+
+        val j1 = launch { settleShoulderL.animateTo(targetShL, settleSpec) }
+        val j2 = launch {
+            delay((70 + rng.nextInt(140)).toLong())
+            settleShoulderR.animateTo(targetShR, settleSpec)
+        }
+        val j3 = launch { settleHeadTurn.animateTo(targetHT, settleSpec) }
+        val j4 = launch { settleHeadPitch.animateTo(targetHP, settleSpec) }
+        val j5 = launch { settleHeadRoll.animateTo(targetHR, settleSpec) }
+        val j6 = launch { settleLegL.animateTo(targetLegL, settleSpec) }
+        val j7 = launch { settleLegR.animateTo(targetLegR, settleSpec) }
+        j1.join(); j2.join(); j3.join(); j4.join(); j5.join(); j6.join(); j7.join()
+
+        delay((900 + rng.nextInt(900)).toLong())
+        if (activePointerCount > 0) return@LaunchedEffect
+        val easeSpec = tween<Float>(durationMillis = 1400 + rng.nextInt(700), easing = FastOutSlowInEasing)
+        launch { settleShoulderL.animateTo(0f, easeSpec) }
+        launch { settleShoulderR.animateTo(0f, easeSpec) }
+        launch { settleHeadTurn.animateTo(targetHT * 0.35f, easeSpec) }
+        launch { settleHeadPitch.animateTo(0f, easeSpec) }
+        launch { settleHeadRoll.animateTo(targetHR * 0.30f, easeSpec) }
+        launch { settleLegL.animateTo(targetLegL * 0.45f, easeSpec) }
+        launch { settleLegR.animateTo(targetLegR * 0.45f, easeSpec) }
+    }
+
+    // Tab 3 Lifelike+: Breath-linked nostril & lip softness (whisper-soft alar flare & relaxed exhale lip ease)
+    LaunchedEffect(showExperimentalLegs, betaLife2BreathFaceCoupling) {
+        if (!showExperimentalLegs || !betaLife2BreathFaceCoupling) {
+            if (!showExperimentalLegs) {
+                nostrilBreath.snapTo(0f)
+                breathLipEase.snapTo(0f)
+            } else {
+                val rSpec = tween<Float>(450, easing = FastOutSlowInEasing)
+                coroutineScope.launch { nostrilBreath.animateTo(0f, rSpec) }
+                coroutineScope.launch { breathLipEase.animateTo(0f, rSpec) }
+            }
+            return@LaunchedEffect
+        }
+        val rng = kotlin.random.Random(System.currentTimeMillis() xor 0x6A4F2C19L)
+        while (true) {
+            val faceCouldBeVisible = camZoom.value <= 0.62f || camTargetY.value >= 2.2f
+            if (!faceCouldBeVisible) {
+                delay(420L)
+                continue
+            }
+            val stim = latestTouchStimulus.coerceIn(0f, 1f)
+            val deepBeat = rng.nextFloat() < 0.24f
+            val inhaleMs = ((if (deepBeat) 1950 else 1480) + rng.nextInt(420) - (stim * 340f).roundToInt()).coerceAtLeast(850)
+            val exhaleMs = ((if (deepBeat) 2450 else 1920) + rng.nextInt(540) - (stim * 360f).roundToInt()).coerceAtLeast(980)
+            val peakNostril = ((if (deepBeat) 0.84f else 0.48f) + stim * 0.24f + rng.nextFloat() * 0.14f).coerceIn(0.32f, 1.0f)
+            val peakLip = ((if (deepBeat) 0.24f else 0.11f) + stim * 0.18f).coerceIn(0f, 0.42f)
+
+            val jInN = launch { nostrilBreath.animateTo(peakNostril, tween(inhaleMs, easing = FastOutSlowInEasing)) }
+            val jInL = launch { breathLipEase.animateTo(peakLip * 0.35f, tween(inhaleMs, easing = FastOutSlowInEasing)) }
+            jInN.join(); jInL.join()
+
+            val jExN = launch { nostrilBreath.animateTo(0.06f, tween(exhaleMs, easing = FastOutSlowInEasing)) }
+            val jExL = launch {
+                breathLipEase.animateTo(peakLip, tween((exhaleMs * 0.42f).roundToInt(), easing = FastOutSlowInEasing))
+                breathLipEase.animateTo(0f, tween((exhaleMs * 0.58f).roundToInt(), easing = FastOutSlowInEasing))
+            }
+            jExN.join(); jExL.join()
+            delay((280 + rng.nextInt(460)).toLong())
+        }
+    }
+
+    // Tab 3 Lifelike+: Subtle capillary warmth across cheeks, ears & upper chest (calm organic ebb + touch response)
+    LaunchedEffect(showExperimentalLegs, betaLife2LivingWarmth) {
+        if (!showExperimentalLegs || !betaLife2LivingWarmth) {
+            if (!showExperimentalLegs) {
+                livingWarmth.snapTo(0f)
+            } else {
+                livingWarmth.animateTo(0f, tween(550, easing = FastOutSlowInEasing))
+            }
+            return@LaunchedEffect
+        }
+        val rng = kotlin.random.Random(System.currentTimeMillis() xor 0x4D2A8F1EL)
+        while (true) {
+            val stim = latestTouchStimulus.coerceIn(0f, 1f)
+            val targetWarmth = (0.24f + rng.nextFloat() * 0.14f + stim * 0.50f).coerceIn(0.20f, 0.90f)
+            val durMs = if (stim > 0.2f) 1100 + rng.nextInt(500) else 2400 + rng.nextInt(1800)
+            livingWarmth.animateTo(targetWarmth, tween(durMs, easing = FastOutSlowInEasing))
+            delay((600 + rng.nextInt(900)).toLong())
         }
     }
 
@@ -790,11 +1061,11 @@ fun InteractiveVulva3DCanvas(
         rightBreastX = rightBreastX.value,
         rightBreastY = rightBreastY.value,
         breastSize = breastSize,
-        leftLegSpread = leftLegSpread.value,
-        rightLegSpread = rightLegSpread.value,
+        leftLegSpread = (leftLegSpread.value + settleLegL.value).coerceIn(-0.30f, 1f),
+        rightLegSpread = (rightLegSpread.value + settleLegR.value).coerceIn(-0.30f, 1f),
         selfSpreadPose = selfSpreadPose.value,
-        headTurn = (headTurn.value + idleHeadTurn.value).coerceIn(-1f, 1f),
-        headPitch = (headPitch.value + idleHeadPitch.value).coerceIn(0f, 1f),
+        headTurn = (headTurn.value + idleHeadTurn.value + settleHeadTurn.value).coerceIn(-1f, 1f),
+        headPitch = (headPitch.value + idleHeadPitch.value + settleHeadPitch.value).coerceIn(0f, 1f),
         eyeBlink = eyeBlink.value,
         leftGluteX = leftGluteX.value,
         leftGluteY = leftGluteY.value,
@@ -809,15 +1080,20 @@ fun InteractiveVulva3DCanvas(
         betaV2BalancedUpperVulvaDepthWithCrest = betaV2BalancedUpperVulvaDepthWithCrest,
         betaV2AdjustableVestibularConcavity = betaV2AdjustableVestibularConcavity,
         betaV2VestibularConcavity = betaV2VestibularConcavity,
-        eyeGazeX = eyeGazeX.value,
-        eyeGazeY = eyeGazeY.value,
-        headRollOffset = idleHeadRoll.value,
+        eyeGazeX = (eyeGazeX.value + anticipationGazeX.value).coerceIn(-1f, 1f),
+        eyeGazeY = (eyeGazeY.value + anticipationGazeY.value).coerceIn(-1f, 1f),
+        headRollOffset = idleHeadRoll.value + settleHeadRoll.value,
         faceWarmth = faceWarmth.value,
         faceBrow = faceBrow.value,
-        faceLipSoft = faceLipSoft.value,
+        faceLipSoft = (faceLipSoft.value + breathLipEase.value).coerceIn(0f, 1f),
         betaLifeDeepBreathsSighs = betaLifeDeepBreathsSighs,
-        shoulderRelaxL = shoulderRelaxL.value,
-        shoulderRelaxR = shoulderRelaxR.value
+        shoulderRelaxL = (shoulderRelaxL.value + settleShoulderL.value).coerceIn(-0.25f, 1.0f),
+        shoulderRelaxR = (shoulderRelaxR.value + settleShoulderR.value).coerceIn(-0.25f, 1.0f),
+        eyeBlinkRightOffset = if (betaLife2AsymmetricBlinking) (eyeBlinkR.value - eyeBlink.value) else 0f,
+        eyelidGazeTrack = if (betaLife2EyelidTracking) 1f else 0f,
+        swallowPhase = swallowPhase.value,
+        nostrilBreath = nostrilBreath.value,
+        livingWarmth = livingWarmth.value
     )
     val currentCam = VulvaCamera3D(
         yawDeg = camYaw.value,
@@ -918,6 +1194,7 @@ fun InteractiveVulva3DCanvas(
                                 var lastPinchDist = -1f
                                 var lastPinchMidY = -1f
                                 var touchedElasticZone = false
+                                var touchedSettleableZone = false
 
                                 while (true) {
                                     val event = awaitPointerEvent()
@@ -934,6 +1211,9 @@ fun InteractiveVulva3DCanvas(
                                         lastPinchMidY = -1f
                                         if (!latestOrbitMode && !latestHoldOpen && touchedElasticZone) {
                                             springBackTissue(resetLegs = false)
+                                        }
+                                        if (!latestOrbitMode && touchedSettleableZone && latestBetaLife2PosturalSettling) {
+                                            posturalSettleTrigger++
                                         }
                                         break
                                     }
@@ -1070,6 +1350,13 @@ fun InteractiveVulva3DCanvas(
                                                     zone == TouchTargetZone.RIGHT_GLUTE
                                                 ) {
                                                     touchedElasticZone = true
+                                                    touchedSettleableZone = true
+                                                }
+                                                if (zone == TouchTargetZone.LEFT_LEG ||
+                                                    zone == TouchTargetZone.RIGHT_LEG ||
+                                                    zone == TouchTargetZone.HEAD
+                                                ) {
+                                                    touchedSettleableZone = true
                                                 }
 
                                                 when (zone) {
@@ -1413,7 +1700,7 @@ fun InteractiveVulva3DCanvas(
                     }
                 }
 
-                // Always-on-top Floating Hamburger Beta Menu (Vulva Beta v2 + Lifelike Beta)
+                // Always-on-top Floating Hamburger Beta Menu (Vulva + Life + Life+)
                 val activeVulvaBetaCount = listOf(
                     betaV2SeamOnlyPolyOffset,
                     betaV2NonInvertingLabiaFold,
@@ -1431,7 +1718,16 @@ fun InteractiveVulva3DCanvas(
                     betaLifeShoulderRelaxation,
                     betaLifeFacialExpressions
                 ).count { it }
-                val totalActiveBetaCount = activeVulvaBetaCount + activeLifelikeBetaCount
+                val activeLifelike2BetaCount = listOf(
+                    betaLife2EyelidTracking,
+                    betaLife2AsymmetricBlinking,
+                    betaLife2GazeAnticipation,
+                    betaLife2SubtleSwallowing,
+                    betaLife2PosturalSettling,
+                    betaLife2BreathFaceCoupling,
+                    betaLife2LivingWarmth
+                ).count { it }
+                val totalActiveBetaCount = activeVulvaBetaCount + activeLifelikeBetaCount + activeLifelike2BetaCount
 
                 // Floating Hamburger Button anchored top-right over the 3D viewport (48dp touch target)
                 Box(
@@ -1477,7 +1773,7 @@ fun InteractiveVulva3DCanvas(
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
                                 .padding(top = 5.dp, end = 5.dp)
-                                .size(18.dp)
+                                .size(19.dp)
                                 .clip(CircleShape)
                                 .background(MaterialTheme.colorScheme.primary),
                             contentAlignment = Alignment.Center
@@ -1492,7 +1788,7 @@ fun InteractiveVulva3DCanvas(
                     }
                 }
 
-                // Translucent Compact Floating 2-Tab Beta Panel (touches outside still orbit/touch Blossom live)
+                // Translucent Compact Floating 3-Tab Beta Panel (touches outside still orbit/touch Blossom live)
                 androidx.compose.animation.AnimatedVisibility(
                     visible = showBetaMenu,
                     enter = fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.95f),
@@ -1504,8 +1800,8 @@ fun InteractiveVulva3DCanvas(
                     val panelScroll = rememberScrollState()
                     Surface(
                         modifier = Modifier
-                            .widthIn(max = 296.dp)
-                            .heightIn(max = 324.dp)
+                            .widthIn(max = 316.dp)
+                            .heightIn(max = 332.dp)
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
@@ -1552,13 +1848,20 @@ fun InteractiveVulva3DCanvas(
                                                 betaV2BalancedUpperVulvaDepth = false
                                                 betaV2BalancedUpperVulvaDepthWithCrest = false
                                                 betaV2AdjustableVestibularConcavity = false
-                                                betaV2VestibularConcavity = 0.45f
+                                                betaV2VestibularConcavity = 0.30f
                                                 betaLifeEyeMicrosaccades = false
                                                 betaLifeDoubleBlinking = false
                                                 betaLifeHeadRepositioning = false
                                                 betaLifeDeepBreathsSighs = false
                                                 betaLifeShoulderRelaxation = false
                                                 betaLifeFacialExpressions = false
+                                                betaLife2EyelidTracking = false
+                                                betaLife2AsymmetricBlinking = false
+                                                betaLife2GazeAnticipation = false
+                                                betaLife2SubtleSwallowing = false
+                                                betaLife2PosturalSettling = false
+                                                betaLife2BreathFaceCoupling = false
+                                                betaLife2LivingWarmth = false
                                                 if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
                                             }
                                             .testTag("beta_reset_all_button")
@@ -1585,12 +1888,12 @@ fun InteractiveVulva3DCanvas(
                                 }
                             }
 
-                            // 2-Tab Selector: Vulva | Lifelike
+                            // 3-Tab Selector: Vulva | Life | Life+
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 12.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 BetaMenuTabPill(
                                     label = if (activeVulvaBetaCount > 0) "Vulva ($activeVulvaBetaCount)" else "Vulva",
@@ -1600,10 +1903,17 @@ fun InteractiveVulva3DCanvas(
                                     modifier = Modifier.weight(1f)
                                 )
                                 BetaMenuTabPill(
-                                    label = if (activeLifelikeBetaCount > 0) "Lifelike ($activeLifelikeBetaCount)" else "Lifelike",
+                                    label = if (activeLifelikeBetaCount > 0) "Life ($activeLifelikeBetaCount)" else "Life",
                                     selected = betaMenuTab == 1,
                                     tag = "beta_tab_lifelike",
                                     onClick = { betaMenuTab = 1 },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                BetaMenuTabPill(
+                                    label = if (activeLifelike2BetaCount > 0) "Life+ ($activeLifelike2BetaCount)" else "Life+",
+                                    selected = betaMenuTab == 2,
+                                    tag = "beta_tab_lifelike_plus",
+                                    onClick = { betaMenuTab = 2 },
                                     modifier = Modifier.weight(1f)
                                 )
                             }
@@ -1763,9 +2073,9 @@ fun InteractiveVulva3DCanvas(
                                             )
                                         }
                                     }
-                                } else {
+                                } else if (betaMenuTab == 1) {
                                     Text(
-                                        text = "Subtle, irregular micro-behaviors (all OFF by default)",
+                                        text = "Subtle, irregular micro-behaviors (promoted ON by default)",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
@@ -1853,6 +2163,114 @@ fun InteractiveVulva3DCanvas(
                                         compact = true,
                                         onToggle = {
                                             betaLifeFacialExpressions = !betaLifeFacialExpressions
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                } else {
+                                    Text(
+                                        text = "Next-gen subtle realism tests (all OFF by default)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "Eyelid tracking",
+                                        subtitle = "Subtle upper eyelid follow accompanying vertical gaze shifts",
+                                        checked = betaLife2EyelidTracking,
+                                        tag = "toggle_beta_life2_eyelid_tracking",
+                                        compact = true,
+                                        onToggle = {
+                                            betaLife2EyelidTracking = !betaLife2EyelidTracking
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "Asymmetric blinking",
+                                        subtitle = "Slight natural timing difference (16–38ms) between left and right eyelids",
+                                        checked = betaLife2AsymmetricBlinking,
+                                        tag = "toggle_beta_life2_asymmetric_blinking",
+                                        compact = true,
+                                        onToggle = {
+                                            betaLife2AsymmetricBlinking = !betaLife2AsymmetricBlinking
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "Gaze anticipation",
+                                        subtitle = "Eyes glance toward a new fixation point shortly before the head follows",
+                                        checked = betaLife2GazeAnticipation,
+                                        tag = "toggle_beta_life2_gaze_anticipation",
+                                        compact = true,
+                                        onToggle = {
+                                            betaLife2GazeAnticipation = !betaLife2GazeAnticipation
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "Subtle swallowing",
+                                        subtitle = "Occasional gentle throat and submental jaw swallow wave",
+                                        checked = betaLife2SubtleSwallowing,
+                                        tag = "toggle_beta_life2_subtle_swallowing",
+                                        compact = true,
+                                        onToggle = {
+                                            betaLife2SubtleSwallowing = !betaLife2SubtleSwallowing
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "Postural settling",
+                                        subtitle = "Small, coordinated cushion, shoulder & head ease after larger movements",
+                                        checked = betaLife2PosturalSettling,
+                                        tag = "toggle_beta_life2_postural_settling",
+                                        compact = true,
+                                        onToggle = {
+                                            betaLife2PosturalSettling = !betaLife2PosturalSettling
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "Breath-linked face softness",
+                                        subtitle = "Whisper-soft nostril flare and relaxed lip ease synced to breathing",
+                                        checked = betaLife2BreathFaceCoupling,
+                                        tag = "toggle_beta_life2_breath_face_coupling",
+                                        compact = true,
+                                        onToggle = {
+                                            betaLife2BreathFaceCoupling = !betaLife2BreathFaceCoupling
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "Subtle capillary warmth",
+                                        subtitle = "Natural living rosy warmth across cheeks & upper chest responding gently to touch",
+                                        checked = betaLife2LivingWarmth,
+                                        tag = "toggle_beta_life2_living_warmth",
+                                        compact = true,
+                                        onToggle = {
+                                            betaLife2LivingWarmth = !betaLife2LivingWarmth
                                             if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
                                         }
                                     )
@@ -2241,7 +2659,7 @@ private fun BetaMenuTabPill(
                 }
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 8.dp)
+            .padding(horizontal = 6.dp, vertical = 8.dp)
             .testTag(tag)
             .semantics {
                 contentDescription = "$label tab${if (selected) ", selected" else ""}"
@@ -2250,7 +2668,7 @@ private fun BetaMenuTabPill(
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             color = if (selected) {
                 MaterialTheme.colorScheme.onPrimaryContainer

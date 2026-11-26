@@ -2815,6 +2815,182 @@ class BlossomGeometryUnitTest {
         assertTrue("Sigh cycle peak must remain anatomically bounded (< 0.22)", maxSighChest < 0.20f && maxSighAbd < 0.22f)
     }
 
+    @Test
+    fun lifelikePlusTab3BehaviorsPreserveInvariantsAndBaselineIdentity() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+
+        // Baseline rest snapshots (default VulvaDeformationState has all Tab 3 channels == 0f)
+        val restState = VulvaDeformationState()
+        assertEquals(0f, restState.eyeBlinkRightOffset, 0f)
+        assertEquals(0f, restState.eyelidGazeTrack, 0f)
+        assertEquals(0f, restState.swallowPhase, 0f)
+        assertEquals(0f, restState.nostrilBreath, 0f)
+        assertEquals(0f, restState.livingWarmth, 0f)
+        assertEquals(0.30f, restState.betaV2VestibularConcavity, 1e-6f)
+
+        scene.update(restState, includeLithotomyBody = true)
+        val restHead = scene.blossomHeadMesh.vertexData.copyOf()
+        val restEyes = scene.blossomEyesMesh.vertexData.copyOf()
+        val restHair = scene.blossomHairMesh.vertexData.copyOf()
+        val restBody = scene.blossomBodyMesh.vertexData.copyOf()
+
+        val rig = scene.blossomHeadRigCache
+        assertTrue("blinkVertIsRight must match blinkVertIndices size", rig.blinkVertIsRight.size == rig.blinkVertIndices.size)
+        assertTrue("blinkVertIsRight must include both left and right eyelid vertices", rig.blinkVertIsRight.any { it } && rig.blinkVertIsRight.any { !it })
+        assertTrue("upperLidLiftIndices must capture upper eyelid vertices", rig.upperLidLiftIndices.size > 20)
+        assertTrue("swallowJawIndices must capture submental/jaw vertices", rig.swallowJawIndices.size > 15)
+        assertTrue("nostrilMorphIndices must capture nasal alar vertices", rig.nostrilMorphIndices.size > 10)
+        assertTrue("throatNeckLocalIndices must capture anterior mid-throat vertices", rig.throatNeckLocalIndices.size > 15)
+
+        // 1. Asymmetric blinking: right-only blink moves x > 0 lids only; left-only blink moves x < 0 lids only
+        scene.update(restState.copy(eyeBlink = 0f, eyeBlinkRightOffset = 0.85f), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomHeadMesh)
+        assertOutwardWindingMatchesNormals("blossomHeadMesh(asymBlinkRight)", scene.blossomHeadMesh)
+        var maxRightOnlyMoveL = 0f
+        var maxRightOnlyMoveR = 0f
+        for (v in 0 until scene.blossomHeadMesh.vertexCount) {
+            val b = v * stride
+            val d = sqrt(
+                (scene.blossomHeadMesh.vertexData[b] - restHead[b]).let { it * it } +
+                    (scene.blossomHeadMesh.vertexData[b + 1] - restHead[b + 1]).let { it * it } +
+                    (scene.blossomHeadMesh.vertexData[b + 2] - restHead[b + 2]).let { it * it }
+            )
+            if (restHead[b] < -0.02f && d > maxRightOnlyMoveL) maxRightOnlyMoveL = d
+            if (restHead[b] > 0.02f && d > maxRightOnlyMoveR) maxRightOnlyMoveR = d
+        }
+        assertTrue("Right-only asymmetric blink must move right eyelid (> 0.015), got $maxRightOnlyMoveR", maxRightOnlyMoveR > 0.015f)
+        assertEquals("Right-only asymmetric blink must leave left eyelid (x < -0.02) untouched", 0f, maxRightOnlyMoveL, 1e-6f)
+
+        scene.update(restState.copy(eyeBlink = 0.85f, eyeBlinkRightOffset = -0.85f), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomHeadMesh)
+        assertOutwardWindingMatchesNormals("blossomHeadMesh(asymBlinkLeft)", scene.blossomHeadMesh)
+        var maxLeftOnlyMoveL = 0f
+        var maxLeftOnlyMoveR = 0f
+        for (v in 0 until scene.blossomHeadMesh.vertexCount) {
+            val b = v * stride
+            val d = sqrt(
+                (scene.blossomHeadMesh.vertexData[b] - restHead[b]).let { it * it } +
+                    (scene.blossomHeadMesh.vertexData[b + 1] - restHead[b + 1]).let { it * it } +
+                    (scene.blossomHeadMesh.vertexData[b + 2] - restHead[b + 2]).let { it * it }
+            )
+            if (restHead[b] < -0.02f && d > maxLeftOnlyMoveL) maxLeftOnlyMoveL = d
+            if (restHead[b] > 0.02f && d > maxLeftOnlyMoveR) maxLeftOnlyMoveR = d
+        }
+        assertTrue("Left-only asymmetric blink must move left eyelid (> 0.015), got $maxLeftOnlyMoveL", maxLeftOnlyMoveL > 0.015f)
+        assertEquals("Left-only asymmetric blink must leave right eyelid (x > 0.02) untouched", 0f, maxLeftOnlyMoveR, 1e-6f)
+
+        // 2. Eyelid tracking with vertical gaze (downward & upward) + 0f baseline identity
+        scene.update(restState.copy(eyeGazeY = -0.55f, eyelidGazeTrack = 0f), includeLithotomyBody = true)
+        assertTrue("With eyelidGazeTrack == 0f, vertical gaze must leave head mesh bitwise untouched", restHead.contentEquals(scene.blossomHeadMesh.vertexData))
+
+        scene.update(restState.copy(eyeGazeY = -0.55f, eyelidGazeTrack = 1f), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomHeadMesh)
+        assertOutwardWindingMatchesNormals("blossomHeadMesh(eyelidTrackDown)", scene.blossomHeadMesh)
+        var maxDownTrack = 0f
+        for (v in 0 until scene.blossomHeadMesh.vertexCount) {
+            val b = v * stride
+            val d = sqrt(
+                (scene.blossomHeadMesh.vertexData[b] - restHead[b]).let { it * it } +
+                    (scene.blossomHeadMesh.vertexData[b + 1] - restHead[b + 1]).let { it * it } +
+                    (scene.blossomHeadMesh.vertexData[b + 2] - restHead[b + 2]).let { it * it }
+            )
+            if (d > maxDownTrack) maxDownTrack = d
+        }
+        assertTrue("Downward eyelid tracking must be subtle yet perceptible (0.004..0.040), got $maxDownTrack", maxDownTrack in 0.004f..0.040f)
+
+        scene.update(restState.copy(eyeGazeY = 0.55f, eyelidGazeTrack = 1f), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomHeadMesh)
+        assertOutwardWindingMatchesNormals("blossomHeadMesh(eyelidTrackUp)", scene.blossomHeadMesh)
+        var maxUpTrack = 0f
+        for (v in 0 until scene.blossomHeadMesh.vertexCount) {
+            val b = v * stride
+            val d = sqrt(
+                (scene.blossomHeadMesh.vertexData[b] - restHead[b]).let { it * it } +
+                    (scene.blossomHeadMesh.vertexData[b + 1] - restHead[b + 1]).let { it * it } +
+                    (scene.blossomHeadMesh.vertexData[b + 2] - restHead[b + 2]).let { it * it }
+            )
+            if (d > maxUpTrack) maxUpTrack = d
+        }
+        assertTrue("Upward eyelid tracking must be subtle yet perceptible (0.002..0.025), got $maxUpTrack", maxUpTrack in 0.002f..0.025f)
+
+        // 3. Subtle swallowing: localized strictly to anterior mid-throat + subtle submental jaw, leaving torso/vulva untouched
+        for (phase in floatArrayOf(0.25f, 0.55f)) {
+            scene.update(restState.copy(swallowPhase = phase), includeLithotomyBody = true)
+            assertValidMesh(scene.blossomBodyMesh)
+            assertValidMesh(scene.blossomHeadMesh)
+            assertOutwardWindingMatchesNormals("blossomHeadMesh(swallow=$phase)", scene.blossomHeadMesh)
+            var maxThroatMove = 0f
+            var maxNonThroatBodyMove = 0f
+            for (v in 0 until scene.blossomBodyMesh.vertexCount) {
+                val b = v * stride
+                val rx = restBody[b]
+                val ry = restBody[b + 1]
+                val d = sqrt(
+                    (scene.blossomBodyMesh.vertexData[b] - rx).let { it * it } +
+                        (scene.blossomBodyMesh.vertexData[b + 1] - ry).let { it * it } +
+                        (scene.blossomBodyMesh.vertexData[b + 2] - restBody[b + 2]).let { it * it }
+                )
+                if (ry in 5.00f..5.78f && abs(rx) < 0.28f) {
+                    if (d > maxThroatMove) maxThroatMove = d
+                } else {
+                    if (d > maxNonThroatBodyMove) maxNonThroatBodyMove = d
+                }
+            }
+            assertTrue("Swallow phase=$phase must gently animate anterior throat (0.002..0.032), got $maxThroatMove", maxThroatMove in 0.002f..0.032f)
+            assertEquals("Swallow phase=$phase must leave non-throat body (breasts/legs/vulva) untouched", 0f, maxNonThroatBodyMove, 1e-6f)
+        }
+
+        // Exact restoration at swallowPhase = 0f and 1f
+        scene.update(restState.copy(swallowPhase = 1f), includeLithotomyBody = true)
+        assertTrue("swallowPhase=1f must restore bit-identical body mesh", restBody.contentEquals(scene.blossomBodyMesh.vertexData))
+        assertTrue("swallowPhase=1f must restore bit-identical head mesh", restHead.contentEquals(scene.blossomHeadMesh.vertexData))
+
+        // 4. Breath-linked nasal alar softness: localized strictly to nose alar wings, zero body/neck-seam spillover
+        scene.update(restState.copy(nostrilBreath = 1f), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomHeadMesh)
+        assertOutwardWindingMatchesNormals("blossomHeadMesh(nostrilBreath)", scene.blossomHeadMesh)
+        assertTrue("Nostril breath flare must leave body mesh bitwise untouched", restBody.contentEquals(scene.blossomBodyMesh.vertexData))
+        var maxNostrilMove = 0f
+        var maxNostrilSeamMove = 0f
+        for (v in 0 until scene.blossomHeadMesh.vertexCount) {
+            val b = v * stride
+            val d = sqrt(
+                (scene.blossomHeadMesh.vertexData[b] - restHead[b]).let { it * it } +
+                    (scene.blossomHeadMesh.vertexData[b + 1] - restHead[b + 1]).let { it * it } +
+                    (scene.blossomHeadMesh.vertexData[b + 2] - restHead[b + 2]).let { it * it }
+            )
+            if (d > maxNostrilMove) maxNostrilMove = d
+            if (restHead[b + 1] <= 5.80f && d > maxNostrilSeamMove) maxNostrilSeamMove = d
+        }
+        assertTrue("Nostril breath flare must be whisper-subtle (0.001..0.015), got $maxNostrilMove", maxNostrilMove in 0.001f..0.015f)
+        assertEquals("Nostril breath flare must leave neck seam untouched", 0f, maxNostrilSeamMove, 0f)
+
+        // Reset back to restState restores every single mesh bit-identically
+        scene.update(restState, includeLithotomyBody = true)
+        assertTrue("Resetting all Tab 3 channels must restore bit-identical head mesh", restHead.contentEquals(scene.blossomHeadMesh.vertexData))
+        assertTrue("Resetting all Tab 3 channels must restore bit-identical eyes mesh", restEyes.contentEquals(scene.blossomEyesMesh.vertexData))
+        assertTrue("Resetting all Tab 3 channels must restore bit-identical hair mesh", restHair.contentEquals(scene.blossomHairMesh.vertexData))
+        assertTrue("Resetting all Tab 3 channels must restore bit-identical body mesh", restBody.contentEquals(scene.blossomBodyMesh.vertexData))
+
+        // 5. Subtle capillary warmth localization (cheeks, ears, upper chest positive; legs/abdomen/vulva/mucosa strictly 0)
+        val cheekWarmth = VulvaGlTextureView.evaluateLivingWarmthMask(x = 0.30f, y = 6.32f, nz = 0.85f)
+        val earWarmth = VulvaGlTextureView.evaluateLivingWarmthMask(x = 0.64f, y = 6.34f, nz = 0.15f)
+        val chestWarmth = VulvaGlTextureView.evaluateLivingWarmthMask(x = 0.35f, y = 4.35f, nz = 0.85f)
+        val legWarmth = VulvaGlTextureView.evaluateLivingWarmthMask(x = 1.10f, y = -1.20f, nz = 0.90f)
+        val abdomenWarmth = VulvaGlTextureView.evaluateLivingWarmthMask(x = 0.25f, y = 2.20f, nz = 0.90f)
+        val vulvaWarmth = VulvaGlTextureView.evaluateLivingWarmthMask(x = 0.10f, y = 0.05f, nz = 0.90f, mucosa = 0.8f)
+        val lipMucosaWarmth = VulvaGlTextureView.evaluateLivingWarmthMask(x = 0.30f, y = 6.32f, nz = 0.85f, mucosa = 1.0f)
+
+        assertTrue("Cheek apple warmth must be strongly active (> 0.80), got $cheekWarmth", cheekWarmth > 0.80f)
+        assertTrue("Ear warmth must be active (> 0.35), got $earWarmth", earWarmth > 0.35f)
+        assertTrue("Upper chest warmth must be gently active (> 0.45), got $chestWarmth", chestWarmth > 0.45f)
+        assertEquals("Leg skin must have 0 capillary warmth", 0f, legWarmth, 0f)
+        assertEquals("Abdomen skin must have 0 capillary warmth", 0f, abdomenWarmth, 0f)
+        assertEquals("Vulvar tissue must have 0 capillary warmth", 0f, vulvaWarmth, 0f)
+        assertEquals("Full mucosa must have 0 capillary warmth", 0f, lipMucosaWarmth, 0f)
+    }
+
     /**
      * Guards against reversed OpenGL triangle winding (which triggers `!gl_FrontFacing` normal flip
      * in the fragment shader and turns meshes dark/inverted). Verifies that > 95% of non-degenerate
