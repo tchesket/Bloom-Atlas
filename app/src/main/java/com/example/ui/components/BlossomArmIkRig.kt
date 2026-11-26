@@ -23,8 +23,13 @@ import kotlin.math.sqrt
  */
 internal object BlossomArmIkRig {
 
-    const val SELF_SPREAD_OUTER_TARGET = 0.74f
-    const val SELF_SPREAD_INNER_TARGET = 0.78f
+    /**
+     * Version 19.0 calibrated self-spread targets: aligned with the default 40% vulva elastic
+     * resistance spread cap (`vulvaElasticMaxSpread(0.40f) == 0.60f`) so Blossom's spreading
+     * animation matches manual tissue elasticity and never overspreads past the 40% limit.
+     */
+    const val SELF_SPREAD_OUTER_TARGET = 0.56f
+    const val SELF_SPREAD_INNER_TARGET = 0.60f
 
     // Exact rest arm joint anchors matching BlossomSdfBodyBuilder.evaluateBodySdf()
     const val SHOULDER_AX = 1.34f
@@ -305,14 +310,14 @@ internal object BlossomArmIkRig {
         val b3 = Vec3(side * 0.80f, 1.24f, 1.07f)
         val wristArc = cubicBezier(b0, b1, b2, b3, uArc)
 
-        // 3. Synchronized lateral spread glide (Phase 3: 0.68 -> 1.00) riding gently up the inguinal contour
+        // 3. Synchronized lateral spread glide (Phase 3: 0.68 -> 1.00) calibrated to v19.0 40% elastic spread
         val spreadT = smoothStep(0.68f, 1.00f, p)
         val manualAdjust = if (p > 0.85f) {
             ((liveOuterSpread - SELF_SPREAD_OUTER_TARGET).coerceIn(-0.22f, 0.26f) * 0.16f) * smoothStep(0.85f, 1.0f, p)
         } else {
             0f
         }
-        val lateralGlide = spreadT * 0.15f + manualAdjust
+        val lateralGlide = spreadT * 0.114f + manualAdjust
 
         var wrist = Vec3(
             wristArc.x + side * lateralGlide,

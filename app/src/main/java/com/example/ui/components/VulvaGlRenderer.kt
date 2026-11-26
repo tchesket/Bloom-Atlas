@@ -205,7 +205,9 @@ class VulvaGlTextureView(
     private var uBetaLifeWarmthLoc = -1
     private var uBetaV3SoftPigmentationLoc = -1
     private var uBetaV3RegionalMaterialLoc = -1
-    private var uBetaV3NaturalLightingLoc = -1
+    private var uBetaV3LabialVestibuleBlendLoc = -1
+    private var uBetaV3IntricateLabiaFoldsLoc = -1
+    private var uIsLabiaArchMeshLoc = -1
 
     private var surfaceWidth = 1
     private var surfaceHeight = 1
@@ -221,7 +223,8 @@ class VulvaGlTextureView(
     @Volatile
     private var renderGeneration = 0
 
-    private var breathPhase = 0f
+    @Volatile
+    var breathPhase: Float = 0f
     private var smoothedStimulus = 0f
     private var lastBreathTimeNs = 0L
     private val breathRng = kotlin.random.Random(System.nanoTime())
@@ -547,7 +550,9 @@ class VulvaGlTextureView(
         uBetaLifeWarmthLoc = GLES20.glGetUniformLocation(program, "uBetaLifeWarmth")
         uBetaV3SoftPigmentationLoc = GLES20.glGetUniformLocation(program, "uBetaV3SoftPigmentation")
         uBetaV3RegionalMaterialLoc = GLES20.glGetUniformLocation(program, "uBetaV3RegionalMaterial")
-        uBetaV3NaturalLightingLoc = GLES20.glGetUniformLocation(program, "uBetaV3NaturalLighting")
+        uBetaV3LabialVestibuleBlendLoc = GLES20.glGetUniformLocation(program, "uBetaV3LabialVestibuleBlend")
+        uBetaV3IntricateLabiaFoldsLoc = GLES20.glGetUniformLocation(program, "uBetaV3IntricateLabiaFolds")
+        uIsLabiaArchMeshLoc = GLES20.glGetUniformLocation(program, "uIsLabiaArchMesh")
 
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glDepthFunc(GLES20.GL_LEQUAL)
@@ -693,15 +698,19 @@ class VulvaGlTextureView(
         GLES20.glUniform1f(uBetaLifeWarmthLoc, if (legsMode) currentDeform.livingWarmth.coerceIn(0f, 1f) else 0f)
         GLES20.glUniform1f(
             uBetaV3SoftPigmentationLoc,
-            if (currentDeform.betaV3SoftPigmentation) currentDeform.betaV3PigmentStrength.coerceIn(0f, 1f) else 0f
+            if (currentDeform.betaV3SoftPigmentation) currentDeform.betaV3PigmentStrength.coerceIn(0f, 1f) * 3.0f else 0f
         )
         GLES20.glUniform1f(
             uBetaV3RegionalMaterialLoc,
-            if (currentDeform.betaV3RegionalSurfaceDetail) currentDeform.betaV3SurfaceStrength.coerceIn(0f, 1f) else 0f
+            if (currentDeform.betaV3RegionalSurfaceDetail) currentDeform.betaV3SurfaceStrength.coerceIn(0f, 1f) * 3.0f else 0f
         )
         GLES20.glUniform1f(
-            uBetaV3NaturalLightingLoc,
-            if (currentDeform.betaV3NaturalLighting) currentDeform.betaV3LightingStrength.coerceIn(0f, 1f) else 0f
+            uBetaV3LabialVestibuleBlendLoc,
+            if (currentDeform.betaV3LabialVestibuleBlend) currentDeform.betaV3LabialBlendStrength.coerceIn(0f, 1f) else 0f
+        )
+        GLES20.glUniform1f(
+            uBetaV3IntricateLabiaFoldsLoc,
+            if (currentDeform.betaV3IntricateLabiaFolds) currentDeform.betaV3LabiaFoldsStrength.coerceIn(0f, 1f) else 0f
         )
 
         GLES20.glEnableVertexAttribArray(aPosLoc)
@@ -904,6 +913,7 @@ class VulvaGlTextureView(
                 GLES20.glVertexAttribPointer(aMatLoc, 4, GLES20.GL_FLOAT, false, DynamicGlMesh.STRIDE_BYTES, 24)
 
                 val isArchMesh = materialType < 0.5f && glMesh === mesh.labiaHoodArchMesh
+                GLES20.glUniform1f(uIsLabiaArchMeshLoc, if (isArchMesh) 1.0f else 0.0f)
                 val useArchWarmFix = isArchMesh && currentDeform.betaWarmTransitionZone
                 GLES20.glUniform1f(uBetaWarmTransitionZoneLoc, if (useArchWarmFix) 1.0f else 0.0f)
 
@@ -1287,14 +1297,21 @@ class VulvaGlTextureView(
         const val RESTING_HEART_RATE_BPM = 66f
         const val MAX_HEART_RATE_BPM = 142f
 
+        /**
+         * Version 19.0 sympathetic cardiac ramp divisor: slows Blossom's heart-rate rise by 3×
+         * so arousal/cardiac elevation builds gradually and organically over sustained contact.
+         */
+        internal const val HEART_RATE_RISE_RATE_DIVISOR = 3.0f
+
         internal fun heartRateExertionNorm(bpm: Float): Float =
             ((bpm - RESTING_HEART_RATE_BPM) / (MAX_HEART_RATE_BPM - RESTING_HEART_RATE_BPM)).coerceIn(0f, 1f)
 
         /**
-         * Physiological heart-rate dynamics: rises smoothly toward a sensitivity-weighted ceiling
-         * during active touch/manipulation (highest for clitoral glans/hood, moderate for inner labia
-         * and breasts, gentle for outer regions) and recovers exponentially back to resting BPM
-         * after a brief sympathetic inertia beat once stimulation stops.
+         * Physiological heart-rate dynamics: rises smoothly (at the v19.0 3× slower build rate)
+         * toward a sensitivity-weighted ceiling during active touch/manipulation (highest for
+         * clitoral glans/hood, moderate for inner labia and breasts, gentle for outer regions)
+         * and recovers exponentially back to resting BPM after a brief sympathetic inertia beat
+         * once stimulation stops.
          */
         internal fun stepHeartRateBpm(
             currentBpm: Float,
@@ -1311,7 +1328,7 @@ class VulvaGlTextureView(
                 val ceilingBpm = RESTING_HEART_RATE_BPM +
                     (MAX_HEART_RATE_BPM - RESTING_HEART_RATE_BPM) * (0.18f + 0.82f * sens)
                 if (currentBpm < ceilingBpm) {
-                    val riseRate = (0.055f + 0.215f * sens) * (0.35f + 0.65f * drive)
+                    val riseRate = ((0.055f + 0.215f * sens) * (0.35f + 0.65f * drive)) / HEART_RATE_RISE_RATE_DIVISOR
                     val next = currentBpm + (ceilingBpm - currentBpm) * (1f - kotlin.math.exp(-dt * riseRate))
                     return next.coerceIn(RESTING_HEART_RATE_BPM, MAX_HEART_RATE_BPM)
                 }
@@ -1631,7 +1648,9 @@ class VulvaGlTextureView(
          *  - Dual-lobe wet mucosal specular BRDF for glistening vestibule & clitoral glans
          *  - Dedicated matte charcoal-plum woven clinical linen pass for Blossom's exam cushion
          */
-        private const val FRAGMENT_SHADER = """
+        private val FRAGMENT_SHADER: String by lazy { FRAGMENT_SHADER_PART_1 + FRAGMENT_SHADER_PART_2 }
+
+        private const val FRAGMENT_SHADER_PART_1 = """
             precision highp float;
 
             varying vec3 vWorldPos;
@@ -1667,7 +1686,9 @@ class VulvaGlTextureView(
             uniform float uBetaLifeWarmth;
             uniform float uBetaV3SoftPigmentation;
             uniform float uBetaV3RegionalMaterial;
-            uniform float uBetaV3NaturalLighting;
+            uniform float uBetaV3LabialVestibuleBlend;
+            uniform float uBetaV3IntricateLabiaFolds;
+            uniform float uIsLabiaArchMesh;
 
             float hash31(vec3 p) {
                 p = fract(p * vec3(0.1031, 0.11369, 0.13787));
@@ -1706,6 +1727,26 @@ class VulvaGlTextureView(
                                      (0.24 + 0.76 * pigment) * (1.0 - stretch * 0.38);
                 float mucosaRipple = vnoise3(p * 38.0) * 0.30 + vnoise3(p * 96.0) * 0.14;
                 return mix(pores + fineWeave + creaseRidges * 0.44, mucosaRipple + creaseRidges * 0.26, mucosa);
+            }
+
+            // Beta v3 Option 6: multi-scale domain-warped tangled folds & delicate plicae for inner labia minora
+            // Uses asymmetric signed coordinates so left and right inner labia form unique organic fold networks.
+            float labiaTangleHeight(vec3 p) {
+                vec3 asymP = vec3(p.x * 1.14 + 0.37, p.y * 1.06 - 0.19, p.z * 1.10);
+                vec3 warp1 = vec3(
+                    vnoise3(asymP * 11.5 + vec3(1.3, -2.1, 0.7)) - 0.5,
+                    vnoise3(asymP * 11.5 + vec3(-2.7, 1.9, -1.1)) - 0.5,
+                    vnoise3(asymP * 11.5 + vec3(0.6, 2.4, 2.8)) - 0.5
+                );
+                vec3 q = asymP + warp1 * 0.135;
+                float ridgeA = 1.0 - abs(sin(q.y * 30.0 + q.x * 42.0 + warp1.z * 3.8));
+                float ridgeB = 1.0 - abs(sin(q.y * 23.0 - q.x * 52.0 + warp1.x * 4.4 + 1.25));
+                vec3 q2 = q * 1.95 + warp1 * 0.28;
+                float plicae = 0.5 + 0.5 * sin(q2.y * 34.0 + q2.x * 26.0 + vnoise3(q2 * 14.0) * 4.2);
+                float lobules = vnoise3(q * 36.0 + vec3(2.1, -1.4, 0.8));
+                float microCrepe = vnoise3(q * 74.0 + vec3(-1.3, 3.2, -0.9));
+                float primary = pow(clamp(ridgeA * 0.54 + ridgeB * 0.46, 0.0, 1.0), 1.35);
+                return primary * 0.54 + plicae * 0.24 + lobules * 0.14 + microCrepe * 0.08;
             }
 
             void main() {
@@ -1953,6 +1994,9 @@ class VulvaGlTextureView(
                     gl_FragColor = vec4(drapeMapped, 1.0);
                     return;
                 }
+        """
+
+        private const val FRAGMENT_SHADER_PART_2 = """
 
                 // -----------------------------------------------------------------
                 // PASS A: LIVING SKIN & MUCOSA WITH RGB SUBSURFACE SCATTERING (SSS)
@@ -2068,8 +2112,9 @@ class VulvaGlTextureView(
                 float v3ZoneMucosa = pelvicRegionMask * smoothstep(0.45, 0.85, mucosa) * (1.0 - smoothstep(0.86, 0.94, wetness));
                 float v3ZoneGlans = pelvicRegionMask * smoothstep(0.86, 0.94, wetness) * smoothstep(0.85, 0.98, mucosa);
                 if (v3MatStr > 0.001) {
-                    // Damp coarse pore normal bump on smooth non-keratinized mucosa & pearl glans
-                    microGrad *= (1.0 - (v3ZoneMucosa * 0.58 + v3ZoneGlans * 0.78) * uBetaV3RegionalMaterial);
+                    // Damp coarse pore normal bump on smooth non-keratinized mucosa & pearl glans (safely floored at 3x!)
+                    float v3PoreDamp = clamp(1.0 - (v3ZoneMucosa * 0.42 + v3ZoneGlans * 0.56) * min(uBetaV3RegionalMaterial, 1.65), 0.12, 1.0);
+                    microGrad *= v3PoreDamp;
                     // Add delicate diagonal Langer's tension lines on dry outer cutaneous pelvic skin in close-ups
                     if (v3ZoneOuter > 0.01 && camDist < 4.8) {
                         float closeL = 1.0 - smoothstep(3.4, 4.8, camDist);
@@ -2079,6 +2124,33 @@ class VulvaGlTextureView(
                         vec3 lDir = normalize(vec3(1.0, sideSign * 0.45, 0.0));
                         vec3 lTan = lDir - N * dot(lDir, N);
                         microGrad += lTan * (lLine * 0.026 * v3ZoneOuter * uBetaV3RegionalMaterial * closeL);
+                    }
+                }
+                // Beta v3 Option 6 (Intricate Labial Folds & Wavy Organic Border):
+                // Sculpt rich, asymmetric tangled folds & delicate plicae across the inner labia minora,
+                // plus soft organic border relief along the wavy labial-vestibular transition.
+                float v3FoldStr = uBetaV3IntricateLabiaFolds * pelvicRegionMask;
+                float innerLabiaFoldsMask = uIsLabiaArchMesh * smoothstep(0.14, 0.52, mucosa) * smoothstep(0.08, 0.52, archAlpha);
+                float tangleHeightC = 0.5;
+                float tangleActive = 0.0;
+                if (v3FoldStr > 0.001) {
+                    float mucEdgeBand = 4.0 * mucosa * (1.0 - mucosa);
+                    float borderReliefMask = (1.0 - uIsLabiaArchMesh) * mucEdgeBand * smoothstep(0.16, 0.62, mucosa) * 0.42;
+                    tangleActive = clamp(innerLabiaFoldsMask + borderReliefMask, 0.0, 1.0) * v3FoldStr;
+                    if (tangleActive > 0.004) {
+                        float fEps = 0.0032;
+                        tangleHeightC = labiaTangleHeight(vRestPos);
+                        float fX = labiaTangleHeight(vRestPos + vec3(fEps, 0.0, 0.0));
+                        float fY = labiaTangleHeight(vRestPos + vec3(0.0, fEps, 0.0));
+                        float fZ = labiaTangleHeight(vRestPos + vec3(0.0, 0.0, fEps));
+                        vec3 fRaw = vec3(tangleHeightC - fX, tangleHeightC - fY, tangleHeightC - fZ);
+                        vec3 fTan = fRaw - N * dot(fRaw, N);
+                        microGrad += fTan * (tangleActive * (0.29 / fEps * 0.0052));
+                        // Organic moisture variation across inner labial folds: dewy pooling in crevices, satin on raised ridges
+                        float wetPocket = vnoise3(vRestPos * vec3(13.0, 17.0, 13.0) + vec3(2.4, -1.7, 0.6));
+                        float creasePool = clamp(1.0 - tangleHeightC * 1.45, -0.35, 0.65);
+                        float wetDelta = (creasePool * 0.34 + (wetPocket - 0.46) * 0.42) * innerLabiaFoldsMask * v3FoldStr;
+                        wetness = clamp(wetness + wetDelta, 0.02, 0.98);
                     }
                 }
                 N = normalize(N + microGrad);
@@ -2103,7 +2175,7 @@ class VulvaGlTextureView(
                 float archWarmMask = uBetaWarmTransitionZone * (1.0 - smoothstep(archWarmLower, archWarmUpper, mucosa));
                 float ringSoftAo = mix(ao, mix(ao, 1.0, 0.28), archWarmMask);
 
-                // Beta v3 Toggle 2 (Soft Spatially Varying Pigmentation):
+                // Beta v3 Toggle 2 (Soft Spatially Varying Pigmentation, scaled 3x: 0..3.0):
                 // Organic low-frequency domain warp of mucocutaneous & pigment transition zones plus subtle
                 // vascular/melanin gradients strictly inside the pelvic region (0.0 when OFF -> bit-identical).
                 float v3PigStr = uBetaV3SoftPigmentation * pelvicRegionMask;
@@ -2115,8 +2187,17 @@ class VulvaGlTextureView(
                     float v3OrgFine = vnoise3(vRestPos * 16.5 + vec3(-2.4, 3.1, 1.5)) - 0.5;
                     float mucBand = 4.0 * mucosa * (1.0 - mucosa);
                     mucosaColor = clamp(mucosa + v3OrgWarp * 0.26 * mucBand * v3PigStr, 0.0, 1.0);
-                    float pigMod = 1.0 + (v3OrgWarp * 0.44 + v3OrgFine * 0.22) * v3PigStr;
+                    float pigMod = clamp(1.0 + (v3OrgWarp * 0.44 + v3OrgFine * 0.22) * v3PigStr, 0.15, 2.25);
                     pigmentColor = clamp(pigment * pigMod, 0.0, 1.0);
+                }
+                // Beta v3 Option 6: wavy, irregular, asymmetric labial-vestibular color boundary modulation
+                if (v3FoldStr > 0.001) {
+                    float mucBandF = 4.0 * mucosaColor * (1.0 - mucosaColor);
+                    float borderMeander =
+                        (vnoise3(vec3(vRestPos.x * 9.5 + 0.72, vRestPos.y * 12.8 - 0.35, vRestPos.z * 9.0)) - 0.5) * 0.65 +
+                        (vnoise3(vec3(vRestPos.x * 24.0 - 1.4, vRestPos.y * 29.0 + 0.9, vRestPos.z * 21.0)) - 0.5) * 0.35;
+                    mucosaColor = clamp(mucosaColor + borderMeander * 0.54 * mucBandF * v3FoldStr, 0.0, 1.0);
+                    pigmentColor = clamp(pigmentColor + borderMeander * 0.22 * innerLabiaFoldsMask * v3FoldStr, 0.0, 1.0);
                 }
 
                 // Skin-harmonized pigmentation across body and pelvic skin
@@ -2156,9 +2237,17 @@ class VulvaGlTextureView(
                 // Beta 5: gently warm-feather the downward-facing submental band under the chin into upper-neck tone (zero change on face y >= 5.92)
                 faceHarmonizedSkin = mix(faceHarmonizedSkin, faceHarmonizedSkin * vec3(0.955, 0.918, 0.902), submentalFeatherZone * (1.0 - faceLipActive) * 0.48);
                 vec3 albedo = mix(faceHarmonizedSkin, mucosaRimmed, mucosaColor);
+                // Beta v3 Option 5 (Smooth Labial-Vestibule Base Color Blend):
+                // Attenuate labia-arch-only darkening/browning strictly where the medial base meets the vestibule,
+                // and harmonize both sides of the junction into the exact same warm mucosal rose tone.
+                float v3BlendStr = uBetaV3LabialVestibuleBlend * pelvicRegionMask;
+                float vestBaseMask = uIsLabiaArchMesh *
+                    smoothstep(0.42, 0.88, mucosaColor) *
+                    (1.0 - smoothstep(0.16, 0.52, pigmentColor));
                 // Seam F (uBetaWarmTransitionZone): deepen the newly front-lit labiaHoodArchMesh by ~1 warm skin-tone
                 // shade (proportional across light and dark skin tones), fading cleanly to 0 along the outer Seam E skirt.
                 float seamFShadeFade = smoothstep(0.0, 0.55, archAlpha) * smoothstep(0.06, 0.28, mucosaColor + pigmentColor * 0.65);
+                seamFShadeFade *= (1.0 - vestBaseMask * v3BlendStr * 0.94);
                 vec3 seamFShadeTarget = mix(albedo * vec3(0.84, 0.77, 0.72), uSkinShadow * vec3(0.96, 0.90, 0.86), 0.24 * (1.0 - mucosaColor));
                 albedo = mix(albedo, seamFShadeTarget, uBetaWarmTransitionZone * seamFShadeFade);
                 // 3G (uBetaRefineInnerLabia): very faint natural warm rose-brown tissue tint on inner labia,
@@ -2166,15 +2255,39 @@ class VulvaGlTextureView(
                 float innerLabiaFade = smoothstep(0.05, 0.42, mucosaColor);
                 float freeEdgeWeight = smoothstep(0.14, 0.56, pigmentColor) * smoothstep(0.06, 0.34, mucosaColor);
                 float roseBrownStrength = uBetaRefineInnerLabia * clamp(innerLabiaFade * 0.11 + freeEdgeWeight * 0.19, 0.0, 0.28);
+                roseBrownStrength *= (1.0 - vestBaseMask * v3BlendStr * 0.92);
                 vec3 warmRoseBrown = mix(uSkinShadow * vec3(0.84, 0.64, 0.56), uMucosaDeep * vec3(0.96, 0.78, 0.70), 0.38);
                 albedo = mix(albedo, warmRoseBrown, roseBrownStrength);
+                if (v3BlendStr > 0.001) {
+                    vec3 vestibuleHarmonyTone = mix(mucosaVar, uMucosaDeep, (1.0 - clamp(ao, 0.48, 1.0)) * 0.26);
+                    albedo = mix(albedo, vestibuleHarmonyTone, vestBaseMask * v3BlendStr * 0.84);
+                    // Gently harmonize the outer vestibule floor margin on the patch side so both sides meet seamlessly
+                    float vestOuterRim = (1.0 - uIsLabiaArchMesh) *
+                        smoothstep(0.38, 0.88, mucosaColor) *
+                        (1.0 - smoothstep(0.84, 0.97, wetness)) *
+                        smoothstep(0.24, 0.68, ao);
+                    albedo = mix(albedo, vestibuleHarmonyTone, vestOuterRim * v3BlendStr * 0.34);
+                }
                 if (v3PigStr > 0.001) {
-                    // Organic subcutaneous vascular transition & gentle non-uniform melanin tone modulation
+                    // Organic subcutaneous vascular transition & gentle non-uniform melanin tone modulation (safely clamped at 3x)
                     float mucBand = 4.0 * mucosaColor * (1.0 - mucosaColor);
-                    vec3 vascularDrift = mix(albedo * vec3(1.03, 0.95, 0.94), mix(uSkinShadow, uMucosaBase, 0.45), 0.22);
-                    albedo = mix(albedo, vascularDrift, mucBand * v3PigStr * (0.20 + 0.18 * nHemo));
+                    vec3 vascularDrift = mix(albedo * vec3(1.03, 0.95, 0.94), mix(uSkinShadow, uMucosaBase, 0.45), 0.24);
+                    albedo = mix(albedo, vascularDrift, clamp(mucBand * v3PigStr * (0.20 + 0.18 * nHemo), 0.0, 0.82));
                     vec3 melaninDrift = mix(albedo * vec3(0.955, 0.935, 0.925), albedo * vec3(1.035, 1.015, 1.005), clamp(0.5 + v3OrgWarp * 1.15, 0.0, 1.0));
-                    albedo = mix(albedo, melaninDrift, v3PigStr * (0.34 + 0.24 * pigmentColor));
+                    albedo = mix(albedo, melaninDrift, clamp(v3PigStr * (0.30 + 0.20 * pigmentColor), 0.0, 0.85));
+                }
+                // Beta v3 Option 6: variegated light/rosy pigmentation & delicate tonal mottling across tangled inner labial folds
+                if (v3FoldStr > 0.001 && innerLabiaFoldsMask > 0.005) {
+                    float pigPatch = vnoise3(vRestPos * vec3(16.0, 21.0, 14.0) + vec3(-1.9, 2.6, 1.1));
+                    float ridgeLight = smoothstep(0.46, 0.84, tangleHeightC);
+                    float creaseRosy = 1.0 - smoothstep(0.18, 0.56, tangleHeightC);
+                    vec3 lightTranslucentPink = mix(albedo * vec3(1.07, 0.99, 0.99), mix(uSkinBase, uMucosaBase, 0.56) * vec3(1.06, 0.95, 0.96), 0.34);
+                    vec3 rosyCreaseTone = mix(albedo * vec3(0.96, 0.85, 0.86), uMucosaDeep * vec3(1.08, 0.94, 0.94), 0.28);
+                    vec3 dappledPigTone = mix(albedo * vec3(0.93, 0.87, 0.85), albedo * vec3(1.05, 0.97, 0.96), pigPatch);
+                    float fWeight = innerLabiaFoldsMask * v3FoldStr;
+                    albedo = mix(albedo, lightTranslucentPink, ridgeLight * fWeight * 0.42);
+                    albedo = mix(albedo, rosyCreaseTone, creaseRosy * fWeight * 0.38);
+                    albedo = mix(albedo, dappledPigTone, fWeight * 0.36);
                 }
 
                 // Tab 3 Lifelike+: Subtle living capillary warmth on cheeks, ears & upper chest (0.0 when OFF -> bit-identical)
@@ -2285,14 +2398,10 @@ class VulvaGlTextureView(
 
                 // TRUE RGB-WAVELENGTH PRE-INTEGRATED SUBSURFACE SCATTERING (SSS):
                 // Red (~650nm) wraps deepest through hemoglobin dermis; Green medium; Blue tightest!
-                // Beta v3 Toggle 5 (Natural Lighting & Shadow Transitions): gently broadens pelvic penumbra wrap
-                float v3LightStr = uBetaV3NaturalLighting * pelvicRegionMask;
                 vec3 sssWrapKey = mix(vec3(0.64, 0.30, 0.14), vec3(0.86, 0.46, 0.22), mucosa) +
-                                  vec3(0.24, 0.14, 0.08) * jointSss +
-                                  vec3(0.20, 0.11, 0.05) * v3LightStr;
+                                  vec3(0.24, 0.14, 0.08) * jointSss;
                 vec3 sssWrapFill = mix(vec3(0.46, 0.24, 0.12), vec3(0.66, 0.36, 0.18), mucosa) +
-                                   vec3(0.18, 0.10, 0.06) * jointSss +
-                                   vec3(0.14, 0.08, 0.04) * v3LightStr;
+                                   vec3(0.18, 0.10, 0.06) * jointSss;
                 vec3 diffKeyRGB = clamp((vec3(NdotL1) + sssWrapKey) / (vec3(1.0) + sssWrapKey), 0.0, 1.0);
                 vec3 diffFillRGB = clamp((vec3(NdotL2) + sssWrapFill) / (vec3(1.0) + sssWrapFill), 0.0, 1.0);
                 diffKeyRGB = pow(max(diffKeyRGB, vec3(0.0001)), vec3(0.90, 1.05, 1.22));
@@ -2302,7 +2411,7 @@ class VulvaGlTextureView(
                 vec3 sssShallow = mix(uSkinBase * vec3(1.08, 0.62, 0.50), vec3(0.90, 0.40, 0.28), 0.50);
                 vec3 sssDeep = vec3(0.86, 0.18, 0.20);
                 vec3 sssTint = mix(sssShallow, sssDeep, 0.36 + 0.54 * mucosa);
-                float terminator = exp(-abs(NdotL1 - 0.02) * (3.6 - 0.85 * v3LightStr)) * (0.28 + 0.34 * mucosa + 0.14 * jointSss + 0.10 * v3LightStr);
+                float terminator = exp(-abs(NdotL1 - 0.02) * 3.6) * (0.28 + 0.34 * mucosa + 0.14 * jointSss);
 
                 // Thin-tissue forward/back translucency (illuminates thin labia minora & hood margins!)
                 // Vulva Beta v2 Toggle 4: strictly pelvic-scoped satin-velvet finish reducing waxy rim/specular polish
@@ -2346,26 +2455,27 @@ class VulvaGlTextureView(
                 float oilBreakup = mix(0.79, 1.19, nMicro * 0.65 + nMelanin * 0.35) * oilBreakupBase;
                 float labiaOilBreakup = mix(oilBreakup, 0.92 * oilBreakupBase, 0.65 * labiaInnerMask);
                 float microRough = mix(-3.0, 3.2, nMid * 0.55 + nMicro * 0.45);
-                // Beta v3 Toggle 4 (Regional Material Differentiation): separate dry matte-satin outer skin,
+                // Beta v3 Toggle 4 (Regional Material Differentiation, scaled 3x: 0..3.0): separate dry matte-satin outer skin,
                 // pliable transitional sulcus/hood satin, hydrated inner mucosa, and luminous pearl glans!
-                float v3OuterMatte = 1.0 - v3ZoneOuter * uBetaV3RegionalMaterial * 0.26;
-                float v3TransSatin = 1.0 + v3ZoneTrans * uBetaV3RegionalMaterial * 0.14;
+                float v3MatBounded = min(uBetaV3RegionalMaterial, 3.0);
+                float v3OuterMatte = clamp(1.0 - v3ZoneOuter * v3MatBounded * 0.24, 0.24, 1.0);
+                float v3TransSatin = 1.0 + v3ZoneTrans * v3MatBounded * 0.14;
                 float v3HydrationVar = mix(0.86, 1.18, nMid * 0.55 + nHemo * 0.45);
-                float v3MucosaSheen = 1.0 + v3ZoneMucosa * uBetaV3RegionalMaterial * (0.28 * v3HydrationVar);
-                float v3GlansPearl = 1.0 + v3ZoneGlans * uBetaV3RegionalMaterial * 0.24;
-                float broadExp = max(12.0, mix(18.0, 29.0, clamp(wetness + naturalSheen * 0.22, 0.0, 1.0)) +
+                float v3MucosaSheen = 1.0 + v3ZoneMucosa * v3MatBounded * (0.28 * v3HydrationVar);
+                float v3GlansPearl = 1.0 + v3ZoneGlans * v3MatBounded * 0.24;
+                float broadExp = max(8.0, mix(18.0, 29.0, clamp(wetness + naturalSheen * 0.22, 0.0, 1.0)) +
                     microRough * (1.0 - mucosa) + 22.0 * labiaInnerMask - 3.0 * pelvicCutaneousFinish -
-                    4.0 * v3ZoneOuter * uBetaV3RegionalMaterial + 6.0 * v3ZoneTrans * uBetaV3RegionalMaterial);
+                    3.6 * v3ZoneOuter * v3MatBounded + 5.5 * v3ZoneTrans * v3MatBounded);
                 float pelvicBroadTrim = (1.0 - pelvicCutaneousFinish * 0.28) * (1.0 - nonArchPelvicMucosa * 0.26) * (1.0 - pelvicFinishMask * labiaInnerMask * 0.12);
                 float broadAmp = mix(0.070, 0.148, wetness) * (0.88 + 0.24 * naturalSheen) * (1.0 - 0.56 * labiaInnerMask) * pelvicBroadTrim * v3OuterMatte * v3TransSatin;
                 float broadSpec = pow(NdotH1, broadExp) * broadAmp * labiaOilBreakup;
                 // Secondary tight crisp highlight strictly reserved for naturally moist inner mucosa & clitoral glans
                 float moistMask = smoothstep(0.075, 0.18, wetness);
                 float wetKeyExp = mix(78.0, 162.0, wetness) + 86.0 * labiaInnerMask + 32.0 * nonArchPelvicMucosa +
-                    24.0 * v3ZoneMucosa * uBetaV3RegionalMaterial + 36.0 * v3ZoneGlans * uBetaV3RegionalMaterial;
+                    22.0 * v3ZoneMucosa * v3MatBounded + 32.0 * v3ZoneGlans * v3MatBounded;
                 float wetFillExp = 92.0 + 74.0 * labiaInnerMask + 24.0 * nonArchPelvicMucosa;
                 float wetSpecGain = (1.0 - 0.56 * labiaInnerMask) * (1.0 - nonArchPelvicMucosa * 0.34) * (1.0 - pelvicFinishMask * labiaInnerMask * 0.12) *
-                    (1.0 - v3ZoneTrans * uBetaV3RegionalMaterial * 0.28) * v3MucosaSheen * v3GlansPearl;
+                    clamp(1.0 - v3ZoneTrans * v3MatBounded * 0.24, 0.25, 1.0) * v3MucosaSheen * v3GlansPearl;
                 float wetSharpSpec = (pow(NdotH1, wetKeyExp) * wetness * 0.54 +
                                       pow(NdotH2, wetFillExp) * wetness * 0.15) * wetSpecGain * moistMask * faceMatteDamp * areolaMatteDamp;
 
@@ -2373,18 +2483,20 @@ class VulvaGlTextureView(
                 float viewRim = clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0);
                 float fresnel = pow(viewRim, 3.4);
                 float rimLight = fresnel * (0.26 + 0.24 * mucosa) * (0.45 + 0.55 * max(dot(N, Lrim), 0.0)) *
-                    (1.0 - pelvicFinishMask * 0.42) * (1.0 - v3LightStr * 0.24);
-                float velvetWrap = pow(viewRim, 2.2) * (1.0 - mucosa) * (1.0 - hairCoverage * 0.80) * (0.052 + 0.018 * v3ZoneOuter * uBetaV3RegionalMaterial);
+                    (1.0 - pelvicFinishMask * 0.42);
+                float velvetWrap = pow(viewRim, 2.2) * (1.0 - mucosa) * (1.0 - hairCoverage * 0.80) * (0.052 + 0.018 * v3ZoneOuter * v3MatBounded);
 
                 // Colored Hemoglobin AO Bounce: prevents crevices from looking muddy gray & softens hip/lip/body contrast
                 float featheredAo = mix(ringSoftAo, min(ringSoftAo, 0.87), submentalFeatherZone * 0.42);
                 featheredAo = mix(featheredAo, min(featheredAo, 0.93), labiaInnerMask * 0.45);
-                float fullAo = clamp(featheredAo * microAo, 0.06, 1.0);
-                if (v3LightStr > 0.001) {
-                    // Gently ease mid-penumbra shadows while preserving deep introitus & urethral openings
-                    float midCrevice = smoothstep(0.20, 0.44, fullAo) * (1.0 - smoothstep(0.72, 0.96, fullAo));
-                    fullAo = mix(fullAo, pow(fullAo, 0.82), v3LightStr * midCrevice * 0.65);
+                if (v3BlendStr > 0.001) {
+                    // Ease medial junction AO shadow so the labial base melts organically into the vestibule
+                    featheredAo = mix(featheredAo, max(featheredAo, 0.72), vestBaseMask * v3BlendStr * 0.65);
                 }
+                float tangleCreaseAo = (tangleActive > 0.004)
+                    ? mix(1.0 - 0.26 * tangleActive, 1.04, clamp(tangleHeightC * 1.15, 0.0, 1.0))
+                    : 1.0;
+                float fullAo = clamp(featheredAo * microAo * tangleCreaseAo, 0.06, 1.0);
                 vec3 aoExponents = mix(vec3(0.76, 1.00, 1.18), vec3(0.68, 0.90, 1.06), jointSss * 0.65);
                 aoExponents = mix(aoExponents, vec3(0.68, 0.96, 1.22), archWarmMask * 0.60);
                 vec3 coloredAo = pow(vec3(fullAo), aoExponents);
@@ -2401,17 +2513,9 @@ class VulvaGlTextureView(
                     0.42 * labiaInnerMask
                 );
 
-                // Warm double-bounce dermal inter-reflection inside shadowed pelvic folds (Beta v3 Toggle 5)
-                vec3 cavityBounce = vec3(0.0);
-                if (v3LightStr > 0.001) {
-                    float cavityBand = (1.0 - fullAo) * smoothstep(0.14, 0.48, fullAo);
-                    cavityBounce = albedo * mix(vec3(1.04, 0.76, 0.68), sssTint, 0.42) * cavityBand * v3LightStr * 0.24;
-                }
-
                 vec3 lit = ambient * coloredAo +
                            albedo * (diffKeyRGB * 0.78 * keyColor + diffFillRGB * (0.22 + neckSkinBlend * 0.08) * fillColor) * (vec3(0.28) + 0.72 * coloredAo) +
                            sssTint * (terminator * 0.35 * faceSssTrim + grazingTrans * 0.19 + thinTransmit * (0.22 + 0.20 * uLightMode)) * coloredAo +
-                           cavityBounce +
                            specColor * (broadSpec + wetSharpSpec) * (0.30 + 0.70 * fullAo) +
                            mix(uSkinBase, vec3(1.0, 0.96, 0.93), 0.28) * velvetWrap * (0.45 + 0.55 * fullAo) +
                            mix(uSkinBase, sssTint, 0.46) * rimLight;

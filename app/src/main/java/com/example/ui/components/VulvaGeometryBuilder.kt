@@ -91,21 +91,23 @@ data class VulvaDeformationState(
     val betaV2AdjustableVestibularConcavity: Boolean = !legacyVulvaMode,
     val betaV2VestibularConcavity: Float = 0.30f,
     /**
-     * Vulva Beta v3 anatomical realism pass (5 independent toggles + adjustable strength,
+     * Vulva Beta v3 anatomical realism pass (6 independent toggles + adjustable strength,
      * all OFF by default so the baked Beta v2 baseline stays bit-for-bit identical) plus
-     * proportional Breast Size Boost (+15% above most petite).
+     * proportional Breast Size Boost slider (0%..+50% above most petite).
      */
     val betaV3OrganicContinuity: Boolean = false,
-    val betaV3ContinuityStrength: Float = 0.65f,
+    val betaV3ContinuityStrength: Float = 0.50f,
     val betaV3SoftPigmentation: Boolean = false,
-    val betaV3PigmentStrength: Float = 0.70f,
+    val betaV3PigmentStrength: Float = 0.50f,
     val betaV3AnatomicalAsymmetry: Boolean = false,
-    val betaV3AsymmetryStrength: Float = 0.65f,
+    val betaV3AsymmetryStrength: Float = 0.50f,
     val betaV3RegionalSurfaceDetail: Boolean = false,
-    val betaV3SurfaceStrength: Float = 0.65f,
-    val betaV3NaturalLighting: Boolean = false,
-    val betaV3LightingStrength: Float = 0.70f,
-    val betaBreastSizeBoost: Boolean = false,
+    val betaV3SurfaceStrength: Float = 0.50f,
+    val betaV3LabialVestibuleBlend: Boolean = false,
+    val betaV3LabialBlendStrength: Float = 0.70f,
+    val betaV3IntricateLabiaFolds: Boolean = false,
+    val betaV3LabiaFoldsStrength: Float = 0.70f,
+    val betaBreastSizeBoost: Float = 0f,
     /**
      * Lifelike Beta (Tab 2 & Tab 3) micro-behavior parameters (all 0f / false by default in
      * VulvaDeformationState so baseline head/body geometry & shading stay bit-identical).
@@ -260,7 +262,7 @@ class VulvaAnatomySceneMesh {
     private var lastAppliedBreastRightX = Float.NaN
     private var lastAppliedBreastRightY = Float.NaN
     private var lastAppliedBreastSize = Float.NaN
-    private var lastAppliedBreastSizeBoost = false
+    private var lastAppliedBreastSizeBoost = Float.NaN
     private var lastVulvaLeftOuter = Float.NaN
     private var lastVulvaRightOuter = Float.NaN
     private var lastVulvaLeftInner = Float.NaN
@@ -290,6 +292,10 @@ class VulvaAnatomySceneMesh {
     private var lastVulvaBetaV3AsymmetryStrength = Float.NaN
     private var lastVulvaBetaV3RegionalSurfaceDetail = false
     private var lastVulvaBetaV3SurfaceStrength = Float.NaN
+    private var lastVulvaBetaV3LabialVestibuleBlend = false
+    private var lastVulvaBetaV3LabialBlendStrength = Float.NaN
+    private var lastVulvaBetaV3IntricateLabiaFolds = false
+    private var lastVulvaBetaV3LabiaFoldsStrength = Float.NaN
     private var lastBetaShortPerineum = false
     private var lastBetaSoftButtockTable = false
     private var lastBetaSmoothVulvaSeam = false
@@ -590,7 +596,13 @@ class VulvaAnatomySceneMesh {
                     state.betaV3AsymmetryStrength != lastVulvaBetaV3AsymmetryStrength) ||
                 state.betaV3RegionalSurfaceDetail != lastVulvaBetaV3RegionalSurfaceDetail ||
                 (state.betaV3RegionalSurfaceDetail &&
-                    state.betaV3SurfaceStrength != lastVulvaBetaV3SurfaceStrength)
+                    state.betaV3SurfaceStrength != lastVulvaBetaV3SurfaceStrength) ||
+                state.betaV3LabialVestibuleBlend != lastVulvaBetaV3LabialVestibuleBlend ||
+                (state.betaV3LabialVestibuleBlend &&
+                    state.betaV3LabialBlendStrength != lastVulvaBetaV3LabialBlendStrength) ||
+                state.betaV3IntricateLabiaFolds != lastVulvaBetaV3IntricateLabiaFolds ||
+                (state.betaV3IntricateLabiaFolds &&
+                    state.betaV3LabiaFoldsStrength != lastVulvaBetaV3LabiaFoldsStrength)
             if (vulvaNeedsUpdate) {
                 updateBlossomVulvaPatch(state)
                 updateClitoralGlans(state, includeLithotomy = true)
@@ -738,7 +750,13 @@ class VulvaAnatomySceneMesh {
                     state.betaV3AsymmetryStrength != lastVulvaBetaV3AsymmetryStrength) ||
                 state.betaV3RegionalSurfaceDetail != lastVulvaBetaV3RegionalSurfaceDetail ||
                 (state.betaV3RegionalSurfaceDetail &&
-                    state.betaV3SurfaceStrength != lastVulvaBetaV3SurfaceStrength)
+                    state.betaV3SurfaceStrength != lastVulvaBetaV3SurfaceStrength) ||
+                state.betaV3LabialVestibuleBlend != lastVulvaBetaV3LabialVestibuleBlend ||
+                (state.betaV3LabialVestibuleBlend &&
+                    state.betaV3LabialBlendStrength != lastVulvaBetaV3LabialBlendStrength) ||
+                state.betaV3IntricateLabiaFolds != lastVulvaBetaV3IntricateLabiaFolds ||
+                (state.betaV3IntricateLabiaFolds &&
+                    state.betaV3LabiaFoldsStrength != lastVulvaBetaV3LabiaFoldsStrength)
             if (pelvisVulvaNeedsUpdate) {
                 updateContouredPelvis(state)
                 updateClitoralGlans(state, includeLithotomy = false)
@@ -778,6 +796,10 @@ class VulvaAnatomySceneMesh {
         lastVulvaBetaV3AsymmetryStrength = state.betaV3AsymmetryStrength
         lastVulvaBetaV3RegionalSurfaceDetail = state.betaV3RegionalSurfaceDetail
         lastVulvaBetaV3SurfaceStrength = state.betaV3SurfaceStrength
+        lastVulvaBetaV3LabialVestibuleBlend = state.betaV3LabialVestibuleBlend
+        lastVulvaBetaV3LabialBlendStrength = state.betaV3LabialBlendStrength
+        lastVulvaBetaV3IntricateLabiaFolds = state.betaV3IntricateLabiaFolds
+        lastVulvaBetaV3LabiaFoldsStrength = state.betaV3LabiaFoldsStrength
     }
 
     private fun updateBlossomBreasts(s: VulvaDeformationState) {
@@ -842,12 +864,19 @@ class VulvaAnatomySceneMesh {
         val leftSpread = s.leftOuter * 0.22f + s.leftInner * 0.048f
         val rightSpread = s.rightOuter * 0.22f + s.rightInner * 0.048f
 
-        val contS = if (s.betaV3OrganicContinuity) s.betaV3ContinuityStrength.coerceIn(0f, 1f) else 0f
-        val asymS = if (s.betaV3AnatomicalAsymmetry) s.betaV3AsymmetryStrength.coerceIn(0f, 1f) else 0f
-        val surfS = if (s.betaV3RegionalSurfaceDetail) s.betaV3SurfaceStrength.coerceIn(0f, 1f) else 0f
+        // Beta v3 sliders 1..4 are amplified 3x (0% = off, 100% = 3.0x) for clear visual expressiveness,
+        // gated cleanly to exact 0 before ovalR = 0.89 so the outer body-patch seam (edgeR >= 0.90) stays untouched.
+        val v3OvalX = x / BlossomSdfBodyBuilder.PATCH_RX
+        val v3OvalY = (y - BlossomSdfBodyBuilder.PATCH_CENTER_Y) / BlossomSdfBodyBuilder.PATCH_RY
+        val v3OvalR = sqrt(v3OvalX * v3OvalX + v3OvalY * v3OvalY)
+        val v3PatchMask = 1f - smoothStep(0.72f, 0.89f, v3OvalR)
+        val contS = if (s.betaV3OrganicContinuity) s.betaV3ContinuityStrength.coerceIn(0f, 1f) * 3.0f * v3PatchMask else 0f
+        val asymS = if (s.betaV3AnatomicalAsymmetry) s.betaV3AsymmetryStrength.coerceIn(0f, 1f) * 3.0f * v3PatchMask else 0f
+        val surfS = if (s.betaV3RegionalSurfaceDetail) s.betaV3SurfaceStrength.coerceIn(0f, 1f) * 3.0f * v3PatchMask else 0f
+        val foldS = if (s.betaV3IntricateLabiaFolds) s.betaV3LabiaFoldsStrength.coerceIn(0f, 1f) * v3PatchMask else 0f
 
         // Teardrop outer labia majora crests framing the continuous inner arch naturally
-        // Beta v3 Toggle 3 (Subtle Anatomical Asymmetry): mild organic left/right fullness & longitudinal peak offset
+        // Beta v3 Toggle 3 (Subtle Anatomical Asymmetry): organic left/right fullness & longitudinal peak offset
         val restCrestX = 0.098f + 0.132f * almondCurve
         val leftCrestAsym = if (asymS > 1e-5f) {
             asymS * (0.011f * almondCurve + 0.006f * sin(y * 3.8f + 0.55f) * cleftSpan)
@@ -877,11 +906,27 @@ class VulvaAnatomySceneMesh {
         val groinSigma = 0.075f + contS * 0.018f
         val leftGroinDip = exp(-((x - leftGroinX) / groinSigma).let { it * it })
         val rightGroinDip = exp(-((x - rightGroinX) / groinSigma).let { it * it })
-        dz -= (leftGroinDip + rightGroinDip) * (0.032f - contS * 0.005f) * groinWeight
+        val groinDepth = (0.032f - contS * 0.005f).coerceAtLeast(0.012f)
+        dz -= (leftGroinDip + rightGroinDip) * groinDepth * groinWeight
 
         // Recessed Concave Vestibular Basin (tightly framed inside inner labia — eliminates muddy outer halo!)
-        val vestLeftEdge = -(0.044f + s.leftInner * 0.155f + s.leftOuter * 0.058f)
-        val vestRightEdge = 0.044f + s.rightInner * 0.155f + s.rightOuter * 0.058f
+        // Beta v3 Toggle 6 (Intricate Labia Folds & Organic Border): breaks up the smooth elliptical
+        // labial-vestibular boundary into wavy, irregular, left/right-asymmetric anatomical curves!
+        val borderWaveMask = smoothBell(y, -0.44f, 0.32f, 0.12f) * foldS
+        val leftBorderWave = if (borderWaveMask > 1e-5f) {
+            val wWarp = 0.75f * sin(y * 9.5f + 0.6f)
+            (0.0135f * sin(y * 16.4f + 0.85f + wWarp) +
+                0.0085f * cos(y * 31.2f - 1.40f - wWarp * 0.6f) +
+                0.0046f * sin(y * 54.0f + 2.15f)) * borderWaveMask
+        } else 0f
+        val rightBorderWave = if (borderWaveMask > 1e-5f) {
+            val wWarp = 0.72f * cos(y * 10.3f - 1.1f)
+            (0.0125f * sin(y * 18.1f + 2.55f + wWarp) +
+                0.0090f * cos(y * 34.5f + 0.75f - wWarp * 0.7f) +
+                0.0048f * sin(y * 58.5f - 1.35f)) * borderWaveMask
+        } else 0f
+        val vestLeftEdge = -(0.044f + s.leftInner * 0.155f + s.leftOuter * 0.058f + leftBorderWave).coerceAtLeast(0.028f)
+        val vestRightEdge = (0.044f + s.rightInner * 0.155f + s.rightOuter * 0.058f + rightBorderWave).coerceAtLeast(0.028f)
         val vestCenter = (vestLeftEdge + vestRightEdge) * 0.5f
         val vestHalfW = ((vestRightEdge - vestLeftEdge) * 0.5f).coerceAtLeast(0.038f)
         val normVestX = (x - vestCenter) / vestHalfW
@@ -891,42 +936,45 @@ class VulvaAnatomySceneMesh {
 
         // Soft, anatomically proportioned teardrop Outer Labia Majora cushions nestled naturally between the thighs
         val fullnessCurve = (0.24f + 0.78f * almondCurve) * smoothBell(y, -0.54f, 0.52f, 0.14f)
+        val asymBlendW = (0.32f * asymS).coerceAtMost(0.95f)
         val fullnessL = if (asymS > 1e-5f) {
             val yL = y - 0.028f * asymS
             val tL = ((yL - (-0.54f)) / 1.06f).coerceIn(0f, 1f)
             val almL = sin(tL * PI.toFloat()).coerceIn(0f, 1f)
-            fullnessCurve * (1f - 0.45f * asymS) + (0.24f + 0.78f * almL) * smoothBell(yL, -0.54f, 0.52f, 0.14f) * (0.45f * asymS)
+            fullnessCurve * (1f - asymBlendW) + (0.24f + 0.78f * almL) * smoothBell(yL, -0.54f, 0.52f, 0.14f) * asymBlendW
         } else fullnessCurve
         val fullnessR = if (asymS > 1e-5f) {
             val yR = y + 0.022f * asymS
             val tR = ((yR - (-0.54f)) / 1.06f).coerceIn(0f, 1f)
             val almR = sin(tR * PI.toFloat()).coerceIn(0f, 1f)
-            fullnessCurve * (1f - 0.45f * asymS) + (0.24f + 0.78f * almR) * smoothBell(yR, -0.54f, 0.52f, 0.14f) * (0.45f * asymS)
+            fullnessCurve * (1f - asymBlendW) + (0.24f + 0.78f * almR) * smoothBell(yR, -0.54f, 0.52f, 0.14f) * asymBlendW
         } else fullnessCurve
         val leftWidth = (0.100f + 0.044f * almondCurve) + s.leftOuter * 0.022f + contS * 0.014f + asymS * 0.009f
-        val rightWidth = (0.100f + 0.044f * almondCurve) + s.rightOuter * 0.022f + contS * 0.014f - asymS * 0.006f
+        val rightWidth = ((0.100f + 0.044f * almondCurve) + s.rightOuter * 0.022f + contS * 0.014f - asymS * 0.006f).coerceAtLeast(0.068f)
 
         val lDist = abs((x - leftCrestX) / leftWidth)
         val rDist = abs((x - rightCrestX) / rightWidth)
         val softVestBridge = if (contS > 1e-5f) {
             val wideVest = (1f - smoothStep(0.22f, 1.38f, vestEllipse)).coerceIn(0f, 1f)
-            insideVestibule * (1f - contS * 0.52f) + wideVest * (contS * 0.52f)
+            val bridgeMix = (contS * 0.34f).coerceIn(0f, 0.92f)
+            insideVestibule * (1f - bridgeMix) + wideVest * bridgeMix
         } else insideVestibule
-        val vestibuleSuppress = 1f - softVestBridge * (0.88f - contS * 0.12f)
+        val vestibuleSuppress = 1f - softVestBridge * (0.88f - (contS * 0.08f).coerceAtMost(0.24f))
         val leftCushion = exp(-Math.pow(lDist.toDouble(), 1.92).toFloat()) *
             (0.108f - s.leftOuter * 0.012f) * (1f + asymS * 0.068f) * fullnessL * vestibuleSuppress
         val rightCushion = exp(-Math.pow(rDist.toDouble(), 1.92).toFloat()) *
-            (0.108f - s.rightOuter * 0.012f) * (1f - asymS * 0.052f) * fullnessR * vestibuleSuppress
+            (0.108f - s.rightOuter * 0.012f) * (1f - asymS * 0.052f).coerceAtLeast(0.76f) * fullnessR * vestibuleSuppress
 
         // Soft anterior & posterior labial commissures framing the cleft smoothly at top and bottom
         val antCommSigmaX = 0.16f + contS * 0.055f
         val antCommSigmaY = 0.12f + contS * 0.055f
         val postCommSigmaX = 0.14f + contS * 0.045f
         val postCommSigmaY = 0.09f + contS * 0.040f
-        val antCommissure = (0.022f + contS * 0.009f) * exp(-((x / antCommSigmaX).let { it * it } + ((y - (0.46f + contS * 0.02f)) / antCommSigmaY).let { it * it })) *
-            (1f - softVestBridge * (0.75f - contS * 0.15f))
-        val postCommissure = (0.018f + contS * 0.007f) * exp(-((x / postCommSigmaX).let { it * it } + ((y + (0.50f + contS * 0.015f)) / postCommSigmaY).let { it * it })) *
-            (1f - softVestBridge * (0.75f - contS * 0.15f))
+        val commVestSuppress = (0.75f - (contS * 0.12f).coerceAtMost(0.36f))
+        val antCommissure = (0.022f + contS * 0.009f) * exp(-((x / antCommSigmaX).let { it * it } + ((y - (0.46f + contS * 0.014f)) / antCommSigmaY).let { it * it })) *
+            (1f - softVestBridge * commVestSuppress)
+        val postCommissure = (0.018f + contS * 0.007f) * exp(-((x / postCommSigmaX).let { it * it } + ((y + (0.50f + contS * 0.010f)) / postCommSigmaY).let { it * it })) *
+            (1f - softVestBridge * commVestSuppress)
 
         // Delicate longitudinal skin folds along outer labia majora (flatten organically under spreading tension)
         val asymPhaseL = asymS * 1.15f
@@ -937,8 +985,8 @@ class VulvaAnatomySceneMesh {
         val outerCreaseR = (0.0048f * sin((x - rightCrestX) * 62f - y * 5.4f + asymPhaseR) +
             0.0022f * cos((x - rightCrestX) * 112f + y * 8.2f + asymPhaseR * 0.6f)) *
             exp(-rDist * rDist * 1.45f) * fullnessR * (1f - s.rightOuter * 0.52f)
-        // Beta v3 Toggle 4 (Regional Curvature & Material Differentiation): multi-scale subtle cutaneous
-        // pillowing on labia majora + soft mons-to-commissure roll (zero change when surfS == 0f)
+        // Beta v3 Toggle 4 (Regional Curvature & Material Differentiation): multi-scale cutaneous
+        // pillowing on labia majora + soft mons-to-commissure roll (3x scaled; zero change when surfS == 0f)
         val majoraRegionalRelief = if (surfS > 1e-5f) {
             val lSubtleRoll = (0.0042f * sin(y * 14.5f + (x - leftCrestX) * 28f + 0.6f) +
                 0.0026f * cos(y * 27.0f - (x - leftCrestX) * 44f)) *
@@ -1005,18 +1053,18 @@ class VulvaAnatomySceneMesh {
             sulcusLeftCenter = (vestLeftEdge * vestYScale) * 0.36f + leftCrestX * 0.64f
             sulcusRightCenter = (vestRightEdge * vestYScale) * 0.36f + rightCrestX * 0.64f
             sulcusSigma = 0.042f + contS * 0.013f
-            sulcusDepthGain = 0.017f * (1f - contS * 0.24f)
-            sulcusAoGain = 0.14f * (1f - contS * 0.18f)
+            sulcusDepthGain = 0.017f * (1f - (contS * 0.24f).coerceAtMost(0.75f))
+            sulcusAoGain = 0.14f * (1f - (contS * 0.18f).coerceAtMost(0.65f))
         } else {
             sulcusLeftCenter = vestLeftEdge - 0.034f
             sulcusRightCenter = vestRightEdge + 0.034f
             sulcusSigma = 0.028f + contS * 0.010f
-            sulcusDepthGain = 0.024f * (1f - contS * 0.22f)
-            sulcusAoGain = 0.21f * (1f - contS * 0.16f)
+            sulcusDepthGain = 0.024f * (1f - (contS * 0.22f).coerceAtMost(0.72f))
+            sulcusAoGain = 0.21f * (1f - (contS * 0.16f).coerceAtMost(0.62f))
         }
         val sulcusEndTaper = if (contS > 1e-5f) {
             val midTaper = 0.42f + 0.58f * smoothBell(y, -0.38f, 0.30f, 0.14f)
-            1f - contS * (1f - midTaper)
+            1f - (contS * 0.34f).coerceAtMost(0.95f) * (1f - midTaper)
         } else 1f
         val sulcusL = exp(-((x - sulcusLeftCenter) / sulcusSigma).let { it * it }) * cleftSpan * sulcusEndTaper
         val sulcusR = exp(-((x - sulcusRightCenter) / sulcusSigma).let { it * it }) * cleftSpan * sulcusEndTaper
@@ -1055,7 +1103,7 @@ class VulvaAnatomySceneMesh {
         val rugae = if (iR2 < 0.88f) {
             0.008f * sin(y * 62f + x * 12f) * (1f - iR2) * (0.35f + 0.65f * cavityOpen)
         } else 0f
-        // Beta v3 Toggle 4: delicate Hart's-line contour nuance & subtle vestibular pillowing
+        // Beta v3 Toggle 4 (3x scaled): Hart's-line contour nuance & vestibular micro-fold pillowing
         val vestRegionalNuance = if (surfS > 1e-5f) {
             val hartsRing = exp(-((sqrt(vestEllipse) - 0.78f) / 0.20f).let { it * it }) *
                 smoothBell(y, -0.40f, 0.18f, 0.10f) * 0.0045f
@@ -1063,7 +1111,16 @@ class VulvaAnatomySceneMesh {
                 insideVestibule * (1f - introEnvelope) * (0.45f + 0.55f * cavityOpen)
             (hartsRing + vestMicroFold) * surfS
         } else 0f
-        dz += coronaRing - introDepth + rugae + (softVestContour + vestRegionalNuance) * (1f - introEnvelope)
+        // Beta v3 Toggle 6: subtle organic scalloped folds where inner labia base meets the vestibule rim
+        val vestBorderFolds = if (foldS > 1e-5f) {
+            val rimBand = exp(-((sqrt(vestEllipse) - 0.86f) / 0.24f).let { it * it }) *
+                smoothBell(y, -0.42f, 0.28f, 0.10f) * (1f - introEnvelope)
+            val asymX = x * 1.13f + (if (x < 0f) 0.45f else -0.62f)
+            val organicPlicae = 0.0052f * sin(y * 34f + asymX * 26f + 1.1f * sin(y * 13f)) +
+                0.0031f * cos(y * 61f - asymX * 38f + 0.7f)
+            organicPlicae * rimBand * foldS
+        } else 0f
+        dz += coronaRing - introDepth + rugae + (softVestContour + vestRegionalNuance + vestBorderFolds) * (1f - introEnvelope)
 
         // Fossa Navicularis & Smooth Posterior Fourchette right below vaginal orifice
         val fossaDx = x / 0.065f
@@ -1359,16 +1416,20 @@ class VulvaAnatomySceneMesh {
         val bottomY = -0.448f
         val ySpan = apexY - bottomY
 
-        val contS = if (s.betaV3OrganicContinuity) s.betaV3ContinuityStrength.coerceIn(0f, 1f) else 0f
-        val asymS = if (s.betaV3AnatomicalAsymmetry) s.betaV3AsymmetryStrength.coerceIn(0f, 1f) else 0f
-        val surfS = if (s.betaV3RegionalSurfaceDetail) s.betaV3SurfaceStrength.coerceIn(0f, 1f) else 0f
+        // Beta v3 sliders 1, 3, 4 are amplified 3x (0% = off, 100% = 3.0x); options 5 & 6 use direct 0..1 strength.
+        val contS = if (s.betaV3OrganicContinuity) s.betaV3ContinuityStrength.coerceIn(0f, 1f) * 3.0f else 0f
+        val asymS = if (s.betaV3AnatomicalAsymmetry) s.betaV3AsymmetryStrength.coerceIn(0f, 1f) * 3.0f else 0f
+        val surfS = if (s.betaV3RegionalSurfaceDetail) s.betaV3SurfaceStrength.coerceIn(0f, 1f) * 3.0f else 0f
+        val blendS = if (s.betaV3LabialVestibuleBlend) s.betaV3LabialBlendStrength.coerceIn(0f, 1f) else 0f
+        val foldS = if (s.betaV3IntricateLabiaFolds) s.betaV3LabiaFoldsStrength.coerceIn(0f, 1f) else 0f
 
         for (r in 0 until archRows) {
             val arcS = (r.toFloat() / (archRows - 1)) * 2f - 1f
             val absS = abs(arcS)
             val signS = if (arcS < 0f) -1f else 1f
-            val innerOpenSide = if (arcS < 0f) s.leftInner else s.rightInner
-            val outerOpenSide = if (arcS < 0f) s.leftOuter else s.rightOuter
+            val isLeftCenter = arcS < 0f
+            val innerOpenSide = if (isLeftCenter) s.leftInner else s.rightInner
+            val outerOpenSide = if (isLeftCenter) s.leftOuter else s.rightOuter
 
             val hoodMask = exp(-(arcS / 0.17f).let { it * it })
             val cosArc = cos(absS * PI.toFloat())
@@ -1379,10 +1440,18 @@ class VulvaAnatomySceneMesh {
             val sinArc = sin(absS * PI.toFloat()).coerceAtLeast(0f)
             val sideSpreadMask = smoothStep(0.08f, 0.36f, absS) * smoothStep(1.0f, 0.70f, absS)
             val archWidthAsym = if (asymS > 1e-5f) {
-                val sideBias = if (arcS < 0f) 0.0048f else -0.0036f
+                val sideBias = if (isLeftCenter) 0.0048f else -0.0036f
                 asymS * sideBias * smoothStep(0.10f, 0.42f, absS) * smoothStep(1.0f, 0.72f, absS)
             } else 0f
-            val baseHalfWidth = 0.036f + 0.036f * sinArc + hoodMask * s.hoodRetract * 0.016f + archWidthAsym
+            // Beta v3 Toggle 6: gentle organic centerline meander breaking up the smooth geometric oval curve
+            // (strictly 0 at hood apex mid and converging tips so midline & convexity stay defect-free)
+            val organicMeander = if (foldS > 1e-5f && absS > 0.02f) {
+                val mPhase = if (isLeftCenter) 0.75f else 2.95f
+                val mMask = smoothStep(0.12f, 0.34f, absS) * smoothStep(0.96f, 0.68f, absS)
+                (0.0085f * sin(absS * 12.8f + mPhase) + 0.0048f * cos(absS * 23.4f - mPhase * 1.2f)) * mMask * foldS
+            } else 0f
+            val baseHalfWidth = (0.036f + 0.036f * sinArc + hoodMask * s.hoodRetract * 0.016f + archWidthAsym + organicMeander)
+                .coerceAtLeast(0.022f)
             val dynamicSpread = (innerOpenSide * 0.145f + outerOpenSide * 0.058f) * sideSpreadMask
             cx[r] = signS * (sinArc * (baseHalfWidth + dynamicSpread) + (1f - sinArc) * 0.006f * smoothStep(0.75f, 1.0f, absS))
         }
@@ -1472,42 +1541,68 @@ class VulvaAnatomySceneMesh {
             val hoodMask = exp(-(arcS / 0.175f).let { it * it })
             val labiaMask = 1f - hoodMask
             // Subtle organic left/right length asymmetry (left petal extends slightly lower & fuller than right)
-            val fourchetteEnd = (if (isLeft) 0.52f - asymS * 0.045f else 0.59f + asymS * 0.040f)
+            val fourchetteEnd = if (isLeft) {
+                (0.52f - asymS * 0.045f).coerceAtLeast(0.36f)
+            } else {
+                (0.59f + asymS * 0.040f).coerceAtMost(0.76f)
+            }
             val fourchetteTaper = smoothStep(1.0f, fourchetteEnd, absS)
             val labiaMidArch = sin(absS * PI.toFloat()).coerceIn(0f, 1f) * fourchetteTaper
             // Subtly offset upper-mid labial lobe fullness between left and right sides
-            val lobePeakS = if (isLeft) (0.34f - asymS * 0.035f) else (0.40f + asymS * 0.035f)
-            val upperLobeFullness = 0.78f + (0.33f + (if (isLeft) 0.045f else -0.035f) * asymS) *
+            val lobePeakS = if (isLeft) (0.34f - asymS * 0.035f).coerceAtLeast(0.22f) else (0.40f + asymS * 0.035f).coerceAtMost(0.54f)
+            val upperLobeFullness = 0.78f + (0.33f + (if (isLeft) 0.045f else -0.035f) * asymS).coerceIn(0.16f, 0.54f) *
                 exp(-((absS - lobePeakS) / 0.22f).let { it * it })
 
             val wrinkleTension = (1f - innerOpen * 0.40f).coerceIn(0.42f, 1f)
             val asymPhase = if (isLeft) 0.62f else 2.84f
-            val sideHeightAsym = if (isLeft) (1.055f + asymS * 0.075f) else (0.945f - asymS * 0.065f)
-            val sideThickPow = if (isLeft) (0.74 - asymS * 0.04) else (0.83 + asymS * 0.04)
+            val sideHeightAsym = if (isLeft) {
+                (1.055f + asymS * 0.075f).coerceAtMost(1.32f)
+            } else {
+                (0.945f - asymS * 0.065f).coerceAtLeast(0.70f)
+            }
+            val sideThickPow = if (isLeft) {
+                (0.74 - asymS * 0.04).coerceAtLeast(0.56)
+            } else {
+                (0.83 + asymS * 0.04).coerceAtMost(1.02)
+            }
 
             // Non-periodic multi-harmonic irregular labial scalloping & soft ruffling (breaks up uniform parallel pleats!)
             val phaseWarp = 0.55f * sin(absS * 7.3f + asymPhase * 0.8f)
+            val extraScallop = if (foldS > 1e-5f) {
+                val fPhase = if (isLeft) 1.15f else 3.72f
+                (0.0115f * sin(absS * 19.3f + fPhase + 0.7f * cos(absS * 8.1f)) +
+                    0.0072f * cos(absS * 34.8f - fPhase * 1.3f) +
+                    0.0044f * sin(absS * 57.5f + fPhase * 0.9f)) * labiaMidArch * labiaMask * foldS
+            } else 0f
             val labiaLobes = (0.019f * sin(absS * 11.3f + asymPhase + phaseWarp) +
                 0.012f * cos(absS * 21.7f - asymPhase * 1.18f - phaseWarp * 0.7f) +
                 0.0068f * sin(absS * 37.4f + asymPhase * 1.52f + phaseWarp * 1.1f) * wrinkleTension +
-                0.0032f * cos(absS * 61.9f - asymPhase * 0.85f) * wrinkleTension) * labiaMidArch * labiaMask
+                0.0032f * cos(absS * 61.9f - asymPhase * 0.85f) * wrinkleTension) * labiaMidArch * labiaMask + extraScallop
 
             // Vulva Beta v2 Toggle 6 (Step 1 + Step 2): conservative dorsal clitoral hood crest fullness
             // (+0.014f * hoodMask) layered cleanly on top of Step 1 without touching labia petals or landings.
             val hoodCrestBoost = if (s.betaV2BalancedUpperVulvaDepthWithCrest) 0.014f else 0f
             val hoodCrestHeight = (0.042f + hoodCrestBoost + 0.009f * s.hoodRetract) * hoodMask
-            val labiaCrestHeight = ((0.055f + 0.020f * innerOpen) * (0.28f + 0.72f * labiaMidArch) * upperLobeFullness * sideHeightAsym +
-                labiaLobes * (0.72f + surfS * 0.14f)) * labiaMask * fourchetteTaper
+            val labiaCrestHeightBase = ((0.055f + 0.020f * innerOpen) * (0.28f + 0.72f * labiaMidArch) * upperLobeFullness * sideHeightAsym +
+                labiaLobes * (0.72f + surfS * 0.14f))
+            val labiaCrestFloor = if (asymS > 1e-5f || surfS > 1e-5f || foldS > 1e-5f) {
+                0.016f * (0.28f + 0.72f * labiaMidArch)
+            } else {
+                Float.NEGATIVE_INFINITY
+            }
+            val labiaCrestHeight = max(labiaCrestHeightBase, labiaCrestFloor) * labiaMask * fourchetteTaper
             val totalHeight = (hoodCrestHeight + labiaCrestHeight).coerceAtLeast(0.001f)
 
             val crestOutwardShift = (0.026f + innerOpen * 0.058f + outerOpen * 0.024f) * labiaMidArch * labiaMask -
                 (0.024f - s.hoodRetract * 0.036f) * hoodMask
 
             // Organic irregular ruffled edge flutter along the rolled labial free margin
+            val crestWaveGain = (1f + asymS * (if (isLeft) 0.18f else -0.10f)).coerceIn(0.62f, 1.60f) *
+                (1f + foldS * 0.58f)
             val crestWave = (0.0125f * sin(absS * 17.6f + asymPhase + phaseWarp * 1.15f) +
                 0.0068f * cos(absS * 33.4f - asymPhase * 1.1f) +
                 0.0030f * sin(absS * 58.7f + asymPhase * 1.65f)) *
-                labiaMidArch * labiaMask * wrinkleTension * (1f + asymS * (if (isLeft) 0.18f else -0.10f))
+                labiaMidArch * labiaMask * wrinkleTension * crestWaveGain
 
             val foldShift = 1.45f * sin(absS * 9.4f + asymPhase) + 0.65f * cos(absS * 16.2f - asymPhase)
             val hoodDorsalArcGain = (0.0085f + surfS * 0.0022f) * exp(-((arcS / 0.085f).let { it * it })) * hoodMask
@@ -1515,7 +1610,16 @@ class VulvaAnatomySceneMesh {
             val crestU = if (isLeft) 0.37f else 0.35f
             val rolledShoulderGain = (if (isLeft) 0.0122f else 0.0102f) * labiaMask * labiaMidArch
 
-            val innerInsetWidth = 0.024f * labiaMidArch * labiaMask + 0.020f * hoodMask
+            // Beta v3 Toggle 6: wavy, irregular, asymmetric medial border width where inner labia meet the vestibule
+            val medialBorderWave = if (foldS > 1e-5f) {
+                val bPhase = if (isLeft) 0.92f else 3.38f
+                val bWarp = 0.65f * sin(absS * 8.4f + bPhase)
+                (0.0105f * sin(absS * 15.6f + bPhase + bWarp) +
+                    0.0062f * cos(absS * 29.8f - bPhase * 1.15f) +
+                    0.0032f * sin(absS * 51.2f + bPhase * 0.7f)) * labiaMidArch * labiaMask * foldS
+            } else 0f
+            val innerInsetWidth = (0.024f * labiaMidArch * labiaMask + 0.020f * hoodMask + medialBorderWave)
+                .coerceAtLeast(0.010f * labiaMidArch * labiaMask + 0.018f * hoodMask)
             val rawCrestPos = crestOutwardShift + crestWave
             // Vulva Beta v2 Toggle 2 (betaV2NonInvertingLabiaFold):
             // 1. Inner-wall monotonicity guard: L'(t) > 0 on [0, crestU] requires C > -(2/pi)*I ~ -0.6366*I.
@@ -1572,6 +1676,26 @@ class VulvaAnatomySceneMesh {
                 val fineRippleWave = cos(absS * 83.0f - foldShift * 0.7f - u * 4.6f + asymPhase * 0.7f)
                 val labiaFold = (0.0052f * radialFoldWave + 0.0026f * fineRippleWave) *
                     heightFrac * labiaMidArch * labiaMask * wrinkleTension
+
+                // Beta v3 Toggle 6 (Intricate Inner-Labia Folds): rich multi-scale crisscrossing oblique
+                // & branched mucosal folds sculpted across the inner labial face (u in 0.14..0.64)
+                val innerTangleMask = smoothStep(0.14f, 0.26f, u) * (1f - smoothStep(0.36f, 0.64f, u)) *
+                    labiaMidArch * labiaMask * foldS
+                var innerTangleWave = 0f
+                val innerTangleZ = if (innerTangleMask > 1e-5f) {
+                    val tPhase = if (isLeft) 0.48f else 2.71f
+                    val uWarp = u * 15.5f + 1.45f * sin(absS * 14.2f + tPhase)
+                    val sWarp = absS * 38.0f + 1.85f * cos(u * 12.8f - tPhase * 0.9f)
+                    val ridge1 = sin(sWarp + uWarp * 1.15f + tPhase)
+                    val ridge2 = cos(absS * 66.0f - u * 23.5f + 1.1f * sin(sWarp * 0.45f) - tPhase * 1.25f)
+                    val lobule = sin(absS * 24.5f + tPhase * 1.6f) * cos(u * 14.2f + 0.8f * sin(absS * 19f))
+                    // Soft ridged folding (broad convex cushions separated by delicate crinkled creases)
+                    val ridged = (1f - abs(ridge1)) * 0.55f + ridge2 * 0.30f + lobule * 0.35f - 0.12f
+                    innerTangleWave = ridged
+                    val reliefZ = (0.0082f * (ridged + 0.56f).coerceAtLeast(0f) + 0.0030f * abs(ridge2))
+                    reliefZ * innerTangleMask * (0.28f + 0.72f * heightFrac)
+                } else 0f
+
                 // Subtle dorsal prepuce ridge & soft transverse retraction folds over the clitoral hood
                 val hoodDorsalRidge = hoodDorsalArcGain * exp(-((u - 0.52f) / 0.20f).let { it * it })
                 val hoodRollFold = s.hoodRetract * hoodMask * (
@@ -1606,7 +1730,7 @@ class VulvaAnatomySceneMesh {
                 } else {
                     rawTipSink
                 }
-                var pz = groundZ + totalHeight * heightFrac + labiaFold + hoodDorsalRidge + hoodRollFold +
+                var pz = groundZ + totalHeight * heightFrac + labiaFold + innerTangleZ + hoodDorsalRidge + hoodRollFold +
                     innerTuck + outerTuck + tipSink
 
                 // Vulva Beta v2 Toggle 2: prevent hood inner margin from slicing through the glans ellipsoid
@@ -1633,33 +1757,50 @@ class VulvaAnatomySceneMesh {
 
                 val archMucosa = ((0.90f * innerFaceMask + 0.40f * (1f - innerFaceMask) * (1f - smoothStep(0.34f, 0.74f, u))) *
                     (1f - hoodOuterSkin * 0.96f)).coerceIn(0f, 1f)
-                val archWetness = ((0.64f * innerFaceMask + 0.20f * heightFrac) * (1f - hoodOuterSkin * 0.92f) +
-                    0.055f).coerceIn(0.055f, 0.80f)
+                // Beta v3 Toggle 6: richer wetness pooling in inner labial fold troughs & softer sheen on crests
+                val tangleWetDelta = if (innerTangleMask > 1e-5f) {
+                    (-innerTangleWave * 0.22f + 0.08f) * innerTangleMask
+                } else 0f
+                val archWetness = (((0.64f * innerFaceMask + 0.20f * heightFrac) * (1f - hoodOuterSkin * 0.92f) +
+                    0.055f) + tangleWetDelta).coerceIn(0.055f, 0.88f)
 
                 val foldCrevice = (0.5f - 0.5f * radialFoldWave) * heightFrac * labiaMask * wrinkleTension
                 val freeEdgeRim = exp(-((u - crestU) / 0.15f).let { it * it })
+                val tanglePigDelta = if (innerTangleMask > 1e-5f) {
+                    (0.09f * innerTangleWave + 0.06f * sin(absS * 21.0f + u * 9.5f + asymPhase)) * innerTangleMask
+                } else 0f
                 val archPigment = (0.12f + 0.44f * freeEdgeRim * rimOrganicMod * labiaMask +
-                    0.16f * freeEdgeRim * hoodMask + foldCrevice * 0.12f)
+                    0.16f * freeEdgeRim * hoodMask + foldCrevice * 0.12f + tanglePigDelta)
                     .coerceIn(0f, 1f)
 
-                val rootShadow = (1f - smoothStep(0.0f, 0.22f, u)) * 0.26f +
+                // Beta v3 Toggle 5 (Soft Labial-Vestibule Color Blend): ease the dark rootShadow band at the
+                // medial labial base so it merges into the vulvar vestibule without a harsh dark line!
+                val rootShadow = (1f - smoothStep(0.0f, 0.22f, u)) * 0.26f * (1f - 0.86f * blendS * labiaMask) +
                     smoothStep(0.62f, 0.84f, u) * 0.06f * labiaMask
-                val archAo = (0.95f - rootShadow - foldCrevice * 0.11f + 0.06f * heightFrac).coerceIn(0.50f, 1f)
+                val tangleAoDrop = if (innerTangleMask > 1e-5f) {
+                    ((-innerTangleWave).coerceAtLeast(0f) * 0.14f) * innerTangleMask
+                } else 0f
+                val archAo = (0.95f - rootShadow - foldCrevice * 0.11f - tangleAoDrop + 0.06f * heightFrac).coerceIn(0.46f, 1f)
 
                 // Reach 100% exact underlying body material BEFORE u = 0.84 so outer skirt transition is invisible!
-                // Beta v3 Toggle 1 (Organic Tissue Continuity): softens base landing transition slightly earlier
+                // Beta v3 Toggle 1 (Organic Tissue Continuity, 3x scaled): softens base landing transition smoothly
                 // without affecting the inner mucosal core or skirt monotonicity.
-                val seamStart = (0.42f - 0.14f * hoodMask) - contS * 0.075f
+                val seamStart = ((0.42f - 0.14f * hoodMask) - contS * 0.075f).coerceAtLeast(0.14f)
                 val seamBlend = if (s.betaSoftArchEdge) {
                     smoothStep(seamStart, SEAM_E_ARCH_COLOR_BLEND_END, u)
                 } else {
                     smoothStep(seamStart, 0.84f, u)
                 }
                 val tipBlend = 1f - fourchetteTaper
+                // Beta v3 Toggle 5: also smoothly blend the medial labial base (u -> 0) directly into the
+                // exact underlying vulvar vestibule material (mucosa, wetness, AO, pigment)!
+                val innerBaseBlend = if (blendS > 1e-5f) {
+                    (1f - smoothStep(0.0f, crestU * (0.68f + 0.30f * blendS), u)) * labiaMask * (0.94f * blendS)
+                } else 0f
                 val bodyLerp = if (s.betaSoftArchEdge) {
-                    max(seamBlend, tipBlend).coerceIn(0f, 1f)
+                    max(max(seamBlend, tipBlend), innerBaseBlend).coerceIn(0f, 1f)
                 } else {
-                    max(seamBlend, tipBlend * 0.90f).coerceIn(0f, 1f)
+                    max(max(seamBlend, tipBlend * 0.90f), innerBaseBlend).coerceIn(0f, 1f)
                 }
 
                 // Seam E (betaSoftArchEdge): match exact surrounding vulva-patch material (baseAo, basePigment,
@@ -1691,10 +1832,16 @@ class VulvaAnatomySceneMesh {
                         targetPigment = groundMat.pigment
                     }
                     val uAlpha = 1f - smoothStep(SEAM_E_ARCH_ALPHA_U_START, SEAM_E_ARCH_ALPHA_U_END, u)
+                    // Beta v3 Toggle 5: softly feather only the extreme buried medial root (u < 0.11, inside innerTuck)
+                    // so the base of the labia minora dissolves seamlessly into the vestibule floor with 0 hard line!
+                    val innerRootAlpha = if (blendS > 1e-5f) {
+                        val medFeather = smoothStep(0.0f, 0.115f, u)
+                        1f - (1f - medFeather) * blendS * labiaMask
+                    } else 1f
                     val tipGate = 1f - smoothStep(0.25f, 0.78f, fourchetteTaper)
                     val elevAbovePatch = pz - groundZ
                     val tipElevAlpha = 1f - tipGate * (1f - smoothStep(SEAM_E_ARCH_TIP_ELEV_START, SEAM_E_ARCH_TIP_ELEV_END, elevAbovePatch))
-                    archAlpha = (uAlpha * tipElevAlpha).coerceIn(0f, 1f)
+                    archAlpha = (uAlpha * innerRootAlpha * tipElevAlpha).coerceIn(0f, 1f)
                 } else {
                     targetMucosa = groundMat.mucosa
                     targetWetness = groundMat.wetness

@@ -132,6 +132,13 @@ class AtlasViewModel(application: Application) : AndroidViewModel(application) {
 
     private val preferencesRepository = PreferencesRepository(application.applicationContext)
 
+    /**
+     * Scroll- and tab-persistent session state for Blossom's 3D viewport (v19.0).
+     * Prevents `LazyColumn` item disposal or tab navigation from resetting Blossom's animations,
+     * self-spread pose, tissue/leg/head positions, camera framing, heart rate, or Beta Lab settings.
+     */
+    val blossomViewportState = com.example.ui.components.BlossomViewportSessionState()
+
     private val _uiState = MutableStateFlow(AtlasUiState())
     val uiState: StateFlow<AtlasUiState> = _uiState.asStateFlow()
 

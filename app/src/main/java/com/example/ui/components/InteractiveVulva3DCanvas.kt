@@ -59,6 +59,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -83,8 +84,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -96,7 +99,49 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
+
+/**
+ * Vulva soft-tissue elasticity Beta slider helpers (Version 19.0 Pre-Graduation Milestone):
+ *  - `0f` = OFF / exact pre-elastic baseline
+ *  - `0.40f` = v19.0 default (+40% elastic resistance -> 0.60 max spread, matching Blossom's self-spread IK cap)
+ *  - `0.60f` = new v19.0 maximum (+60% elastic resistance -> 0.40 max spread)
+ */
+internal const val VULVA_ELASTIC_DEFAULT_RESISTANCE = 0.40f
+internal const val VULVA_ELASTIC_MAX_RESISTANCE = 0.60f
+
+internal fun vulvaElasticPullScale(resistance: Float): Float {
+    val r = resistance.coerceIn(0f, VULVA_ELASTIC_MAX_RESISTANCE)
+    return 1f - r * 0.85f
+}
+
+internal fun vulvaElasticMaxSpread(resistance: Float): Float {
+    val r = resistance.coerceIn(0f, VULVA_ELASTIC_MAX_RESISTANCE)
+    return 1f - r
+}
+
+internal fun vulvaElasticHoodMax(resistance: Float): Float {
+    val r = resistance.coerceIn(0f, VULVA_ELASTIC_MAX_RESISTANCE)
+    return 1f - r * 0.70f
+}
+
+internal fun vulvaElasticSpringStiffness(resistance: Float): Float {
+    val r = resistance.coerceIn(0f, VULVA_ELASTIC_MAX_RESISTANCE)
+    return Spring.StiffnessLow * (1f + r * 1.25f)
+}
+
+internal fun vulvaElasticStep(current: Float, delta: Float, maxLimit: Float, resistance: Float): Float {
+    val r = resistance.coerceIn(0f, VULVA_ELASTIC_MAX_RESISTANCE)
+    val resist = if (delta > 0f && r > 0.0001f) {
+        val normR = (r / VULVA_ELASTIC_DEFAULT_RESISTANCE).coerceIn(0f, 1.50f)
+        val frac = (current / maxLimit.coerceAtLeast(0.05f)).coerceIn(0f, 1f)
+        (1f - (0.32f * normR) * frac).coerceAtLeast(0.42f)
+    } else {
+        1f
+    }
+    return (current + delta * resist).coerceIn(0f, maxLimit)
+}
 
 private enum class CameraAnglePreset(
     val label: String,
@@ -147,7 +192,8 @@ fun InteractiveVulva3DCanvas(
     resetTrigger: Int,
     toneIndex: Int,
     onSelectPart: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    sessionState: BlossomViewportSessionState = remember { BlossomViewportSessionState() }
 ) {
     val isPreviewOrTest = LocalInspectionMode.current ||
         Build.FINGERPRINT.equals("robolectric", ignoreCase = true)
@@ -178,125 +224,191 @@ fun InteractiveVulva3DCanvas(
     val surfaceColor = MaterialTheme.colorScheme.surface
 
     // 5 live elastic pelvic channels + 4 breast mobility + 2 interactive leg-spread channels
-    val leftOuterSpread = remember { Animatable(0f) }
-    val rightOuterSpread = remember { Animatable(0f) }
-    val leftInnerOpen = remember { Animatable(0f) }
-    val rightInnerOpen = remember { Animatable(0f) }
-    val hoodRetraction = remember { Animatable(0f) }
-    val leftBreastX = remember { Animatable(0f) }
-    val leftBreastY = remember { Animatable(0f) }
-    val rightBreastX = remember { Animatable(0f) }
-    val rightBreastY = remember { Animatable(0f) }
+    // All Animatables restore their exact values from sessionState on scroll re-entry (v19.0)
+    val leftOuterSpread = remember(sessionState) { Animatable(sessionState.leftOuterSpread) }
+    val rightOuterSpread = remember(sessionState) { Animatable(sessionState.rightOuterSpread) }
+    val leftInnerOpen = remember(sessionState) { Animatable(sessionState.leftInnerOpen) }
+    val rightInnerOpen = remember(sessionState) { Animatable(sessionState.rightInnerOpen) }
+    val hoodRetraction = remember(sessionState) { Animatable(sessionState.hoodRetraction) }
+    val leftBreastX = remember(sessionState) { Animatable(sessionState.leftBreastX) }
+    val leftBreastY = remember(sessionState) { Animatable(sessionState.leftBreastY) }
+    val rightBreastX = remember(sessionState) { Animatable(sessionState.rightBreastX) }
+    val rightBreastY = remember(sessionState) { Animatable(sessionState.rightBreastY) }
     // Persistent leg-spread & head-turn/nod channels (stay in place until moved again or explicitly reset)
-    val leftLegSpread = remember { Animatable(0f) }
-    val rightLegSpread = remember { Animatable(0f) }
-    val headTurn = remember { Animatable(0f) }
-    val headPitch = remember { Animatable(0f) }
+    val leftLegSpread = remember(sessionState) { Animatable(sessionState.leftLegSpread) }
+    val rightLegSpread = remember(sessionState) { Animatable(sessionState.rightLegSpread) }
+    val headTurn = remember(sessionState) { Animatable(sessionState.headTurn) }
+    val headPitch = remember(sessionState) { Animatable(sessionState.headPitch) }
     // Subtle elastic buttock soft-tissue channels + natural interval eyelid blink
-    val leftGluteX = remember { Animatable(0f) }
-    val leftGluteY = remember { Animatable(0f) }
-    val rightGluteX = remember { Animatable(0f) }
-    val rightGluteY = remember { Animatable(0f) }
-    val eyeBlink = remember { Animatable(0f) }
-    val eyeBlinkR = remember { Animatable(0f) }
+    val leftGluteX = remember(sessionState) { Animatable(sessionState.leftGluteX) }
+    val leftGluteY = remember(sessionState) { Animatable(sessionState.leftGluteY) }
+    val rightGluteX = remember(sessionState) { Animatable(sessionState.rightGluteX) }
+    val rightGluteY = remember(sessionState) { Animatable(sessionState.rightGluteY) }
+    val eyeBlink = remember(sessionState) { Animatable(sessionState.eyeBlink) }
+    val eyeBlinkR = remember(sessionState) { Animatable(sessionState.eyeBlinkR) }
     // Lifelike Beta (Tab 2) live micro-behavior channels
-    val eyeGazeX = remember { Animatable(0f) }
-    val eyeGazeY = remember { Animatable(0f) }
-    val idleHeadTurn = remember { Animatable(0f) }
-    val idleHeadPitch = remember { Animatable(0f) }
-    val idleHeadRoll = remember { Animatable(0f) }
-    val faceWarmth = remember { Animatable(0f) }
-    val faceBrow = remember { Animatable(0f) }
-    val faceLipSoft = remember { Animatable(0f) }
-    val shoulderRelaxL = remember { Animatable(0f) }
-    val shoulderRelaxR = remember { Animatable(0f) }
+    val eyeGazeX = remember(sessionState) { Animatable(sessionState.eyeGazeX) }
+    val eyeGazeY = remember(sessionState) { Animatable(sessionState.eyeGazeY) }
+    val idleHeadTurn = remember(sessionState) { Animatable(sessionState.idleHeadTurn) }
+    val idleHeadPitch = remember(sessionState) { Animatable(sessionState.idleHeadPitch) }
+    val idleHeadRoll = remember(sessionState) { Animatable(sessionState.idleHeadRoll) }
+    val faceWarmth = remember(sessionState) { Animatable(sessionState.faceWarmth) }
+    val faceBrow = remember(sessionState) { Animatable(sessionState.faceBrow) }
+    val faceLipSoft = remember(sessionState) { Animatable(sessionState.faceLipSoft) }
+    val shoulderRelaxL = remember(sessionState) { Animatable(sessionState.shoulderRelaxL) }
+    val shoulderRelaxR = remember(sessionState) { Animatable(sessionState.shoulderRelaxR) }
     // Lifelike+ Beta (Tab 3) live micro-behavior channels (all strictly 0f when their respective toggles are OFF)
-    val anticipationGazeX = remember { Animatable(0f) }
-    val anticipationGazeY = remember { Animatable(0f) }
-    val swallowPhase = remember { Animatable(0f) }
-    val settleHeadTurn = remember { Animatable(0f) }
-    val settleHeadPitch = remember { Animatable(0f) }
-    val settleHeadRoll = remember { Animatable(0f) }
-    val settleShoulderL = remember { Animatable(0f) }
-    val settleShoulderR = remember { Animatable(0f) }
-    val settleLegL = remember { Animatable(0f) }
-    val settleLegR = remember { Animatable(0f) }
-    val nostrilBreath = remember { Animatable(0f) }
-    val breathLipEase = remember { Animatable(0f) }
-    val livingWarmth = remember { Animatable(0f) }
-    var posturalSettleTrigger by remember { mutableIntStateOf(0) }
-    var lastManualHeadDragMs by remember { mutableStateOf(0L) }
-    // Unified touch-engagement stimulus & realistic cardio-respiratory heart rate (66..142 BPM)
-    var touchStimulus by remember { mutableFloatStateOf(0f) }
-    var lastStimulusTouchMs by remember { mutableStateOf(0L) }
-    var heartRateBpm by remember { mutableFloatStateOf(VulvaGlTextureView.RESTING_HEART_RATE_BPM) }
-    var heartRateSensitivity by remember { mutableFloatStateOf(0f) }
-    var heartRateDrive by remember { mutableFloatStateOf(0f) }
-    var lastHeartStimMs by remember { mutableStateOf(0L) }
+    val anticipationGazeX = remember(sessionState) { Animatable(sessionState.anticipationGazeX) }
+    val anticipationGazeY = remember(sessionState) { Animatable(sessionState.anticipationGazeY) }
+    val swallowPhase = remember(sessionState) { Animatable(sessionState.swallowPhase) }
+    val settleHeadTurn = remember(sessionState) { Animatable(sessionState.settleHeadTurn) }
+    val settleHeadPitch = remember(sessionState) { Animatable(sessionState.settleHeadPitch) }
+    val settleHeadRoll = remember(sessionState) { Animatable(sessionState.settleHeadRoll) }
+    val settleShoulderL = remember(sessionState) { Animatable(sessionState.settleShoulderL) }
+    val settleShoulderR = remember(sessionState) { Animatable(sessionState.settleShoulderR) }
+    val settleLegL = remember(sessionState) { Animatable(sessionState.settleLegL) }
+    val settleLegR = remember(sessionState) { Animatable(sessionState.settleLegR) }
+    val nostrilBreath = remember(sessionState) { Animatable(sessionState.nostrilBreath) }
+    val breathLipEase = remember(sessionState) { Animatable(sessionState.breathLipEase) }
+    val livingWarmth = remember(sessionState) { Animatable(sessionState.livingWarmth) }
+    var posturalSettleTrigger by sessionState.posturalSettleTriggerState
+    var lastManualHeadDragMs by sessionState.lastManualHeadDragMsState
+    // Unified touch-engagement stimulus & realistic cardio-respiratory heart rate (66..142 BPM, 3× slower rise in v19.0)
+    var touchStimulus by sessionState.touchStimulusState
+    var lastStimulusTouchMs by sessionState.lastStimulusTouchMsState
+    var heartRateBpm by sessionState.heartRateBpmState
+    var heartRateSensitivity by sessionState.heartRateSensitivityState
+    var heartRateDrive by sessionState.heartRateDriveState
+    var lastHeartStimMs by sessionState.lastHeartStimMsState
     val heartPulseScale = remember { Animatable(1f) }
     // Animated self-spread hand/arm IK pose (0 = relaxed at sides, 1 = hands holding labia open)
-    var blossomSpreadPoseActive by remember { mutableStateOf(false) }
-    val selfSpreadPose = remember { Animatable(0f) }
+    var blossomSpreadPoseActive by sessionState.blossomSpreadPoseActiveState
+    val selfSpreadPose = remember(sessionState) { Animatable(sessionState.selfSpreadPose) }
 
     // Live Blossom appearance customization: Hair color (default Chestnut Brown), Breast size (default Medium), Pubic hair (default Natural 0.45)
-    var hairStyleIndex by remember { mutableIntStateOf(2) }
-    var breastSize by remember { mutableFloatStateOf(0.50f) }
-    var pubicHairAmount by remember { mutableFloatStateOf(0.45f) }
+    var hairStyleIndex by sessionState.hairStyleIndexState
+    var breastSize by sessionState.breastSizeState
+    var pubicHairAmount by sessionState.pubicHairAmountState
     val hairStyle = BlossomHairStyles[hairStyleIndex.coerceIn(0, BlossomHairStyles.lastIndex)]
 
-    // Smooth 3D camera orbit, zoom, target framing, lighting & Blossom full-body state (default ON, Exam View)
-    var isOrbitMode by remember { mutableStateOf(false) }
-    var dramaticSideLight by remember { mutableStateOf(false) }
-    var showExperimentalLegs by remember { mutableStateOf(true) }
+    // Smooth 3D camera orbit, zoom, target framing, lighting & Blossom full-body state (persisted across scroll disposal)
+    var isOrbitMode by sessionState.isOrbitModeState
+    var dramaticSideLight by sessionState.dramaticSideLightState
+    var showExperimentalLegs by sessionState.showExperimentalLegsState
     // Buried compatibility toggle: restores exact pre-Beta v1 vulva, seam, neck, and hair appearance
-    var showAdvancedRendering by remember { mutableStateOf(false) }
-    var legacyVulvaMode by remember { mutableStateOf(false) }
-    // Floating always-on-top 3-Tab Beta Lab overlay:
-    //  Tab 0 (Vulva): Beta v2 is now baked live; holds 5 independent Beta v3 anatomical realism toggles + Breast Size Boost (all OFF by default)
+    var showAdvancedRendering by sessionState.showAdvancedRenderingState
+    var legacyVulvaMode by sessionState.legacyVulvaModeState
+    // Floating always-on-top 3-Tab Beta Lab overlay (v19.0 Pre-Graduation Milestone defaults):
+    //  Tab 0 (Vulva): all 6 anatomical realism v3 options + elasticity (40%, max 60%) + breast boost (45%) ON by default
     //  Tab 1 (Life):  all 6 promoted ON by default
-    //  Tab 2 (Life+): 7 subtle realism features + Heart Rate HUD toggle (all OFF by default)
-    var showBetaMenu by remember { mutableStateOf(false) }
-    var betaMenuTab by remember { mutableIntStateOf(0) } // 0 = Vulva, 1 = Life, 2 = Life+
-    var betaV3OrganicContinuity by remember { mutableStateOf(false) }
-    var betaV3ContinuityStrength by remember { mutableFloatStateOf(0.65f) }
-    var betaV3SoftPigmentation by remember { mutableStateOf(false) }
-    var betaV3PigmentStrength by remember { mutableFloatStateOf(0.70f) }
-    var betaV3AnatomicalAsymmetry by remember { mutableStateOf(false) }
-    var betaV3AsymmetryStrength by remember { mutableFloatStateOf(0.65f) }
-    var betaV3RegionalSurfaceDetail by remember { mutableStateOf(false) }
-    var betaV3SurfaceStrength by remember { mutableFloatStateOf(0.65f) }
-    var betaV3NaturalLighting by remember { mutableStateOf(false) }
-    var betaV3LightingStrength by remember { mutableFloatStateOf(0.70f) }
-    var betaBreastSizeBoost by remember { mutableStateOf(false) }
+    //  Tab 2 (Life+): all 7 subtle realism features ON by default; Heart Rate HUD remains OFF by default
+    var showBetaMenu by sessionState.showBetaMenuState
+    var betaMenuTab by sessionState.betaMenuTabState
+    var betaV3OrganicContinuity by sessionState.betaV3OrganicContinuityState
+    var betaV3ContinuityStrength by sessionState.betaV3ContinuityStrengthState
+    var betaV3SoftPigmentation by sessionState.betaV3SoftPigmentationState
+    var betaV3PigmentStrength by sessionState.betaV3PigmentStrengthState
+    var betaV3AnatomicalAsymmetry by sessionState.betaV3AnatomicalAsymmetryState
+    var betaV3AsymmetryStrength by sessionState.betaV3AsymmetryStrengthState
+    var betaV3RegionalSurfaceDetail by sessionState.betaV3RegionalSurfaceDetailState
+    var betaV3SurfaceStrength by sessionState.betaV3SurfaceStrengthState
+    var betaV3LabialVestibuleBlend by sessionState.betaV3LabialVestibuleBlendState
+    var betaV3LabialBlendStrength by sessionState.betaV3LabialBlendStrengthState
+    var betaV3IntricateLabiaFolds by sessionState.betaV3IntricateLabiaFoldsState
+    var betaV3LabiaFoldsStrength by sessionState.betaV3LabiaFoldsStrengthState
+    var betaVulvaElasticityEnabled by sessionState.betaVulvaElasticityEnabledState
+    var betaVulvaElasticity by sessionState.betaVulvaElasticityState
+    var betaBreastSizeBoostEnabled by sessionState.betaBreastSizeBoostEnabledState
+    var betaBreastSizeBoost by sessionState.betaBreastSizeBoostState
     // Lifelike Beta (Tab 2) toggles (promoted ON by default)
-    var betaLifeEyeMicrosaccades by remember { mutableStateOf(true) }
-    var betaLifeDoubleBlinking by remember { mutableStateOf(true) }
-    var betaLifeHeadRepositioning by remember { mutableStateOf(true) }
-    var betaLifeDeepBreathsSighs by remember { mutableStateOf(true) }
-    var betaLifeShoulderRelaxation by remember { mutableStateOf(true) }
-    var betaLifeFacialExpressions by remember { mutableStateOf(true) }
-    // Lifelike+ Beta (Tab 3) next-gen realism toggles (all OFF by default!)
-    var betaLife2EyelidTracking by remember { mutableStateOf(false) }
-    var betaLife2AsymmetricBlinking by remember { mutableStateOf(false) }
-    var betaLife2GazeAnticipation by remember { mutableStateOf(false) }
-    var betaLife2SubtleSwallowing by remember { mutableStateOf(false) }
-    var betaLife2PosturalSettling by remember { mutableStateOf(false) }
-    var betaLife2BreathFaceCoupling by remember { mutableStateOf(false) }
-    var betaLife2LivingWarmth by remember { mutableStateOf(false) }
-    var betaLife2ShowHeartRate by remember { mutableStateOf(false) }
-    var activePreset by remember { mutableStateOf<CameraAnglePreset?>(CameraAnglePreset.EXAM_FRONT) }
-    val initialCam = remember { CameraAnglePreset.EXAM_FRONT.resolveCamera(blossomBodyEnabled = true) }
-    val camYaw = remember { Animatable(initialCam.yawDeg) }
-    val camPitch = remember { Animatable(initialCam.pitchDeg) }
-    val camZoom = remember { Animatable(initialCam.zoom) }
-    val camTargetY = remember { Animatable(initialCam.targetY) }
-    val camTargetZ = remember { Animatable(initialCam.targetZ) }
+    var betaLifeEyeMicrosaccades by sessionState.betaLifeEyeMicrosaccadesState
+    var betaLifeDoubleBlinking by sessionState.betaLifeDoubleBlinkingState
+    var betaLifeHeadRepositioning by sessionState.betaLifeHeadRepositioningState
+    var betaLifeDeepBreathsSighs by sessionState.betaLifeDeepBreathsSighsState
+    var betaLifeShoulderRelaxation by sessionState.betaLifeShoulderRelaxationState
+    var betaLifeFacialExpressions by sessionState.betaLifeFacialExpressionsState
+    // Lifelike+ Beta (Tab 3) next-gen realism toggles (all 7 ON by default; Heart Rate HUD OFF by default)
+    var betaLife2EyelidTracking by sessionState.betaLife2EyelidTrackingState
+    var betaLife2AsymmetricBlinking by sessionState.betaLife2AsymmetricBlinkingState
+    var betaLife2GazeAnticipation by sessionState.betaLife2GazeAnticipationState
+    var betaLife2SubtleSwallowing by sessionState.betaLife2SubtleSwallowingState
+    var betaLife2PosturalSettling by sessionState.betaLife2PosturalSettlingState
+    var betaLife2BreathFaceCoupling by sessionState.betaLife2BreathFaceCouplingState
+    var betaLife2LivingWarmth by sessionState.betaLife2LivingWarmthState
+    var betaLife2ShowHeartRate by sessionState.betaLife2ShowHeartRateState
+
+    var activePresetOrdinal by sessionState.activePresetOrdinalState
+    val activePreset: CameraAnglePreset? = activePresetOrdinal?.let { CameraAnglePreset.entries.getOrNull(it) }
+    val camYaw = remember(sessionState) { Animatable(sessionState.camYaw) }
+    val camPitch = remember(sessionState) { Animatable(sessionState.camPitch) }
+    val camZoom = remember(sessionState) { Animatable(sessionState.camZoom) }
+    val camTargetY = remember(sessionState) { Animatable(sessionState.camTargetY) }
+    val camTargetZ = remember(sessionState) { Animatable(sessionState.camTargetZ) }
+
+    fun persistAnimatablesToSession() {
+        sessionState.leftOuterSpread = leftOuterSpread.value
+        sessionState.rightOuterSpread = rightOuterSpread.value
+        sessionState.leftInnerOpen = leftInnerOpen.value
+        sessionState.rightInnerOpen = rightInnerOpen.value
+        sessionState.hoodRetraction = hoodRetraction.value
+        sessionState.leftBreastX = leftBreastX.value
+        sessionState.leftBreastY = leftBreastY.value
+        sessionState.rightBreastX = rightBreastX.value
+        sessionState.rightBreastY = rightBreastY.value
+        sessionState.leftLegSpread = leftLegSpread.value
+        sessionState.rightLegSpread = rightLegSpread.value
+        sessionState.headTurn = headTurn.value
+        sessionState.headPitch = headPitch.value
+        sessionState.leftGluteX = leftGluteX.value
+        sessionState.leftGluteY = leftGluteY.value
+        sessionState.rightGluteX = rightGluteX.value
+        sessionState.rightGluteY = rightGluteY.value
+        sessionState.eyeBlink = eyeBlink.value
+        sessionState.eyeBlinkR = eyeBlinkR.value
+        sessionState.eyeGazeX = eyeGazeX.value
+        sessionState.eyeGazeY = eyeGazeY.value
+        sessionState.idleHeadTurn = idleHeadTurn.value
+        sessionState.idleHeadPitch = idleHeadPitch.value
+        sessionState.idleHeadRoll = idleHeadRoll.value
+        sessionState.faceWarmth = faceWarmth.value
+        sessionState.faceBrow = faceBrow.value
+        sessionState.faceLipSoft = faceLipSoft.value
+        sessionState.shoulderRelaxL = shoulderRelaxL.value
+        sessionState.shoulderRelaxR = shoulderRelaxR.value
+        sessionState.anticipationGazeX = anticipationGazeX.value
+        sessionState.anticipationGazeY = anticipationGazeY.value
+        sessionState.swallowPhase = swallowPhase.value
+        sessionState.settleHeadTurn = settleHeadTurn.value
+        sessionState.settleHeadPitch = settleHeadPitch.value
+        sessionState.settleHeadRoll = settleHeadRoll.value
+        sessionState.settleShoulderL = settleShoulderL.value
+        sessionState.settleShoulderR = settleShoulderR.value
+        sessionState.settleLegL = settleLegL.value
+        sessionState.settleLegR = settleLegR.value
+        sessionState.nostrilBreath = nostrilBreath.value
+        sessionState.breathLipEase = breathLipEase.value
+        sessionState.livingWarmth = livingWarmth.value
+        sessionState.selfSpreadPose = selfSpreadPose.value
+        sessionState.camYaw = camYaw.value
+        sessionState.camPitch = camPitch.value
+        sessionState.camZoom = camZoom.value
+        sessionState.camTargetY = camTargetY.value
+        sessionState.camTargetZ = camTargetZ.value
+    }
+
+    SideEffect { persistAnimatablesToSession() }
+    DisposableEffect(sessionState) {
+        onDispose { persistAnimatablesToSession() }
+    }
 
     // Live 3D skin sensory glow under fingertip
     var touchGlowX by remember { mutableFloatStateOf(0.5f) }
     var touchGlowY by remember { mutableFloatStateOf(0.5f) }
     var touchGlowColor by remember { mutableStateOf(Color(0xFFFFD1DC)) }
     val touchGlowIntensity = remember { Animatable(0f) }
+
+    val activeVulvaElasticity = sessionState.effectiveVulvaElasticity
+    val activeBreastSizeBoost = sessionState.effectiveBreastSizeBoost
 
     var activePointerCount by remember { mutableStateOf(0) }
     val latestHoldOpen by rememberUpdatedState(holdOpen)
@@ -312,6 +424,8 @@ fun InteractiveVulva3DCanvas(
     val latestBetaLife2AsymmetricBlinking by rememberUpdatedState(betaLife2AsymmetricBlinking)
     val latestBetaLife2GazeAnticipation by rememberUpdatedState(betaLife2GazeAnticipation)
     val latestBetaLife2PosturalSettling by rememberUpdatedState(betaLife2PosturalSettling)
+    val latestBetaVulvaElasticity by rememberUpdatedState(activeVulvaElasticity)
+    val latestBetaBreastSizeBoost by rememberUpdatedState(activeBreastSizeBoost)
 
     fun registerPhysiologicalStimulus(level: Float, isDragMotion: Boolean = false) {
         val clamped = level.coerceIn(0f, 1f)
@@ -323,10 +437,10 @@ fun InteractiveVulva3DCanvas(
         heartRateSensitivity = max(heartRateSensitivity * 0.86f, clamped)
         heartRateDrive = max(heartRateDrive, if (isDragMotion) 1.0f else 0.58f)
         if (!isDragMotion) {
-            // Subtle immediate autonomic pulse bump on tap/contact scaled by zone sensitivity
+            // Subtle immediate autonomic pulse bump on tap/contact, scaled 3× slower for v19.0
             val tapCeiling = VulvaGlTextureView.RESTING_HEART_RATE_BPM +
                 (VulvaGlTextureView.MAX_HEART_RATE_BPM - VulvaGlTextureView.RESTING_HEART_RATE_BPM) * (0.18f + 0.82f * clamped)
-            val tapBump = 0.6f + 2.4f * clamped
+            val tapBump = (0.6f + 2.4f * clamped) / VulvaGlTextureView.HEART_RATE_RISE_RATE_DIVISOR
             if (heartRateBpm < tapCeiling) {
                 heartRateBpm = (heartRateBpm + tapBump).coerceAtMost(tapCeiling)
             }
@@ -334,9 +448,11 @@ fun InteractiveVulva3DCanvas(
     }
 
     fun springBackTissue(resetLegs: Boolean = false) {
+        val elasticRes = latestBetaVulvaElasticity.coerceIn(0f, VULVA_ELASTIC_MAX_RESISTANCE)
+        val activeMaxSpread = vulvaElasticMaxSpread(elasticRes)
         val tissueSpring = spring<Float>(
-            dampingRatio = 0.76f,
-            stiffness = Spring.StiffnessLow
+            dampingRatio = 0.76f + 0.06f * (elasticRes / VULVA_ELASTIC_DEFAULT_RESISTANCE).coerceIn(0f, 1.5f),
+            stiffness = vulvaElasticSpringStiffness(elasticRes)
         )
         val breastSpring = spring<Float>(
             dampingRatio = 0.50f,
@@ -347,13 +463,14 @@ fun InteractiveVulva3DCanvas(
             stiffness = Spring.StiffnessMedium
         )
         // While Blossom holds the self-spread pose, releasing manual touches returns labia to her held pose
+        // (capped to the v19.0 40% elastic limit or any higher active elasticity resistance)
         val outerRestTarget = if (latestBlossomSpreadPoseActive && !resetLegs) {
-            BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET
+            min(BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET, activeMaxSpread)
         } else {
             0f
         }
         val innerRestTarget = if (latestBlossomSpreadPoseActive && !resetLegs) {
-            BlossomArmIkRig.SELF_SPREAD_INNER_TARGET
+            min(BlossomArmIkRig.SELF_SPREAD_INNER_TARGET, activeMaxSpread)
         } else {
             0f
         }
@@ -392,7 +509,7 @@ fun InteractiveVulva3DCanvas(
     }
 
     fun animateToPreset(preset: CameraAnglePreset, legsEnabled: Boolean = showExperimentalLegs) {
-        activePreset = preset
+        activePresetOrdinal = preset.ordinal
         val target = preset.resolveCamera(legsEnabled)
         val camSpring = spring<Float>(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow)
         coroutineScope.launch { camYaw.animateTo(target.yawDeg, camSpring) }
@@ -403,17 +520,22 @@ fun InteractiveVulva3DCanvas(
     }
 
     LaunchedEffect(blossomSpreadPoseActive) {
-        if (blossomSpreadPoseActive) {
-            val remaining = (1f - selfSpreadPose.value).coerceIn(0.05f, 1f)
+        if (blossomSpreadPoseActive && selfSpreadPose.value < 0.999f) {
+            val startPose = selfSpreadPose.value
+            val remaining = (1f - startPose).coerceIn(0.05f, 1f)
             val durationMs = (2500f * remaining).roundToInt().coerceAtLeast(280)
+            val startSpreadT = smoothStepPose(0.66f, 1.00f, startPose)
+            val activeMaxSpread = vulvaElasticMaxSpread(latestBetaVulvaElasticity)
+            val selfOuterCap = min(BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET, activeMaxSpread)
+            val selfInnerCap = min(BlossomArmIkRig.SELF_SPREAD_INNER_TARGET, activeMaxSpread)
             val startLO = leftOuterSpread.value
             val startRO = rightOuterSpread.value
             val startLI = leftInnerOpen.value
             val startRI = rightInnerOpen.value
-            val targetLO = max(startLO, BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET)
-            val targetRO = max(startRO, BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET)
-            val targetLI = max(startLI, BlossomArmIkRig.SELF_SPREAD_INNER_TARGET)
-            val targetRI = max(startRI, BlossomArmIkRig.SELF_SPREAD_INNER_TARGET)
+            val targetLO = max(startLO.coerceAtMost(activeMaxSpread), selfOuterCap)
+            val targetRO = max(startRO.coerceAtMost(activeMaxSpread), selfOuterCap)
+            val targetLI = max(startLI.coerceAtMost(activeMaxSpread), selfInnerCap)
+            val targetRI = max(startRI.coerceAtMost(activeMaxSpread), selfInnerCap)
 
             selfSpreadPose.animateTo(
                 targetValue = 1f,
@@ -421,10 +543,15 @@ fun InteractiveVulva3DCanvas(
             ) {
                 val spreadT = smoothStepPose(0.66f, 1.00f, value)
                 if (spreadT > 0.0001f && activePointerCount == 0) {
-                    val lo = startLO + (targetLO - startLO) * spreadT
-                    val ro = startRO + (targetRO - startRO) * spreadT
-                    val li = startLI + (targetLI - startLI) * spreadT
-                    val ri = startRI + (targetRI - startRI) * spreadT
+                    val spreadFrac = if (startSpreadT >= 0.999f) {
+                        1f
+                    } else {
+                        ((spreadT - startSpreadT) / (1f - startSpreadT)).coerceIn(0f, 1f)
+                    }
+                    val lo = startLO + (targetLO - startLO) * spreadFrac
+                    val ro = startRO + (targetRO - startRO) * spreadFrac
+                    val li = startLI + (targetLI - startLI) * spreadFrac
+                    val ri = startRI + (targetRI - startRI) * spreadFrac
                     coroutineScope.launch {
                         leftOuterSpread.snapTo(lo)
                         rightOuterSpread.snapTo(ro)
@@ -433,7 +560,7 @@ fun InteractiveVulva3DCanvas(
                     }
                 }
             }
-        } else if (selfSpreadPose.value > 0.001f) {
+        } else if (!blossomSpreadPoseActive && selfSpreadPose.value > 0.001f) {
             val remaining = selfSpreadPose.value.coerceIn(0.05f, 1f)
             val durationMs = (2215f * remaining).roundToInt().coerceAtLeast(280)
             val startLO = leftOuterSpread.value
@@ -461,13 +588,16 @@ fun InteractiveVulva3DCanvas(
     }
 
     LaunchedEffect(resetTrigger) {
-        if (resetTrigger > 0) {
+        if (resetTrigger > sessionState.lastHandledResetTrigger) {
+            sessionState.lastHandledResetTrigger = resetTrigger
             blossomSpreadPoseActive = false
             springBackTissue(resetLegs = true)
         }
     }
     LaunchedEffect(holdOpen) {
-        if (!holdOpen && activePointerCount == 0) {
+        val prevHoldOpen = sessionState.lastObservedHoldOpen
+        sessionState.lastObservedHoldOpen = holdOpen
+        if (prevHoldOpen == true && !holdOpen && activePointerCount == 0) {
             springBackTissue(resetLegs = false)
         }
     }
@@ -865,7 +995,10 @@ fun InteractiveVulva3DCanvas(
         }
     }
     LaunchedEffect(showExperimentalLegs, betaLife2PosturalSettling, posturalSettleTrigger) {
-        if (!showExperimentalLegs || !betaLife2PosturalSettling || posturalSettleTrigger <= 0) return@LaunchedEffect
+        if (!showExperimentalLegs || !betaLife2PosturalSettling || posturalSettleTrigger <= sessionState.lastHandledPosturalSettleTrigger) {
+            return@LaunchedEffect
+        }
+        sessionState.lastHandledPosturalSettleTrigger = posturalSettleTrigger
         val rng = kotlin.random.Random(System.currentTimeMillis() xor posturalSettleTrigger.toLong())
         delay((340 + rng.nextInt(320)).toLong())
         if (activePointerCount > 0) return@LaunchedEffect
@@ -1157,9 +1290,11 @@ fun InteractiveVulva3DCanvas(
         betaV3AsymmetryStrength = betaV3AsymmetryStrength,
         betaV3RegionalSurfaceDetail = betaV3RegionalSurfaceDetail,
         betaV3SurfaceStrength = betaV3SurfaceStrength,
-        betaV3NaturalLighting = betaV3NaturalLighting,
-        betaV3LightingStrength = betaV3LightingStrength,
-        betaBreastSizeBoost = betaBreastSizeBoost,
+        betaV3LabialVestibuleBlend = betaV3LabialVestibuleBlend,
+        betaV3LabialBlendStrength = betaV3LabialBlendStrength,
+        betaV3IntricateLabiaFolds = betaV3IntricateLabiaFolds,
+        betaV3LabiaFoldsStrength = betaV3LabiaFoldsStrength,
+        betaBreastSizeBoost = activeBreastSizeBoost,
         eyeGazeX = (eyeGazeX.value + anticipationGazeX.value).coerceIn(-1f, 1f),
         eyeGazeY = (eyeGazeY.value + anticipationGazeY.value).coerceIn(-1f, 1f),
         headRollOffset = idleHeadRoll.value + settleHeadRoll.value,
@@ -1234,7 +1369,9 @@ fun InteractiveVulva3DCanvas(
                         VulvaGlTextureView(
                             context = ctx,
                             onGlError = { glUnavailable = true }
-                        ).also { glViewRef = it }
+                        ).apply {
+                            breathPhase = sessionState.breathPhase
+                        }.also { glViewRef = it }
                     },
                     update = { glView ->
                         glViewRef = glView
@@ -1251,6 +1388,7 @@ fun InteractiveVulva3DCanvas(
                         glView.requestFrame()
                     },
                     onRelease = { glView ->
+                        sessionState.breathPhase = glView.breathPhase
                         if (glViewRef === glView) glViewRef = null
                         glView.shutdown()
                     },
@@ -1300,7 +1438,7 @@ fun InteractiveVulva3DCanvas(
                                     }
 
                                     if (latestOrbitMode) {
-                                        activePreset = null
+                                        activePresetOrdinal = null
                                         val minZoom = if (latestShowFullBody) 0.10f else 0.42f
                                         val maxYaw = if (latestShowFullBody) 82f else 54f
                                         val minPitch = if (latestShowFullBody) -36f else -36f
@@ -1387,7 +1525,7 @@ fun InteractiveVulva3DCanvas(
                                             rightBreastX = rightBreastX.value,
                                             rightBreastY = rightBreastY.value,
                                             breastSize = breastSize,
-                                            betaBreastSizeBoost = betaBreastSizeBoost,
+                                            betaBreastSizeBoost = latestBetaBreastSizeBoost,
                                             leftLegSpread = leftLegSpread.value,
                                             rightLegSpread = rightLegSpread.value,
                                             selfSpreadPose = selfSpreadPose.value,
@@ -1605,10 +1743,13 @@ fun InteractiveVulva3DCanvas(
                                                         val dyNorm = localDelta.y
                                                         val curLocal = vFrame?.screenToLocalNorm(rawScreen) ?: existing.startNorm
 
+                                                        val elasticRes = latestBetaVulvaElasticity.coerceIn(0f, VULVA_ELASTIC_MAX_RESISTANCE)
+                                                        val pullScale = vulvaElasticPullScale(elasticRes)
+                                                        val hoodPullScale = 1f - elasticRes * 0.65f
                                                         val inHoodZone = existing.startNorm.x in 0.28f..0.72f &&
                                                             existing.startNorm.y in 0.14f..0.46f
                                                         if (inHoodZone && abs(dyNorm) > abs(dxNorm) * 0.55f) {
-                                                            dHood += (-dyNorm) * 4.5f
+                                                            dHood += (-dyNorm) * 4.5f * hoodPullScale
                                                         }
 
                                                         val inLabiaSpan = existing.startNorm.y in 0.18f..0.88f
@@ -1616,13 +1757,13 @@ fun InteractiveVulva3DCanvas(
                                                             if (existing.startNorm.x < 0.50f) {
                                                                 val pull = -dxNorm
                                                                 val nearInner = existing.startNorm.x in 0.36f..0.50f
-                                                                dLeftOuter += pull * if (nearInner) 2.2f else 3.9f
-                                                                dLeftInner += pull * if (nearInner) 4.5f else 3.0f
+                                                                dLeftOuter += pull * (if (nearInner) 2.2f else 3.9f) * pullScale
+                                                                dLeftInner += pull * (if (nearInner) 4.5f else 3.0f) * pullScale
                                                             } else {
                                                                 val pull = dxNorm
                                                                 val nearInner = existing.startNorm.x in 0.50f..0.64f
-                                                                dRightOuter += pull * if (nearInner) 2.2f else 3.9f
-                                                                dRightInner += pull * if (nearInner) 4.5f else 3.0f
+                                                                dRightOuter += pull * (if (nearInner) 2.2f else 3.9f) * pullScale
+                                                                dRightInner += pull * (if (nearInner) 4.5f else 3.0f) * pullScale
                                                             }
                                                         }
 
@@ -1655,13 +1796,18 @@ fun InteractiveVulva3DCanvas(
                                         }
 
                                         if (dLeftOuter != 0f || dRightOuter != 0f || dLeftInner != 0f || dRightInner != 0f || dHood != 0f) {
-                                            val nextLO = (leftOuterSpread.value + dLeftOuter).coerceIn(0f, 1f)
-                                            val nextRO = (rightOuterSpread.value + dRightOuter).coerceIn(0f, 1f)
+                                            val elasticRes = latestBetaVulvaElasticity.coerceIn(0f, VULVA_ELASTIC_MAX_RESISTANCE)
+                                            val maxSpread = vulvaElasticMaxSpread(elasticRes)
+                                            val maxHood = vulvaElasticHoodMax(elasticRes)
+                                            val nextLO = vulvaElasticStep(leftOuterSpread.value, dLeftOuter, maxSpread, elasticRes)
+                                            val nextRO = vulvaElasticStep(rightOuterSpread.value, dRightOuter, maxSpread, elasticRes)
                                             val minLI = (nextLO - 0.16f).coerceAtLeast(0f) * 0.72f
                                             val minRI = (nextRO - 0.16f).coerceAtLeast(0f) * 0.72f
-                                            val nextLI = (leftInnerOpen.value + dLeftInner).coerceAtLeast(minLI).coerceIn(0f, 1f)
-                                            val nextRI = (rightInnerOpen.value + dRightInner).coerceAtLeast(minRI).coerceIn(0f, 1f)
-                                            val nextH = (hoodRetraction.value + dHood).coerceIn(0f, 1f)
+                                            val nextLI = vulvaElasticStep(leftInnerOpen.value, dLeftInner, maxSpread, elasticRes)
+                                                .coerceAtLeast(minLI)
+                                            val nextRI = vulvaElasticStep(rightInnerOpen.value, dRightInner, maxSpread, elasticRes)
+                                                .coerceAtLeast(minRI)
+                                            val nextH = vulvaElasticStep(hoodRetraction.value, dHood, maxHood, elasticRes)
 
                                             coroutineScope.launch {
                                                 leftOuterSpread.snapTo(nextLO)
@@ -1873,8 +2019,10 @@ fun InteractiveVulva3DCanvas(
                     betaV3SoftPigmentation,
                     betaV3AnatomicalAsymmetry,
                     betaV3RegionalSurfaceDetail,
-                    betaV3NaturalLighting,
-                    betaBreastSizeBoost
+                    betaV3LabialVestibuleBlend,
+                    betaV3IntricateLabiaFolds,
+                    betaVulvaElasticityEnabled && betaVulvaElasticity > 0.005f,
+                    betaBreastSizeBoostEnabled && betaBreastSizeBoost > 0.005f
                 ).count { it }
                 val activeLifelikeBetaCount = listOf(
                     betaLifeEyeMicrosaccades,
@@ -1955,50 +2103,50 @@ fun InteractiveVulva3DCanvas(
                     }
                 }
 
-                // Translucent Compact Floating 3-Tab Beta Panel (touches outside still orbit/touch Blossom live)
+                // Translucent Compact Floating 3-Tab Beta Panel (v19.0: 60% height, ~30% narrower, higher translucency)
                 androidx.compose.animation.AnimatedVisibility(
                     visible = showBetaMenu,
                     enter = fadeIn(tween(150)) + scaleIn(tween(150), initialScale = 0.95f),
                     exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.96f),
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(top = 60.dp, end = 8.dp, start = 12.dp, bottom = 10.dp)
+                        .padding(top = 58.dp, end = 8.dp, start = 12.dp, bottom = 8.dp)
                 ) {
                     val panelScroll = rememberScrollState()
                     Surface(
                         modifier = Modifier
-                            .widthIn(max = 316.dp)
-                            .heightIn(max = 332.dp)
+                            .widthIn(max = 222.dp)
+                            .heightIn(max = 200.dp)
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
                                 onClick = {}
                             )
                             .testTag("beta_floating_panel"),
-                        shape = RoundedCornerShape(18.dp),
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.89f),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
                         border = androidx.compose.foundation.BorderStroke(
                             width = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.70f)
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
                         ),
-                        shadowElevation = 8.dp
+                        shadowElevation = 4.dp
                     ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 10.dp, bottom = 8.dp)
+                                .padding(top = 2.dp, bottom = 4.dp)
                         ) {
-                            // Header + quick Reset All
+                            // Compact header + quick Reset All (turns toggles OFF while preserving last slider values)
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp),
+                                    .padding(horizontal = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
                                     text = "Beta Lab",
-                                    style = MaterialTheme.typography.titleSmall,
+                                    style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -2006,33 +2154,9 @@ fun InteractiveVulva3DCanvas(
                                     Box(
                                         modifier = Modifier
                                             .heightIn(min = 48.dp)
-                                            .clip(RoundedCornerShape(12.dp))
+                                            .clip(RoundedCornerShape(10.dp))
                                             .clickable {
-                                                betaV3OrganicContinuity = false
-                                                betaV3ContinuityStrength = 0.65f
-                                                betaV3SoftPigmentation = false
-                                                betaV3PigmentStrength = 0.70f
-                                                betaV3AnatomicalAsymmetry = false
-                                                betaV3AsymmetryStrength = 0.65f
-                                                betaV3RegionalSurfaceDetail = false
-                                                betaV3SurfaceStrength = 0.65f
-                                                betaV3NaturalLighting = false
-                                                betaV3LightingStrength = 0.70f
-                                                betaBreastSizeBoost = false
-                                                betaLifeEyeMicrosaccades = false
-                                                betaLifeDoubleBlinking = false
-                                                betaLifeHeadRepositioning = false
-                                                betaLifeDeepBreathsSighs = false
-                                                betaLifeShoulderRelaxation = false
-                                                betaLifeFacialExpressions = false
-                                                betaLife2EyelidTracking = false
-                                                betaLife2AsymmetricBlinking = false
-                                                betaLife2GazeAnticipation = false
-                                                betaLife2SubtleSwallowing = false
-                                                betaLife2PosturalSettling = false
-                                                betaLife2BreathFaceCoupling = false
-                                                betaLife2LivingWarmth = false
-                                                betaLife2ShowHeartRate = false
+                                                sessionState.disableAllBetaToggles()
                                                 if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
                                             }
                                             .testTag("beta_reset_all_button")
@@ -2043,13 +2167,13 @@ fun InteractiveVulva3DCanvas(
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f))
-                                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.80f))
+                                                .padding(horizontal = 8.dp, vertical = 4.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
-                                                text = "Reset all",
+                                                text = "All off",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = MaterialTheme.colorScheme.onSecondaryContainer
@@ -2063,25 +2187,25 @@ fun InteractiveVulva3DCanvas(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 BetaMenuTabPill(
-                                    label = if (activeVulvaBetaCount > 0) "Vulva ($activeVulvaBetaCount)" else "Vulva",
+                                    label = if (activeVulvaBetaCount > 0) "Vulva $activeVulvaBetaCount" else "Vulva",
                                     selected = betaMenuTab == 0,
                                     tag = "beta_tab_vulva",
                                     onClick = { betaMenuTab = 0 },
                                     modifier = Modifier.weight(1f)
                                 )
                                 BetaMenuTabPill(
-                                    label = if (activeLifelikeBetaCount > 0) "Life ($activeLifelikeBetaCount)" else "Life",
+                                    label = if (activeLifelikeBetaCount > 0) "Life $activeLifelikeBetaCount" else "Life",
                                     selected = betaMenuTab == 1,
                                     tag = "beta_tab_lifelike",
                                     onClick = { betaMenuTab = 1 },
                                     modifier = Modifier.weight(1f)
                                 )
                                 BetaMenuTabPill(
-                                    label = if (activeLifelike2BetaCount > 0) "Life+ ($activeLifelike2BetaCount)" else "Life+",
+                                    label = if (activeLifelike2BetaCount > 0) "Life+ $activeLifelike2BetaCount" else "Life+",
                                     selected = betaMenuTab == 2,
                                     tag = "beta_tab_lifelike_plus",
                                     onClick = { betaMenuTab = 2 },
@@ -2090,7 +2214,7 @@ fun InteractiveVulva3DCanvas(
                             }
 
                             HorizontalDivider(
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.50f)
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
                             )
 
                             Column(
@@ -2100,10 +2224,10 @@ fun InteractiveVulva3DCanvas(
                             ) {
                                 if (betaMenuTab == 0) {
                                     Text(
-                                        text = "Anatomical realism pass v3 & proportion options (OFF by default)",
+                                        text = "v19.0 pre-graduation defaults (toggle preserves last slider value)",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                     VulvaBetaToggleRow(
                                         title = "1. Organic tissue continuity",
@@ -2118,7 +2242,7 @@ fun InteractiveVulva3DCanvas(
                                     )
                                     AnimatedVisibility(visible = betaV3OrganicContinuity) {
                                         BetaStrengthSliderRow(
-                                            label = "Continuity strength",
+                                            label = "Continuity strength (3×)",
                                             value = betaV3ContinuityStrength,
                                             tag = "slider_beta_v3_continuity_strength",
                                             onValueChange = { betaV3ContinuityStrength = it }
@@ -2141,7 +2265,7 @@ fun InteractiveVulva3DCanvas(
                                     )
                                     AnimatedVisibility(visible = betaV3SoftPigmentation) {
                                         BetaStrengthSliderRow(
-                                            label = "Pigmentation blend",
+                                            label = "Pigmentation blend (3×)",
                                             value = betaV3PigmentStrength,
                                             tag = "slider_beta_v3_pigment_strength",
                                             onValueChange = { betaV3PigmentStrength = it }
@@ -2164,7 +2288,7 @@ fun InteractiveVulva3DCanvas(
                                     )
                                     AnimatedVisibility(visible = betaV3AnatomicalAsymmetry) {
                                         BetaStrengthSliderRow(
-                                            label = "Asymmetry strength",
+                                            label = "Asymmetry strength (3×)",
                                             value = betaV3AsymmetryStrength,
                                             tag = "slider_beta_v3_asymmetry_strength",
                                             onValueChange = { betaV3AsymmetryStrength = it }
@@ -2187,7 +2311,7 @@ fun InteractiveVulva3DCanvas(
                                     )
                                     AnimatedVisibility(visible = betaV3RegionalSurfaceDetail) {
                                         BetaStrengthSliderRow(
-                                            label = "Surface detail strength",
+                                            label = "Surface detail (3×)",
                                             value = betaV3SurfaceStrength,
                                             tag = "slider_beta_v3_surface_strength",
                                             onValueChange = { betaV3SurfaceStrength = it }
@@ -2198,22 +2322,22 @@ fun InteractiveVulva3DCanvas(
                                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
                                     )
                                     VulvaBetaToggleRow(
-                                        title = "5. Natural lighting & shadows",
-                                        subtitle = "Softens pelvic shadow penumbras with warm cavity bounce while keeping landmarks crisp",
-                                        checked = betaV3NaturalLighting,
-                                        tag = "toggle_beta_v3_natural_lighting",
+                                        title = "5. Labial-vestibule color blend",
+                                        subtitle = "Smoothly melts the inner labial base into the vulvar vestibule color & tone",
+                                        checked = betaV3LabialVestibuleBlend,
+                                        tag = "toggle_beta_v3_labial_vestibule_blend",
                                         compact = true,
                                         onToggle = {
-                                            betaV3NaturalLighting = !betaV3NaturalLighting
+                                            betaV3LabialVestibuleBlend = !betaV3LabialVestibuleBlend
                                             if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
                                         }
                                     )
-                                    AnimatedVisibility(visible = betaV3NaturalLighting) {
+                                    AnimatedVisibility(visible = betaV3LabialVestibuleBlend) {
                                         BetaStrengthSliderRow(
-                                            label = "Lighting softness",
-                                            value = betaV3LightingStrength,
-                                            tag = "slider_beta_v3_lighting_strength",
-                                            onValueChange = { betaV3LightingStrength = it }
+                                            label = "Base blend strength",
+                                            value = betaV3LabialBlendStrength,
+                                            tag = "slider_beta_v3_labial_blend_strength",
+                                            onValueChange = { betaV3LabialBlendStrength = it }
                                         )
                                     }
                                     HorizontalDivider(
@@ -2221,22 +2345,136 @@ fun InteractiveVulva3DCanvas(
                                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
                                     )
                                     VulvaBetaToggleRow(
-                                        title = "Breast size boost (+15%)",
-                                        subtitle = "Increases breast size ~15% across slider settings except the most petite",
-                                        checked = betaBreastSizeBoost,
-                                        tag = "toggle_beta_breast_size_boost",
+                                        title = "6. Intricate labial folds & border",
+                                        subtitle = "Wavy asymmetric border with tangled inner folds, varied wetness & rosy tint",
+                                        checked = betaV3IntricateLabiaFolds,
+                                        tag = "toggle_beta_v3_intricate_labia_folds",
                                         compact = true,
                                         onToggle = {
-                                            betaBreastSizeBoost = !betaBreastSizeBoost
+                                            betaV3IntricateLabiaFolds = !betaV3IntricateLabiaFolds
                                             if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
                                         }
                                     )
+                                    AnimatedVisibility(visible = betaV3IntricateLabiaFolds) {
+                                        BetaStrengthSliderRow(
+                                            label = "Folds & border strength",
+                                            value = betaV3LabiaFoldsStrength,
+                                            tag = "slider_beta_v3_labia_folds_strength",
+                                            onValueChange = { betaV3LabiaFoldsStrength = it }
+                                        )
+                                    }
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "Vulva elastic resistance",
+                                        subtitle = "Firms labial pull resistance & lowers max spread up to 60%",
+                                        checked = betaVulvaElasticityEnabled,
+                                        tag = "toggle_beta_vulva_elasticity",
+                                        compact = true,
+                                        onToggle = {
+                                            betaVulvaElasticityEnabled = !betaVulvaElasticityEnabled
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    AnimatedVisibility(visible = betaVulvaElasticityEnabled) {
+                                        val elasticPct = (betaVulvaElasticity.coerceIn(0f, VULVA_ELASTIC_MAX_RESISTANCE) * 100f).roundToInt()
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(start = 8.dp, end = 8.dp, bottom = 4.dp),
+                                            verticalArrangement = Arrangement.spacedBy(0.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "Resistance (max 60%)",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                Text(
+                                                    text = "+$elasticPct%",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                            Slider(
+                                                value = betaVulvaElasticity.coerceIn(0f, VULVA_ELASTIC_MAX_RESISTANCE),
+                                                onValueChange = { betaVulvaElasticity = it },
+                                                valueRange = 0f..VULVA_ELASTIC_MAX_RESISTANCE,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .testTag("slider_beta_vulva_elasticity")
+                                                    .semantics {
+                                                        contentDescription = "Vulva elastic resistance, $elasticPct percent"
+                                                    }
+                                            )
+                                        }
+                                    }
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 8.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "Breast size boost",
+                                        subtitle = "Boosts breast size up to +50% except the most petite setting",
+                                        checked = betaBreastSizeBoostEnabled,
+                                        tag = "toggle_beta_breast_size_boost",
+                                        compact = true,
+                                        onToggle = {
+                                            betaBreastSizeBoostEnabled = !betaBreastSizeBoostEnabled
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    AnimatedVisibility(visible = betaBreastSizeBoostEnabled) {
+                                        val boostPct = (betaBreastSizeBoost.coerceIn(0f, 0.50f) * 100f).roundToInt()
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(start = 8.dp, end = 8.dp, bottom = 4.dp),
+                                            verticalArrangement = Arrangement.spacedBy(0.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "Boost amount (max 50%)",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                Text(
+                                                    text = "+$boostPct%",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                            Slider(
+                                                value = betaBreastSizeBoost.coerceIn(0f, 0.50f),
+                                                onValueChange = { betaBreastSizeBoost = it },
+                                                valueRange = 0f..0.50f,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .testTag("slider_beta_breast_size_boost")
+                                                    .semantics {
+                                                        contentDescription = "Breast size boost, $boostPct percent"
+                                                    }
+                                            )
+                                        }
+                                    }
                                 } else if (betaMenuTab == 1) {
                                     Text(
-                                        text = "Subtle, irregular micro-behaviors (promoted ON by default)",
+                                        text = "Subtle, irregular micro-behaviors (ON by default)",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                     VulvaBetaToggleRow(
                                         title = "Eye microsaccades",
@@ -2326,10 +2564,10 @@ fun InteractiveVulva3DCanvas(
                                     )
                                 } else {
                                     Text(
-                                        text = "Next-gen subtle realism tests (all OFF by default)",
+                                        text = "Next-gen realism (all ON by default except Heart Rate HUD)",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                     VulvaBetaToggleRow(
                                         title = "Eyelid tracking",
@@ -2823,16 +3061,16 @@ private fun BetaMenuTabPill(
     Box(
         modifier = modifier
             .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(
                 if (selected) {
-                    MaterialTheme.colorScheme.primaryContainer
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.90f)
                 } else {
-                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.65f)
+                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.50f)
                 }
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 8.dp)
+            .padding(horizontal = 4.dp, vertical = 6.dp)
             .testTag(tag)
             .semantics {
                 contentDescription = "$label tab${if (selected) ", selected" else ""}"
@@ -2841,14 +3079,16 @@ private fun BetaMenuTabPill(
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             color = if (selected) {
                 MaterialTheme.colorScheme.onPrimaryContainer
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
-            maxLines = 1
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -2867,30 +3107,31 @@ private fun VulvaBetaToggleRow(
             .fillMaxWidth()
             .heightIn(min = if (compact) 48.dp else 56.dp)
             .clickable(onClick = onToggle)
-            .padding(horizontal = if (compact) 12.dp else 14.dp, vertical = if (compact) 6.dp else 8.dp)
+            .padding(horizontal = if (compact) 8.dp else 14.dp, vertical = if (compact) 4.dp else 8.dp)
             .testTag(tag)
             .semantics {
                 contentDescription = "$title, ${if (checked) "enabled" else "disabled"}. $subtitle"
             },
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 10.dp)
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
+                style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
                 text = subtitle,
-                style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall,
+                style = if (compact) MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 13.sp) else MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Switch(
             checked = checked,
-            onCheckedChange = null
+            onCheckedChange = null,
+            modifier = if (compact) Modifier.scale(0.80f) else Modifier
         )
     }
 }
@@ -2906,7 +3147,7 @@ private fun BetaStrengthSliderRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 12.dp, end = 12.dp, bottom = 6.dp),
+            .padding(start = 8.dp, end = 8.dp, bottom = 4.dp),
         verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
         Row(
@@ -2916,7 +3157,7 @@ private fun BetaStrengthSliderRow(
         ) {
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(

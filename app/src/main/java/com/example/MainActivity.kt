@@ -242,6 +242,7 @@ private fun TabContentHost(
         when (uiState.activeTab) {
             AtlasTab.ANATOMY -> AnatomyScreen(
                 uiState = uiState,
+                blossomViewportState = viewModel.blossomViewportState,
                 onSelectView = viewModel::selectAnatomyView,
                 onSelectPart = viewModel::selectAnatomyPart,
                 onToggleLabels = viewModel::toggleDiagramLabels,

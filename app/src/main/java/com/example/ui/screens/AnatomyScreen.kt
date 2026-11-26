@@ -80,6 +80,7 @@ import com.example.data.model.AnatomyViewType
 import com.example.data.model.AudienceMode
 import com.example.data.model.SensitivityTier
 import com.example.ui.components.AnatomyHapticsEngine
+import com.example.ui.components.BlossomViewportSessionState
 import com.example.ui.components.InteractiveAnatomyCanvas
 import com.example.ui.components.InteractiveVulva3DCanvas
 import com.example.ui.components.InteractiveVulvaCanvas
@@ -102,7 +103,8 @@ fun AnatomyScreen(
     onToggleTouchExplore: () -> Unit,
     onReadArticle: (String) -> Unit,
     onOpenDiversity: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    blossomViewportState: BlossomViewportSessionState = remember { BlossomViewportSessionState() }
 ) {
     val context = LocalContext.current
     val hapticsEngine = remember(context) { AnatomyHapticsEngine(context) }
@@ -386,7 +388,8 @@ fun AnatomyScreen(
                             holdOpen = uiState.holdVulvaOpen,
                             resetTrigger = uiState.vulvaResetTrigger,
                             toneIndex = uiState.vulvaToneIndex,
-                            onSelectPart = onSelectPart
+                            onSelectPart = onSelectPart,
+                            sessionState = blossomViewportState
                         )
                     } else {
                         InteractiveVulvaCanvas(

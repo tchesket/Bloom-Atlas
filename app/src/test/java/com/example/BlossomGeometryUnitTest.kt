@@ -4,7 +4,15 @@ import com.example.ui.components.BlossomArmIkRig
 import com.example.ui.components.BlossomBodyBuilder
 import com.example.ui.components.BlossomSdfBodyBuilder
 import com.example.ui.components.BlossomUpperBodyBuilder
+import com.example.ui.components.BlossomViewportSessionState
 import com.example.ui.components.DynamicGlMesh
+import com.example.ui.components.VULVA_ELASTIC_DEFAULT_RESISTANCE
+import com.example.ui.components.VULVA_ELASTIC_MAX_RESISTANCE
+import com.example.ui.components.vulvaElasticHoodMax
+import com.example.ui.components.vulvaElasticMaxSpread
+import com.example.ui.components.vulvaElasticPullScale
+import com.example.ui.components.vulvaElasticSpringStiffness
+import com.example.ui.components.vulvaElasticStep
 import com.example.ui.components.VulvaAnatomySceneMesh
 import com.example.ui.components.VulvaDeformationState
 import com.example.ui.components.VulvaGlTextureView
@@ -1905,8 +1913,9 @@ class BlossomGeometryUnitTest {
         assertFalse(defaultState.betaV3SoftPigmentation)
         assertFalse(defaultState.betaV3AnatomicalAsymmetry)
         assertFalse(defaultState.betaV3RegionalSurfaceDetail)
-        assertFalse(defaultState.betaV3NaturalLighting)
-        assertFalse(defaultState.betaBreastSizeBoost)
+        assertFalse(defaultState.betaV3LabialVestibuleBlend)
+        assertFalse(defaultState.betaV3IntricateLabiaFolds)
+        assertEquals(0f, defaultState.betaBreastSizeBoost, 0f)
         assertFalse(defaultState.betaLifeDeepBreathsSighs)
         assertEquals(0f, defaultState.eyeGazeX, 0f)
         assertEquals(0f, defaultState.eyeGazeY, 0f)
@@ -2077,11 +2086,12 @@ class BlossomGeometryUnitTest {
         )
 
         // 4. Toggle 3 (betaV2AlignedSulcus): verify outward alignment & complete independence from Toggle 2
+        // Uses historical wide spread (0.74/0.78) calibrated to the fixed x=0.242 / x=0.350 probe coordinates
         val spreadBase = v13BaselineState(
-            leftOuter = BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET,
-            rightOuter = BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET,
-            leftInner = BlossomArmIkRig.SELF_SPREAD_INNER_TARGET,
-            rightInner = BlossomArmIkRig.SELF_SPREAD_INNER_TARGET
+            leftOuter = 0.74f,
+            rightOuter = 0.74f,
+            leftInner = 0.78f,
+            rightInner = 0.78f
         )
         val spreadSulcusOnly = spreadBase.copy(betaV2AlignedSulcus = true, betaV2NonInvertingLabiaFold = false)
         val spreadSulcusAndFold = spreadBase.copy(betaV2AlignedSulcus = true, betaV2NonInvertingLabiaFold = true)
@@ -3050,26 +3060,36 @@ class BlossomGeometryUnitTest {
             val baseArch = scene.labiaHoodArchMesh.vertexData.copyOf()
             val baseGlans = scene.glansMesh.vertexData.copyOf()
 
-            // Verify each individual Beta v3 geometry toggle + all 5 combined preserve all topology invariants
+            val baseArchAlpha = scene.labiaHoodArchAlphaData.copyOf()
+
+            // Verify each individual Beta v3 toggle (at full 100% = 3x for 1..4) + all 6 combined preserve all topology invariants
             val variants = listOf(
-                "V3_Continuity" to basePose.copy(betaV3OrganicContinuity = true, betaV3ContinuityStrength = 1.0f),
-                "V3_Asymmetry" to basePose.copy(betaV3AnatomicalAsymmetry = true, betaV3AsymmetryStrength = 1.0f),
-                "V3_RegionalSurface" to basePose.copy(betaV3RegionalSurfaceDetail = true, betaV3SurfaceStrength = 1.0f),
-                "V3_All5" to basePose.copy(
-                    betaV3OrganicContinuity = true,
-                    betaV3ContinuityStrength = 1.0f,
-                    betaV3SoftPigmentation = true,
-                    betaV3PigmentStrength = 1.0f,
-                    betaV3AnatomicalAsymmetry = true,
-                    betaV3AsymmetryStrength = 1.0f,
-                    betaV3RegionalSurfaceDetail = true,
-                    betaV3SurfaceStrength = 1.0f,
-                    betaV3NaturalLighting = true,
-                    betaV3LightingStrength = 1.0f
+                Triple("V3_Continuity_3x", true, basePose.copy(betaV3OrganicContinuity = true, betaV3ContinuityStrength = 1.0f)),
+                Triple("V3_Asymmetry_3x", true, basePose.copy(betaV3AnatomicalAsymmetry = true, betaV3AsymmetryStrength = 1.0f)),
+                Triple("V3_RegionalSurface_3x", true, basePose.copy(betaV3RegionalSurfaceDetail = true, betaV3SurfaceStrength = 1.0f)),
+                Triple("V3_LabialVestibuleBlend", false, basePose.copy(betaV3LabialVestibuleBlend = true, betaV3LabialBlendStrength = 1.0f)),
+                Triple("V3_IntricateLabiaFolds", true, basePose.copy(betaV3IntricateLabiaFolds = true, betaV3LabiaFoldsStrength = 1.0f)),
+                Triple(
+                    "V3_All6",
+                    true,
+                    basePose.copy(
+                        betaV3OrganicContinuity = true,
+                        betaV3ContinuityStrength = 1.0f,
+                        betaV3SoftPigmentation = true,
+                        betaV3PigmentStrength = 1.0f,
+                        betaV3AnatomicalAsymmetry = true,
+                        betaV3AsymmetryStrength = 1.0f,
+                        betaV3RegionalSurfaceDetail = true,
+                        betaV3SurfaceStrength = 1.0f,
+                        betaV3LabialVestibuleBlend = true,
+                        betaV3LabialBlendStrength = 1.0f,
+                        betaV3IntricateLabiaFolds = true,
+                        betaV3LabiaFoldsStrength = 1.0f
+                    )
                 )
             )
 
-            for ((label, variantPose) in variants) {
+            for ((label, modifiesPatchInterior, variantPose) in variants) {
                 scene.update(variantPose, includeLithotomyBody = true)
                 assertValidMesh(scene.blossomVulvaPatchMesh)
                 assertValidMesh(scene.labiaHoodArchMesh)
@@ -3096,7 +3116,40 @@ class BlossomGeometryUnitTest {
                     }
                 }
                 assertEquals("$poseName $label outer patch seam must remain untouched", 0f, maxOuterSeamDiff, 1e-5f)
-                assertTrue("$poseName $label must produce measurable interior anatomical refinement (> 0.001)", maxInteriorDiff > 0.001f)
+                if (modifiesPatchInterior) {
+                    assertTrue("$poseName $label must produce measurable interior anatomical refinement (> 0.001)", maxInteriorDiff > 0.001f)
+                }
+
+                // Verify Option 5 measurably blends medial labial arch materials into vestibule & Option 6 adds arch fold relief + wetness/pigment variation
+                val vArch = scene.labiaHoodArchMesh.vertexData
+                var maxArchPosDiff = 0f
+                var maxArchMatDiff = 0f
+                for (v in 0 until scene.labiaHoodArchMesh.vertexCount) {
+                    val b = v * stride
+                    val pd = max(abs(vArch[b] - baseArch[b]), max(abs(vArch[b + 1] - baseArch[b + 1]), abs(vArch[b + 2] - baseArch[b + 2])))
+                    val md = max(
+                        max(abs(vArch[b + 6] - baseArch[b + 6]), abs(vArch[b + 7] - baseArch[b + 7])),
+                        max(abs(vArch[b + 8] - baseArch[b + 8]), abs(vArch[b + 9] - baseArch[b + 9]))
+                    )
+                    if (pd > maxArchPosDiff) maxArchPosDiff = pd
+                    if (md > maxArchMatDiff) maxArchMatDiff = md
+                }
+                if (label == "V3_LabialVestibuleBlend") {
+                    assertTrue(
+                        "$poseName Option 5 must measurably blend medial labial arch materials toward vestibule (> 0.04), got $maxArchMatDiff",
+                        maxArchMatDiff > 0.04f
+                    )
+                }
+                if (label == "V3_IntricateLabiaFolds") {
+                    assertTrue(
+                        "$poseName Option 6 must sculpt measurable wavy border & inner labial fold geometry (> 0.004), got $maxArchPosDiff",
+                        maxArchPosDiff > 0.004f
+                    )
+                    assertTrue(
+                        "$poseName Option 6 must vary inner labial wetness/pigmentation across folds (> 0.03), got $maxArchMatDiff",
+                        maxArchMatDiff > 0.03f
+                    )
+                }
 
                 val archRep = inspectLabiaHoodArchDiagnostics(scene, variantPose, "$poseName [$label]")
                 assertEquals("$poseName $label arch inverted CCW triangles", 0, archRep.windingInvertedCcwCount)
@@ -3121,16 +3174,47 @@ class BlossomGeometryUnitTest {
                 if (shift > maxAsymShift) maxAsymShift = shift
             }
             assertTrue(
-                "$poseName Toggle 3 must shift L/R majora asymmetry measurably (> 0.002 at x=±$probeMajoraX), got maxAsymShift=$maxAsymShift",
-                maxAsymShift > 0.002f
+                "$poseName Toggle 3 must shift L/R majora asymmetry measurably (> 0.005 at 3x, x=±$probeMajoraX), got maxAsymShift=$maxAsymShift",
+                maxAsymShift > 0.005f
             )
 
             // Verify turning all Beta v3 switches back OFF restores bit-identical live defaults
             scene.update(basePose, includeLithotomyBody = true)
             assertTrue("$poseName patch must revert bit-identically when Beta v3 is OFF", basePatch.contentEquals(scene.blossomVulvaPatchMesh.vertexData))
             assertTrue("$poseName arch must revert bit-identically when Beta v3 is OFF", baseArch.contentEquals(scene.labiaHoodArchMesh.vertexData))
+            assertTrue("$poseName arch alpha must revert bit-identically when Beta v3 is OFF", baseArchAlpha.contentEquals(scene.labiaHoodArchAlphaData))
             assertTrue("$poseName glans must revert bit-identically when Beta v3 is OFF", baseGlans.contentEquals(scene.glansMesh.vertexData))
         }
+
+        // Verify Vulva elastic resistance Beta slider (v19.0: 0% = OFF, default +40%, max +60%)
+        assertEquals(0.40f, VULVA_ELASTIC_DEFAULT_RESISTANCE, 1e-6f)
+        assertEquals(0.60f, VULVA_ELASTIC_MAX_RESISTANCE, 1e-6f)
+        assertEquals("At 0% (OFF), pull scale must equal exact baseline 1.0", 1.0f, vulvaElasticPullScale(0f), 1e-6f)
+        assertEquals("At 0% (OFF), max spread must equal exact baseline 1.0", 1.0f, vulvaElasticMaxSpread(0f), 1e-6f)
+        assertEquals("At 0% (OFF), hood max must equal exact baseline 1.0", 1.0f, vulvaElasticHoodMax(0f), 1e-6f)
+        assertEquals("At 0% (OFF), spring stiffness must equal baseline 200f", 200f, vulvaElasticSpringStiffness(0f), 1e-4f)
+        assertEquals("At +40% (default), max spread must be reduced by 40% to 0.60", 0.60f, vulvaElasticMaxSpread(0.40f), 1e-5f)
+        assertEquals("At +60% (max), max spread must be reduced by 60% to 0.40", 0.40f, vulvaElasticMaxSpread(0.60f), 1e-5f)
+        assertTrue(
+            "Elastic pull resistance must scale monotonically stiffer from 0% -> 20% -> 40% -> 60%",
+            vulvaElasticPullScale(0.60f) < vulvaElasticPullScale(0.40f) &&
+                vulvaElasticPullScale(0.40f) < vulvaElasticPullScale(0.20f) &&
+                vulvaElasticPullScale(0.20f) < vulvaElasticPullScale(0f) &&
+                vulvaElasticPullScale(0.40f) in 0.60f..0.72f &&
+                vulvaElasticPullScale(0.60f) in 0.44f..0.55f
+        )
+        assertTrue(
+            "Elastic recoil stiffness must increase monotonically up to +60%",
+            vulvaElasticSpringStiffness(0.60f) > vulvaElasticSpringStiffness(0.40f) &&
+                vulvaElasticSpringStiffness(0.40f) > vulvaElasticSpringStiffness(0.20f) &&
+                vulvaElasticSpringStiffness(0.20f) > vulvaElasticSpringStiffness(0f)
+        )
+        // Progressive stretch resistance: outward drag near cap moves less than at rest, and never exceeds maxSpread
+        val stepNearRest = vulvaElasticStep(0.05f, 0.20f, 0.60f, 0.40f) - 0.05f
+        val stepNearCap = vulvaElasticStep(0.45f, 0.20f, 0.60f, 0.40f) - 0.45f
+        assertTrue("Progressive elastic resistance should stiffen near cap ($stepNearCap < $stepNearRest)", stepNearCap < stepNearRest)
+        assertTrue("Elastic step must never exceed max spread 0.60 at +40%", vulvaElasticStep(0.55f, 0.50f, 0.60f, 0.40f) <= 0.60f + 1e-6f)
+        assertTrue("Elastic step must never exceed max spread 0.40 at +60%", vulvaElasticStep(0.35f, 0.50f, 0.40f, 0.60f) <= 0.40f + 1e-6f)
     }
 
     @Test
@@ -3148,22 +3232,21 @@ class BlossomGeometryUnitTest {
             return best
         }
 
-        // 1. Most petite (0.0f and 0.06f) must remain 100% bit-identical with breast boost ON
+        // 1. Most petite (0.0f and 0.06f) must remain 100% bit-identical even at max +50% breast boost
         for (petiteSize in floatArrayOf(0.0f, 0.06f)) {
-            val baseState = VulvaDeformationState(breastSize = petiteSize, betaBreastSizeBoost = false)
+            val baseState = VulvaDeformationState(breastSize = petiteSize, betaBreastSizeBoost = 0f)
             scene.update(baseState, includeLithotomyBody = true)
             val baseBreasts = scene.blossomBreastsMesh.vertexData.copyOf()
 
-            scene.update(baseState.copy(betaBreastSizeBoost = true), includeLithotomyBody = true)
+            scene.update(baseState.copy(betaBreastSizeBoost = 0.50f), includeLithotomyBody = true)
             assertTrue(
-                "Breast size boost must leave most petite size ($petiteSize) bitwise untouched",
+                "Breast size boost (+50%) must leave most petite size ($petiteSize) bitwise untouched",
                 baseBreasts.contentEquals(scene.blossomBreastsMesh.vertexData)
             )
         }
 
-        // 2. Medium (0.50f) and Full (1.00f) must gain ~10–20% projection cleanly with valid outward normals
-        // Sample the chest-wall floor under the breast apex from blossomBodyMesh
-        scene.update(VulvaDeformationState(breastSize = 0.50f, betaBreastSizeBoost = false), includeLithotomyBody = true)
+        // 2. Medium (0.50f) and Full (1.00f) must scale monotonically from +15% up to +50% cleanly with valid outward normals
+        scene.update(VulvaDeformationState(breastSize = 0.50f, betaBreastSizeBoost = 0f), includeLithotomyBody = true)
         var chestFloorZ = Float.NEGATIVE_INFINITY
         val bodyData0 = scene.blossomBodyMesh.vertexData
         for (v in 0 until scene.blossomBodyMesh.vertexCount) {
@@ -3173,25 +3256,32 @@ class BlossomGeometryUnitTest {
             }
         }
         for (sz in floatArrayOf(0.50f, 1.00f)) {
-            val baseState = VulvaDeformationState(breastSize = sz, betaBreastSizeBoost = false)
+            val baseState = VulvaDeformationState(breastSize = sz, betaBreastSizeBoost = 0f)
             scene.update(baseState, includeLithotomyBody = true)
             val baseApexZ = maxBreastApexZ(scene.blossomBreastsMesh)
             val baseBody = scene.blossomBodyMesh.vertexData.copyOf()
+            val baseProj = (baseApexZ - chestFloorZ).coerceAtLeast(0.05f)
 
-            scene.update(baseState.copy(betaBreastSizeBoost = true), includeLithotomyBody = true)
+            scene.update(baseState.copy(betaBreastSizeBoost = 0.15f), includeLithotomyBody = true)
             assertValidMesh(scene.blossomBreastsMesh)
-            assertOutwardWindingMatchesNormals("blossomBreastsMesh(breastBoost=$sz)", scene.blossomBreastsMesh)
-            val boostedApexZ = maxBreastApexZ(scene.blossomBreastsMesh)
-
-            val baseProj = baseApexZ - chestFloorZ
-            val boostedProj = boostedApexZ - chestFloorZ
-            val gainRatio = (boostedProj - baseProj) / baseProj.coerceAtLeast(0.05f)
+            val apex15 = maxBreastApexZ(scene.blossomBreastsMesh)
+            val gain15 = ((apex15 - chestFloorZ) - baseProj) / baseProj
             assertTrue(
-                "Breast boost at size=$sz must increase breast projection noticeably (+8%..+24%), got ${(gainRatio * 100f).toInt()}% (base=$baseApexZ -> boosted=$boostedApexZ, floor=$chestFloorZ)",
-                gainRatio in 0.08f..0.24f
+                "Breast boost +15% at size=$sz must increase projection (+8%..+24%), got ${(gain15 * 100f).toInt()}%",
+                gain15 in 0.08f..0.24f
+            )
+
+            scene.update(baseState.copy(betaBreastSizeBoost = 0.50f), includeLithotomyBody = true)
+            assertValidMesh(scene.blossomBreastsMesh)
+            assertOutwardWindingMatchesNormals("blossomBreastsMesh(breastBoost50=$sz)", scene.blossomBreastsMesh)
+            val apex50 = maxBreastApexZ(scene.blossomBreastsMesh)
+            val gain50 = ((apex50 - chestFloorZ) - baseProj) / baseProj
+            assertTrue(
+                "Breast boost +50% at size=$sz must increase projection substantially (+35%..+65%) and exceed +15%, got ${(gain50 * 100f).toInt()}%",
+                gain50 in 0.35f..0.65f && gain50 > gain15 + 0.22f
             )
             assertTrue(
-                "Breast boost at size=$sz must leave blossomBodyMesh bitwise untouched",
+                "Breast boost +50% at size=$sz must leave blossomBodyMesh bitwise untouched",
                 baseBody.contentEquals(scene.blossomBodyMesh.vertexData)
             )
         }
@@ -3221,9 +3311,16 @@ class BlossomGeometryUnitTest {
             return bpm
         }
 
-        val bpmClit = simulateSustainedTouch(1.0f, 18f)
-        val bpmBreast = simulateSustainedTouch(0.54f, 18f)
-        val bpmLeg = simulateSustainedTouch(0.20f, 18f)
+        // Version 19.0: heart-rate rise is 3× slower (takes 54s to match the prior 18s build)
+        assertEquals(3.0f, VulvaGlTextureView.HEART_RATE_RISE_RATE_DIVISOR, 1e-5f)
+        val bpmClit18 = simulateSustainedTouch(1.0f, 18f)
+        val bpmClit = simulateSustainedTouch(1.0f, 54f)
+        val bpmBreast = simulateSustainedTouch(0.54f, 54f)
+        val bpmLeg = simulateSustainedTouch(0.20f, 54f)
+        assertTrue(
+            "3× slower rise must climb gently at 18s (expected < 128 BPM, got $bpmClit18) before reaching high BPM by 54s ($bpmClit)",
+            bpmClit18 in (restBpm + 30f)..128f && bpmClit > bpmClit18 + 10f
+        )
         assertTrue(
             "Clitoral stimulation BPM ($bpmClit) must exceed breast ($bpmBreast) > outer skin ($bpmLeg) > rest ($restBpm)",
             bpmClit > bpmBreast + 12f && bpmBreast > bpmLeg + 8f && bpmLeg > restBpm + 4f
@@ -3314,6 +3411,127 @@ class BlossomGeometryUnitTest {
             "Peak heart-rate breathing displacements must remain anatomically bounded (chest <= 0.195, abd <= 0.215), got ($peakChest, $peakAbd)",
             peakChest <= 0.195f && peakAbd <= 0.215f
         )
+    }
+
+    @Test
+    fun version19MilestoneDefaultsToggleMemoryAndSelfSpreadElasticCapHold() {
+        val session = BlossomViewportSessionState()
+
+        // 1. Verify exact v19.0 Beta Lab defaults across Vulva, Life, and Life+
+        assertTrue(session.betaV3OrganicContinuity)
+        assertEquals(0.50f, session.betaV3ContinuityStrength, 1e-6f)
+        assertTrue(session.betaV3SoftPigmentation)
+        assertEquals(0.50f, session.betaV3PigmentStrength, 1e-6f)
+        assertTrue(session.betaV3AnatomicalAsymmetry)
+        assertEquals(0.85f, session.betaV3AsymmetryStrength, 1e-6f)
+        assertTrue(session.betaV3RegionalSurfaceDetail)
+        assertEquals(0.36f, session.betaV3SurfaceStrength, 1e-6f)
+        assertTrue(session.betaV3LabialVestibuleBlend)
+        assertEquals(0.75f, session.betaV3LabialBlendStrength, 1e-6f)
+        assertTrue(session.betaV3IntricateLabiaFolds)
+        assertEquals(0.65f, session.betaV3LabiaFoldsStrength, 1e-6f)
+        assertTrue(session.betaVulvaElasticityEnabled)
+        assertEquals(0.40f, session.betaVulvaElasticity, 1e-6f)
+        assertEquals(0.40f, session.effectiveVulvaElasticity, 1e-6f)
+        assertTrue(session.betaBreastSizeBoostEnabled)
+        assertEquals(0.45f, session.betaBreastSizeBoost, 1e-6f)
+        assertEquals(0.45f, session.effectiveBreastSizeBoost, 1e-6f)
+
+        // All 6 Life toggles ON, all 7 Life+ realism toggles ON, Heart Rate HUD OFF
+        assertTrue(session.betaLifeEyeMicrosaccades && session.betaLifeDoubleBlinking && session.betaLifeHeadRepositioning)
+        assertTrue(session.betaLifeDeepBreathsSighs && session.betaLifeShoulderRelaxation && session.betaLifeFacialExpressions)
+        assertTrue(session.betaLife2EyelidTracking && session.betaLife2AsymmetricBlinking && session.betaLife2GazeAnticipation)
+        assertTrue(session.betaLife2SubtleSwallowing && session.betaLife2PosturalSettling)
+        assertTrue(session.betaLife2BreathFaceCoupling && session.betaLife2LivingWarmth)
+        assertFalse("Heart rate overlay must remain OFF by default", session.betaLife2ShowHeartRate)
+
+        // 2. Verify toggle OFF -> ON preserves custom slider values (including after disableAllBetaToggles)
+        session.betaV3AsymmetryStrength = 0.72f
+        session.betaVulvaElasticity = 0.55f
+        session.betaBreastSizeBoost = 0.32f
+
+        session.betaV3AnatomicalAsymmetry = false
+        session.betaVulvaElasticityEnabled = false
+        session.betaBreastSizeBoostEnabled = false
+        assertEquals(0f, session.effectiveVulvaElasticity, 1e-6f)
+        assertEquals(0f, session.effectiveBreastSizeBoost, 1e-6f)
+
+        session.betaV3AnatomicalAsymmetry = true
+        session.betaVulvaElasticityEnabled = true
+        session.betaBreastSizeBoostEnabled = true
+        assertEquals(0.72f, session.betaV3AsymmetryStrength, 1e-6f)
+        assertEquals(0.55f, session.effectiveVulvaElasticity, 1e-6f)
+        assertEquals(0.32f, session.effectiveBreastSizeBoost, 1e-6f)
+
+        session.disableAllBetaToggles()
+        assertFalse(session.betaV3AnatomicalAsymmetry)
+        assertFalse(session.betaVulvaElasticityEnabled)
+        assertFalse(session.betaBreastSizeBoostEnabled)
+        assertEquals(0.72f, session.betaV3AsymmetryStrength, 1e-6f)
+        assertEquals(0.55f, session.betaVulvaElasticity, 1e-6f)
+        assertEquals(0.32f, session.betaBreastSizeBoost, 1e-6f)
+
+        // 3. Verify Blossom's self-spread IK targets respect the default 40% elastic limit (0.60f max spread)
+        val defaultMaxSpread = vulvaElasticMaxSpread(VULVA_ELASTIC_DEFAULT_RESISTANCE)
+        assertEquals(0.60f, defaultMaxSpread, 1e-6f)
+        assertTrue(
+            "SELF_SPREAD_OUTER_TARGET (${BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET}) must be <= 0.60",
+            BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET <= defaultMaxSpread + 1e-6f
+        )
+        assertTrue(
+            "SELF_SPREAD_INNER_TARGET (${BlossomArmIkRig.SELF_SPREAD_INNER_TARGET}) must be <= 0.60",
+            BlossomArmIkRig.SELF_SPREAD_INNER_TARGET <= defaultMaxSpread + 1e-6f
+        )
+        for (side in floatArrayOf(-1f, 1f)) {
+            val sol = BlossomArmIkRig.solveSideArmIk(
+                side = side,
+                poseProgress = 1.0f,
+                liveOuterSpread = BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET
+            )
+            val l1 = (sol.elbow - sol.shoulder).len()
+            val l2 = (sol.wrist - sol.elbow).len()
+            assertEquals("Upper arm length must remain exact at v19.0 spread", BlossomArmIkRig.UPPER_ARM_LEN, l1, 1e-3f)
+            assertEquals("Forearm length must remain exact at v19.0 spread", BlossomArmIkRig.FOREARM_LEN, l2, 1e-3f)
+        }
+
+        // 4. Verify the full v19.0 default configuration produces zero mesh defects at rest & self-spread
+        val scene = VulvaAnatomySceneMesh()
+        val v19Rest = VulvaDeformationState(
+            betaV3OrganicContinuity = true,
+            betaV3ContinuityStrength = 0.50f,
+            betaV3SoftPigmentation = true,
+            betaV3PigmentStrength = 0.50f,
+            betaV3AnatomicalAsymmetry = true,
+            betaV3AsymmetryStrength = 0.85f,
+            betaV3RegionalSurfaceDetail = true,
+            betaV3SurfaceStrength = 0.36f,
+            betaV3LabialVestibuleBlend = true,
+            betaV3LabialBlendStrength = 0.75f,
+            betaV3IntricateLabiaFolds = true,
+            betaV3LabiaFoldsStrength = 0.65f,
+            betaBreastSizeBoost = 0.45f
+        )
+        val v19Spread = v19Rest.copy(
+            leftOuter = BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET,
+            rightOuter = BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET,
+            leftInner = BlossomArmIkRig.SELF_SPREAD_INNER_TARGET,
+            rightInner = BlossomArmIkRig.SELF_SPREAD_INNER_TARGET,
+            selfSpreadPose = 1.0f
+        )
+        for ((label, st) in listOf("v19Rest" to v19Rest, "v19Spread" to v19Spread)) {
+            scene.update(st, includeLithotomyBody = true)
+            assertValidMesh(scene.blossomVulvaPatchMesh)
+            assertValidMesh(scene.labiaHoodArchMesh)
+            assertValidMesh(scene.glansMesh)
+            assertValidMesh(scene.blossomBreastsMesh)
+            val diag = inspectLabiaHoodArchDiagnostics(scene, st, label)
+            assertEquals("$label: 0 inverted CCW triangles", 0, diag.windingInvertedCcwCount)
+            assertEquals("$label: 0 outer skirt fold-overs", 0, diag.outerSkirtNonMonotonicSteps)
+            assertEquals("$label: 0 inner wall fold-overs", 0, diag.innerWallNonMonotonicSteps)
+            assertEquals("$label: 0 midline crossings", 0, diag.midlineCrossingVertices)
+            assertEquals("$label: 0 glans clips", 0, diag.glansInterpenetratingVertices)
+            assertEquals("$label: 0 visible arch below patch", 0, diag.visibleArchBelowPatchVertices)
+        }
     }
 
     /**
