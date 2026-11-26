@@ -197,6 +197,8 @@ class VulvaGlTextureView(
     private var uBetaWarmTransitionZoneLoc = -1
     private var uBetaRefineInnerLabiaLoc = -1
     private var uBetaV2NaturalPelvicFinishLoc = -1
+    private var uShoulderRelaxLLoc = -1
+    private var uShoulderRelaxRLoc = -1
 
     private var surfaceWidth = 1
     private var surfaceHeight = 1
@@ -215,6 +217,12 @@ class VulvaGlTextureView(
     private var breathPhase = 0f
     private var smoothedStimulus = 0f
     private var lastBreathTimeNs = 0L
+    private val breathRng = kotlin.random.Random(System.nanoTime())
+    private var lastDeepBreathEnabled = false
+    private var breathCycleFreqMul = 1.0f
+    private var breathCycleDepthMul = 1.0f
+    private var breathCycleIsSigh = false
+    private var cyclesUntilNextSigh = 2
 
     private val breathTicker = Runnable {
         val session = synchronized(sessionLock) {
@@ -527,6 +535,8 @@ class VulvaGlTextureView(
         uBetaWarmTransitionZoneLoc = GLES20.glGetUniformLocation(program, "uBetaWarmTransitionZone")
         uBetaRefineInnerLabiaLoc = GLES20.glGetUniformLocation(program, "uBetaRefineInnerLabia")
         uBetaV2NaturalPelvicFinishLoc = GLES20.glGetUniformLocation(program, "uBetaV2NaturalPelvicFinish")
+        uShoulderRelaxLLoc = GLES20.glGetUniformLocation(program, "uShoulderRelaxL")
+        uShoulderRelaxRLoc = GLES20.glGetUniformLocation(program, "uShoulderRelaxR")
 
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glDepthFunc(GLES20.GL_LEQUAL)
@@ -603,12 +613,59 @@ class VulvaGlTextureView(
         val stimRate = if (targetStim > smoothedStimulus) 3.2f else 0.55f
         smoothedStimulus = (smoothedStimulus + (targetStim - smoothedStimulus) * (dtSec * stimRate).coerceIn(0f, 1f))
             .coerceIn(0f, 1f)
-        if (legsMode) {
-            breathPhase = (breathPhase + dtSec * breathFrequencyHz(smoothedStimulus)) % 1.0f
+        val deepBreathsEnabled = legsMode && currentDeform.betaLifeDeepBreathsSighs
+        if (deepBreathsEnabled != lastDeepBreathEnabled) {
+            lastDeepBreathEnabled = deepBreathsEnabled
+            if (deepBreathsEnabled) {
+                // Start with natural irregular variation and trigger an unhurried sigh within 1-2 breaths
+                breathCycleFreqMul = 0.92f + breathRng.nextFloat() * 0.16f
+                breathCycleDepthMul = 0.94f + breathRng.nextFloat() * 0.18f
+                breathCycleIsSigh = false
+                cyclesUntilNextSigh = 1 + breathRng.nextInt(2)
+            } else {
+                breathCycleFreqMul = 1.0f
+                breathCycleDepthMul = 1.0f
+                breathCycleIsSigh = false
+                cyclesUntilNextSigh = 2
+            }
         }
-        val breathDisp = if (legsMode) evaluateBreathingDisplacement(breathPhase, smoothedStimulus) else Pair(0f, 0f)
+        if (legsMode) {
+            if (!deepBreathsEnabled) {
+                breathPhase = (breathPhase + dtSec * breathFrequencyHz(smoothedStimulus)) % 1.0f
+            } else {
+                val nextPhase = breathPhase + dtSec * breathFrequencyHz(smoothedStimulus) * breathCycleFreqMul
+                if (nextPhase >= 1.0f) {
+                    breathPhase = nextPhase % 1.0f
+                    cyclesUntilNextSigh--
+                    if (cyclesUntilNextSigh <= 0) {
+                        breathCycleIsSigh = true
+                        breathCycleFreqMul = 0.64f + breathRng.nextFloat() * 0.12f
+                        breathCycleDepthMul = 1.56f + breathRng.nextFloat() * 0.34f
+                        cyclesUntilNextSigh = 4 + breathRng.nextInt(5)
+                    } else {
+                        breathCycleIsSigh = false
+                        breathCycleFreqMul = 0.89f + breathRng.nextFloat() * 0.22f
+                        breathCycleDepthMul = 0.86f + breathRng.nextFloat() * 0.28f
+                    }
+                } else {
+                    breathPhase = nextPhase
+                }
+            }
+        }
+        val breathDisp = when {
+            !legsMode -> Pair(0f, 0f)
+            !deepBreathsEnabled -> evaluateBreathingDisplacement(breathPhase, smoothedStimulus)
+            else -> evaluateBreathingDisplacementWithSigh(
+                phaseCycles = breathPhase,
+                stimulus = smoothedStimulus,
+                isSighCycle = breathCycleIsSigh,
+                depthMultiplier = breathCycleDepthMul
+            )
+        }
         GLES20.glUniform1f(uBreathChestLoc, breathDisp.first)
         GLES20.glUniform1f(uBreathAbdomenLoc, breathDisp.second)
+        GLES20.glUniform1f(uShoulderRelaxLLoc, if (legsMode) currentDeform.shoulderRelaxL else 0f)
+        GLES20.glUniform1f(uShoulderRelaxRLoc, if (legsMode) currentDeform.shoulderRelaxR else 0f)
 
         GLES20.glEnableVertexAttribArray(aPosLoc)
         GLES20.glEnableVertexAttribArray(aNormalLoc)
@@ -1146,6 +1203,51 @@ class VulvaGlTextureView(
         }
 
         /**
+         * Lifelike Beta irregular deep-breath / sigh waveform in [0..1].
+         * Normal cycles use the exact physiological curve; sigh cycles take a fuller, slightly
+         * longer inhale (0.00..0.44), hold a delicate beat at the crest (0.44..0.50), and release
+         * in a slow, eased exhale (0.50..0.93) before a soft resting pause.
+         */
+        internal fun evaluateSighBreathWave(cycle01: Float, isSighCycle: Boolean): Float {
+            if (!isSighCycle) return evaluateBreathWave(cycle01)
+            val t = ((cycle01 % 1f) + 1f) % 1f
+            return when {
+                t < 0.44f -> {
+                    val u = t / 0.44f
+                    (0.5f - 0.5f * cos(u * Math.PI.toFloat())).coerceIn(0f, 1f)
+                }
+                t < 0.50f -> {
+                    val u = (t - 0.44f) / 0.06f
+                    (1f - 0.035f * u * u).coerceIn(0f, 1f)
+                }
+                t < 0.93f -> {
+                    val u = (t - 0.50f) / 0.43f
+                    val ease = (0.5f + 0.5f * cos(u * Math.PI.toFloat())).coerceIn(0f, 1f)
+                    (0.965f * ease * (0.76f + 0.24f * ease)).coerceIn(0f, 1f)
+                }
+                else -> 0f
+            }
+        }
+
+        internal fun evaluateBreathingDisplacementWithSigh(
+            phaseCycles: Float,
+            stimulus: Float,
+            isSighCycle: Boolean,
+            depthMultiplier: Float
+        ): Pair<Float, Float> {
+            val s = stimulus.coerceIn(0f, 1f)
+            val depthScale = (1.0f + 0.24f * s) * depthMultiplier.coerceIn(0.75f, 2.0f)
+            val abdomenWave = evaluateSighBreathWave(phaseCycles, isSighCycle)
+            val chestLag = if (isSighCycle) 0.028f else 0.04f
+            val chestWave = evaluateSighBreathWave(phaseCycles - chestLag, isSighCycle)
+            // During a deep sigh, the upper ribcage participates a touch more visibly relative to calm rest
+            val chestBoost = if (isSighCycle) 1.12f else 1.0f
+            val chestRise = chestWave * 0.072f * depthScale * chestBoost
+            val abdomenRise = abdomenWave * 0.096f * depthScale
+            return Pair(chestRise, abdomenRise)
+        }
+
+        /**
          * Exact CPU mirror of the VERTEX_SHADER respiratory displacement used by unit tests
          * to verify thoracic ribcage expansion and zero differential breast Z-stretching.
          */
@@ -1192,6 +1294,46 @@ class VulvaGlTextureView(
             return floatArrayOf(latRib, liftY, liftZ)
         }
 
+        /**
+         * Exact CPU mirror of the VERTEX_SHADER Lifelike Beta subtle shoulder relaxation offset.
+         * Strictly localized to the trapezius ridge (y > 4.56, ax > 0.62) and deltoid/upper-arm
+         * shoulder cap (ax > 1.40, y in 3.45..5.18) so breasts, neck, head, forearms & vulva are
+         * 100% untouched (0.0f displacement).
+         */
+        internal fun evaluateVertexShoulderRelaxOffset(
+            x: Float,
+            y: Float,
+            z: Float,
+            shoulderRelaxL: Float,
+            shoulderRelaxR: Float
+        ): FloatArray {
+            if (kotlin.math.abs(shoulderRelaxL) <= 1e-4f && kotlin.math.abs(shoulderRelaxR) <= 1e-4f) {
+                return floatArrayOf(0f, 0f, 0f)
+            }
+            fun glSmoothStep(e0: Float, e1: Float, v: Float): Float {
+                val t = ((v - e0) / (e1 - e0)).coerceIn(0f, 1f)
+                return t * t * (3f - 2f * t)
+            }
+            val ax = kotlin.math.abs(x)
+            val sgnX = when {
+                x > 0f -> 1f
+                x < 0f -> -1f
+                else -> 0f
+            }
+            val zAboveMat = z - BlossomBodyBuilder.mattressSurfaceZ(y)
+            val trapMask = glSmoothStep(0.62f, 1.08f, ax) * (1f - glSmoothStep(1.86f, 2.30f, ax)) *
+                glSmoothStep(4.56f, 4.82f, y) * (1f - glSmoothStep(4.98f, 5.22f, y))
+            val deltoidMask = glSmoothStep(1.40f, 1.66f, ax) * (1f - glSmoothStep(2.16f, 2.52f, ax)) *
+                glSmoothStep(3.45f, 4.08f, y) * (1f - glSmoothStep(4.86f, 5.18f, y))
+            val zMask = glSmoothStep(0.14f, 0.56f, zAboveMat)
+            val shMask = (trapMask * 0.76f + deltoidMask).coerceIn(0f, 1f) * zMask
+            val sideRelax = if (x < 0f) shoulderRelaxL else shoulderRelaxR
+            val dx = sideRelax * 0.014f * shMask * sgnX
+            val dy = -sideRelax * 0.068f * shMask
+            val dz = -sideRelax * 0.036f * shMask
+            return floatArrayOf(dx, dy, dz)
+        }
+
         private const val VERTEX_SHADER = """
             attribute vec3 aPos;
             attribute vec3 aNormal;
@@ -1203,6 +1345,8 @@ class VulvaGlTextureView(
             uniform float uBreathChest;
             uniform float uBreathAbdomen;
             uniform float uAllowBreathing;
+            uniform float uShoulderRelaxL;
+            uniform float uShoulderRelaxR;
 
             varying vec3 vWorldPos;
             varying vec3 vRestPos;
@@ -1259,6 +1403,22 @@ class VulvaGlTextureView(
                         uBreathAbdomen * abdEnv * abdMask * 0.58 - uBreathChest * chestEnv * chestMask * 0.24,
                         0.0
                     ));
+
+                    // Lifelike Beta: Subtle asymmetric shoulder / trapezius / deltoid relaxation (0.0 when disabled)
+                    if (abs(uShoulderRelaxL) > 0.0001 || abs(uShoulderRelaxR) > 0.0001) {
+                        float trapMask = smoothstep(0.62, 1.08, ax) * (1.0 - smoothstep(1.86, 2.30, ax)) *
+                                         smoothstep(4.56, 4.82, aPos.y) * (1.0 - smoothstep(4.98, 5.22, aPos.y));
+                        float deltoidMask = smoothstep(1.40, 1.66, ax) * (1.0 - smoothstep(2.16, 2.52, ax)) *
+                                            smoothstep(3.45, 4.08, aPos.y) * (1.0 - smoothstep(4.86, 5.18, aPos.y));
+                        float shZMask = smoothstep(0.14, 0.56, zAboveMat);
+                        float shMask = clamp(trapMask * 0.76 + deltoidMask, 0.0, 1.0) * shZMask;
+                        float sideRelax = (aPos.x < 0.0) ? uShoulderRelaxL : uShoulderRelaxR;
+                        pos += vec3(
+                            sideRelax * 0.014 * shMask * sign(aPos.x),
+                            -sideRelax * 0.068 * shMask,
+                            -sideRelax * 0.036 * shMask
+                        );
+                    }
                 }
 
                 vec4 worldPos = uModel * vec4(pos, 1.0);

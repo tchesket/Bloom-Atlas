@@ -84,7 +84,24 @@ data class VulvaDeformationState(
     val betaV2SeamOnlyPolyOffset: Boolean = false,
     val betaV2NonInvertingLabiaFold: Boolean = false,
     val betaV2AlignedSulcus: Boolean = false,
-    val betaV2NaturalPelvicFinish: Boolean = false
+    val betaV2NaturalPelvicFinish: Boolean = false,
+    val betaV2BalancedUpperVulvaDepth: Boolean = false,
+    val betaV2BalancedUpperVulvaDepthWithCrest: Boolean = false,
+    val betaV2AdjustableVestibularConcavity: Boolean = false,
+    val betaV2VestibularConcavity: Float = 0.45f,
+    /**
+     * Lifelike Beta micro-behavior parameters (all 0f / false by default so baseline Version 13.0
+     * geometry, animation, and shading are preserved bit-for-bit when disabled).
+     */
+    val eyeGazeX: Float = 0f,
+    val eyeGazeY: Float = 0f,
+    val headRollOffset: Float = 0f,
+    val faceWarmth: Float = 0f,
+    val faceBrow: Float = 0f,
+    val faceLipSoft: Float = 0f,
+    val betaLifeDeepBreathsSighs: Boolean = false,
+    val shoulderRelaxL: Float = 0f,
+    val shoulderRelaxR: Float = 0f
 )
 
 class DynamicGlMesh(
@@ -205,6 +222,12 @@ class VulvaAnatomySceneMesh {
     private var lastAppliedHeadTurn = Float.NaN
     private var lastAppliedHeadPitch = Float.NaN
     private var lastAppliedEyeBlink = Float.NaN
+    private var lastAppliedEyeGazeX = Float.NaN
+    private var lastAppliedEyeGazeY = Float.NaN
+    private var lastAppliedHeadRollOffset = Float.NaN
+    private var lastAppliedFaceWarmth = Float.NaN
+    private var lastAppliedFaceBrow = Float.NaN
+    private var lastAppliedFaceLipSoft = Float.NaN
     private var lastAppliedBreastLeftX = Float.NaN
     private var lastAppliedBreastLeftY = Float.NaN
     private var lastAppliedBreastRightX = Float.NaN
@@ -229,6 +252,10 @@ class VulvaAnatomySceneMesh {
     private var lastVulvaBetaV2SeamOnlyPolyOffset = false
     private var lastVulvaBetaV2NonInvertingLabiaFold = false
     private var lastVulvaBetaV2AlignedSulcus = false
+    private var lastVulvaBetaV2BalancedUpperVulvaDepth = false
+    private var lastVulvaBetaV2BalancedUpperVulvaDepthWithCrest = false
+    private var lastVulvaBetaV2AdjustableVestibularConcavity = false
+    private var lastVulvaBetaV2VestibularConcavity = Float.NaN
     private var lastBetaShortPerineum = false
     private var lastBetaSoftButtockTable = false
     private var lastBetaSmoothVulvaSeam = false
@@ -515,7 +542,12 @@ class VulvaAnatomySceneMesh {
                 state.betaPerinealRaphe != lastVulvaRaphe ||
                 state.betaV2SeamOnlyPolyOffset != lastVulvaBetaV2SeamOnlyPolyOffset ||
                 state.betaV2NonInvertingLabiaFold != lastVulvaBetaV2NonInvertingLabiaFold ||
-                state.betaV2AlignedSulcus != lastVulvaBetaV2AlignedSulcus
+                state.betaV2AlignedSulcus != lastVulvaBetaV2AlignedSulcus ||
+                state.betaV2BalancedUpperVulvaDepth != lastVulvaBetaV2BalancedUpperVulvaDepth ||
+                state.betaV2BalancedUpperVulvaDepthWithCrest != lastVulvaBetaV2BalancedUpperVulvaDepthWithCrest ||
+                state.betaV2AdjustableVestibularConcavity != lastVulvaBetaV2AdjustableVestibularConcavity ||
+                (state.betaV2AdjustableVestibularConcavity &&
+                    state.betaV2VestibularConcavity != lastVulvaBetaV2VestibularConcavity)
             if (vulvaNeedsUpdate) {
                 updateBlossomVulvaPatch(state)
                 updateClitoralGlans(state, includeLithotomy = true)
@@ -588,7 +620,13 @@ class VulvaAnatomySceneMesh {
             }
             if (state.headTurn != lastAppliedHeadTurn ||
                 state.headPitch != lastAppliedHeadPitch ||
-                state.eyeBlink != lastAppliedEyeBlink
+                state.eyeBlink != lastAppliedEyeBlink ||
+                state.eyeGazeX != lastAppliedEyeGazeX ||
+                state.eyeGazeY != lastAppliedEyeGazeY ||
+                state.headRollOffset != lastAppliedHeadRollOffset ||
+                state.faceWarmth != lastAppliedFaceWarmth ||
+                state.faceBrow != lastAppliedFaceBrow ||
+                state.faceLipSoft != lastAppliedFaceLipSoft
             ) {
                 BlossomUpperBodyBuilder.applyHeadTurn(
                     bodyMesh = blossomBodyMesh,
@@ -598,11 +636,23 @@ class VulvaAnatomySceneMesh {
                     cache = blossomHeadRigCache,
                     headTurn = state.headTurn,
                     headPitch = state.headPitch,
-                    eyeBlink = state.eyeBlink
+                    eyeBlink = state.eyeBlink,
+                    eyeGazeX = state.eyeGazeX,
+                    eyeGazeY = state.eyeGazeY,
+                    headRollOffset = state.headRollOffset,
+                    faceWarmth = state.faceWarmth,
+                    faceBrow = state.faceBrow,
+                    faceLipSoft = state.faceLipSoft
                 )
                 lastAppliedHeadTurn = state.headTurn
                 lastAppliedHeadPitch = state.headPitch
                 lastAppliedEyeBlink = state.eyeBlink
+                lastAppliedEyeGazeX = state.eyeGazeX
+                lastAppliedEyeGazeY = state.eyeGazeY
+                lastAppliedHeadRollOffset = state.headRollOffset
+                lastAppliedFaceWarmth = state.faceWarmth
+                lastAppliedFaceBrow = state.faceBrow
+                lastAppliedFaceLipSoft = state.faceLipSoft
             }
         } else {
             val pelvisVulvaNeedsUpdate = lastVulvaLithotomy != false ||
@@ -617,7 +667,12 @@ class VulvaAnatomySceneMesh {
                 state.betaPerinealRaphe != lastVulvaRaphe ||
                 state.betaV2SeamOnlyPolyOffset != lastVulvaBetaV2SeamOnlyPolyOffset ||
                 state.betaV2NonInvertingLabiaFold != lastVulvaBetaV2NonInvertingLabiaFold ||
-                state.betaV2AlignedSulcus != lastVulvaBetaV2AlignedSulcus
+                state.betaV2AlignedSulcus != lastVulvaBetaV2AlignedSulcus ||
+                state.betaV2BalancedUpperVulvaDepth != lastVulvaBetaV2BalancedUpperVulvaDepth ||
+                state.betaV2BalancedUpperVulvaDepthWithCrest != lastVulvaBetaV2BalancedUpperVulvaDepthWithCrest ||
+                state.betaV2AdjustableVestibularConcavity != lastVulvaBetaV2AdjustableVestibularConcavity ||
+                (state.betaV2AdjustableVestibularConcavity &&
+                    state.betaV2VestibularConcavity != lastVulvaBetaV2VestibularConcavity)
             if (pelvisVulvaNeedsUpdate) {
                 updateContouredPelvis(state)
                 updateClitoralGlans(state, includeLithotomy = false)
@@ -647,6 +702,10 @@ class VulvaAnatomySceneMesh {
         lastVulvaBetaV2SeamOnlyPolyOffset = state.betaV2SeamOnlyPolyOffset
         lastVulvaBetaV2NonInvertingLabiaFold = state.betaV2NonInvertingLabiaFold
         lastVulvaBetaV2AlignedSulcus = state.betaV2AlignedSulcus
+        lastVulvaBetaV2BalancedUpperVulvaDepth = state.betaV2BalancedUpperVulvaDepth
+        lastVulvaBetaV2BalancedUpperVulvaDepthWithCrest = state.betaV2BalancedUpperVulvaDepthWithCrest
+        lastVulvaBetaV2AdjustableVestibularConcavity = state.betaV2AdjustableVestibularConcavity
+        lastVulvaBetaV2VestibularConcavity = state.betaV2VestibularConcavity
     }
 
     private fun updateBlossomBreasts(s: VulvaDeformationState) {
@@ -772,9 +831,44 @@ class VulvaAnatomySceneMesh {
             exp(-rDist * rDist * 1.45f) * fullnessCurve * (1f - s.rightOuter * 0.52f)
         dz += leftCushion + rightCushion + antCommissure + postCommissure + outerCreaseL + outerCreaseR
 
-        // Truly Concave Vestibular Basin: smooth inward bowl with zero harsh cliff edge
+        // Truly Concave Vestibular Basin: smooth inward bowl with zero harsh cliff edge.
+        // Vulva Beta v2 Toggle 5 (Step 1 only) & Toggle 6 (Step 1 + Step 2): smoothly tapers
+        // superior vestibular floor depth above the urethral meatus (y > +0.08f).
+        // Vulva Beta v2 Toggle 7 (betaV2AdjustableVestibularConcavity): reduces uniform vestibular
+        // basin concavity & softens the steep perimeter wall transition while adding delicate
+        // anatomical soft-tissue contouring — WITHOUT reducing vaginal canal (introitus) depth!
         val concaveBowl = (1f - vestEllipse.coerceIn(0f, 1f))
-        val cleftRecess = (0.098f + 0.032f * cavityOpen) * insideVestibule + 0.032f * concaveBowl
+        val baseCleftRecess = (0.098f + 0.032f * cavityOpen) * insideVestibule + 0.032f * concaveBowl
+        val basinRecess: Float
+        val softVestContour: Float
+        if (s.betaV2AdjustableVestibularConcavity) {
+            val c = s.betaV2VestibularConcavity.coerceIn(0f, 1f)
+            val reduce = 1f - c
+            if (reduce > 1e-6f) {
+                val softVestWall = (1f - smoothStep(0.16f, 1.36f, vestEllipse)).coerceIn(0f, 1f)
+                val rimWall = insideVestibule * (1f - 0.68f * reduce) + softVestWall * (0.68f * reduce)
+                val depthScale = 0.22f + 0.78f * c
+                basinRecess = ((0.098f + 0.032f * cavityOpen) * rimWall + 0.032f * concaveBowl * c) * depthScale
+                val periUrethralPillow = exp(
+                    -(((x - vestCenter * 0.35f) / 0.062f).let { it * it } +
+                        ((y - 0.04f) / 0.135f).let { it * it })
+                )
+                val lateralSoftPad = exp(
+                    -(((abs(x - vestCenter) - vestHalfW * 0.56f) / (vestHalfW * 0.36f).coerceAtLeast(0.025f)).let { it * it })
+                ) * smoothBell(y, -0.34f, 0.22f, 0.09f)
+                softVestContour = (0.010f * periUrethralPillow + 0.007f * lateralSoftPad) * reduce * insideVestibule
+            } else {
+                basinRecess = baseCleftRecess
+                softVestContour = 0f
+            }
+        } else {
+            basinRecess = baseCleftRecess
+            softVestContour = 0f
+        }
+        val useUpperFloorTaper = s.betaV2BalancedUpperVulvaDepth || s.betaV2BalancedUpperVulvaDepthWithCrest
+        val upperTaperMul = if (useUpperFloorTaper) 1f - 0.56f * smoothStep(0.08f, 0.34f, y) else 1f
+        val cleftRecess = basinRecess * upperTaperMul
+        val savedBasinDepthForIntroitus = ((baseCleftRecess * upperTaperMul) - cleftRecess).coerceAtLeast(0f)
         dz -= cleftRecess
 
         // Interlabial sulcus crease gently separating inner labia arch from outer labia majora
@@ -826,13 +920,16 @@ class VulvaAnatomySceneMesh {
         val iR2 = iDx * iDx + iDy * iDy
         val iAngle = atan2(iDy, iDx)
         val coronaWave = 1f + 0.12f * sin(iAngle * 5f + 0.5f) + 0.06f * cos(iAngle * 9f - 0.4f)
-        val introDepth = (0.135f + 0.24f * cavityOpen) * exp(-(iR2 / (coronaWave * coronaWave)) * 1.75f)
+        val introEnvelope = exp(-(iR2 / (coronaWave * coronaWave)) * 1.75f)
+        // Compensate vaginal canal depth by savedBasinDepthForIntroitus so reducing vestibular concavity
+        // never shallows the vaginal orifice itself!
+        val introDepth = ((0.135f + 0.24f * cavityOpen) + savedBasinDepthForIntroitus) * introEnvelope
         val coronaRing = exp(-((sqrt(iR2) - 1.04f) / 0.19f).let { it * it }) *
             (0.018f + 0.010f * sin(iAngle * 6f + 0.3f)) * insideVestibule * (0.40f + 0.60f * cavityOpen)
         val rugae = if (iR2 < 0.88f) {
             0.008f * sin(y * 62f + x * 12f) * (1f - iR2) * (0.35f + 0.65f * cavityOpen)
         } else 0f
-        dz += coronaRing - introDepth + rugae
+        dz += coronaRing - introDepth + rugae + softVestContour * (1f - introEnvelope)
 
         // Fossa Navicularis & Smooth Posterior Fourchette right below vaginal orifice
         val fossaDx = x / 0.065f
@@ -1252,7 +1349,10 @@ class VulvaAnatomySceneMesh {
                 0.0068f * sin(absS * 37.4f + asymPhase * 1.52f + phaseWarp * 1.1f) * wrinkleTension +
                 0.0032f * cos(absS * 61.9f - asymPhase * 0.85f) * wrinkleTension) * labiaMidArch * labiaMask
 
-            val hoodCrestHeight = (0.042f + 0.009f * s.hoodRetract) * hoodMask
+            // Vulva Beta v2 Toggle 6 (Step 1 + Step 2): conservative dorsal clitoral hood crest fullness
+            // (+0.014f * hoodMask) layered cleanly on top of Step 1 without touching labia petals or landings.
+            val hoodCrestBoost = if (s.betaV2BalancedUpperVulvaDepthWithCrest) 0.014f else 0f
+            val hoodCrestHeight = (0.042f + hoodCrestBoost + 0.009f * s.hoodRetract) * hoodMask
             val labiaCrestHeight = ((0.055f + 0.020f * innerOpen) * (0.28f + 0.72f * labiaMidArch) * upperLobeFullness * sideHeightAsym +
                 labiaLobes * 0.72f) * labiaMask * fourchetteTaper
             val totalHeight = (hoodCrestHeight + labiaCrestHeight).coerceAtLeast(0.001f)
