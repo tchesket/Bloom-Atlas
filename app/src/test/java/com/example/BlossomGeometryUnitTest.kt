@@ -3452,7 +3452,7 @@ class BlossomGeometryUnitTest {
         assertTrue(session.betaVulvaElasticityEnabled)
         assertEquals(0.50f, session.betaVulvaElasticity, 1e-6f)
         assertEquals(0.50f, session.effectiveVulvaElasticity, 1e-6f)
-        assertFalse("Beta Option #7 (Medial root color continuity) must be OFF by default", session.betaV3MedialRootContinuity)
+        assertTrue("Beta Option #7 (Vestibule-labial patch alignment) must be ON by default in v23.0", session.betaV3MedialRootContinuity)
         assertEquals(0.75f, session.betaV3MedialRootStrength, 1e-6f)
         assertTrue(session.betaBreastSizeBoostEnabled)
         assertEquals(0.45f, session.betaBreastSizeBoost, 1e-6f)
@@ -3584,113 +3584,390 @@ class BlossomGeometryUnitTest {
         )
         scene.update(baseState, includeLithotomyBody = true)
         val baseArch = scene.labiaHoodArchMesh.vertexData.copyOf()
-        val baseAlpha = scene.labiaHoodArchAlphaData.copyOf()
         val basePatch = scene.blossomVulvaPatchMesh.vertexData.copyOf()
         val baseGlans = scene.glansMesh.vertexData.copyOf()
 
-        val opt7State = baseState.copy(betaV3MedialRootContinuity = true, betaV3MedialRootStrength = 0.85f)
+        val opt7State = baseState.copy(betaV3MedialRootContinuity = true, betaV3MedialRootStrength = 0.75f)
         scene.update(opt7State, includeLithotomyBody = true)
         val opt7Arch = scene.labiaHoodArchMesh.vertexData.copyOf()
-        val opt7Alpha = scene.labiaHoodArchAlphaData.copyOf()
         val opt7Patch = scene.blossomVulvaPatchMesh.vertexData.copyOf()
-        val opt7Glans = scene.glansMesh.vertexData.copyOf()
 
-        // 1. Geometry (x, y, z) and normals (nx, ny, nz) must be 100% bit-identical across arch, patch & glans
-        for (i in 0 until scene.labiaHoodArchMesh.vertexCount) {
-            val b = i * stride
-            for (k in 0..5) {
-                assertEquals("Arch vertex $i field $k must be bit-identical", baseArch[b + k], opt7Arch[b + k], 0f)
-            }
-        }
+        // 1. Vulva patch geometry & normals (x, y, z, nx, ny, nz) must remain 100% bit-identical,
+        //    and outer labia majora / mons / perineum skin (outside the labial attachment footprint) must have 0 pink bleed!
+        var maxPatchMucLift = 0f
+        var maxOuterSkinMucDiff = 0f
         for (i in 0 until scene.blossomVulvaPatchMesh.vertexCount) {
             val b = i * stride
             for (k in 0..5) {
                 assertEquals("Patch vertex $i field $k must be bit-identical", basePatch[b + k], opt7Patch[b + k], 0f)
             }
-        }
-        assertTrue("Glans mesh must be 100% bit-identical", baseGlans.contentEquals(opt7Glans))
-
-        // 2. Medial labial root band (u in 0..0.28, labia rows) must show meaningful mucosal floor lift
-        //    (preventing pale low-mucosa drops) and c == 0 alpha lift; outer skirt (u >= 0.55) and free-rim pigment stay untouched.
-        var maxRootMucosaLift = 0f
-        var baseMinRootMucosa = 1f
-        var opt7MinRootMucosa = 1f
-        var rootAlphaLiftSum = 0f
-        var rootAlphaSamples = 0
-        var maxOuterSkirtDiff = 0f
-        var maxPigmentDiff = 0f
-        for (r in 0 until scene.archRows) {
-            val arcS = (r.toFloat() / (scene.archRows - 1)) * 2f - 1f
-            val absS = abs(arcS)
-            for (c in 0 until scene.archCols) {
-                val u = c.toFloat() / (scene.archCols - 1)
-                val vIdx = r * scene.archCols + c
-                val b = vIdx * stride
-                val pigDiff = abs(opt7Arch[b + 9] - baseArch[b + 9])
-                if (pigDiff > maxPigmentDiff) maxPigmentDiff = pigDiff
-                if (u >= 0.55f) {
-                    for (m in 6..9) {
-                        val d = abs(opt7Arch[b + m] - baseArch[b + m])
-                        if (d > maxOuterSkirtDiff) maxOuterSkirtDiff = d
-                    }
-                }
-                if (u <= 0.28f && absS in 0.22f..0.78f) {
-                    val bMuc = baseArch[b + 6]
-                    val oMuc = opt7Arch[b + 6]
-                    val lift = oMuc - bMuc
-                    if (lift > maxRootMucosaLift) maxRootMucosaLift = lift
-                    if (bMuc < baseMinRootMucosa) baseMinRootMucosa = bMuc
-                    if (oMuc < opt7MinRootMucosa) opt7MinRootMucosa = oMuc
-                }
-                if (c == 0 && absS in 0.28f..0.72f) {
-                    rootAlphaLiftSum += (opt7Alpha[vIdx] - baseAlpha[vIdx])
-                    rootAlphaSamples++
-                }
+            val px = opt7Patch[b]
+            val py = opt7Patch[b + 1]
+            val mucDiff = opt7Patch[b + 6] - basePatch[b + 6]
+            if (mucDiff > maxPatchMucLift) maxPatchMucLift = mucDiff
+            if (abs(px) >= 0.32f || py >= 0.34f || py <= -0.52f) {
+                val absDiff = abs(mucDiff)
+                if (absDiff > maxOuterSkinMucDiff) maxOuterSkinMucDiff = absDiff
             }
         }
-        assertEquals("Option 7 must not alter arch free-edge pigment", 0f, maxPigmentDiff, 0f)
-        assertEquals("Option 7 must leave outer skirt material (u >= 0.55) bitwise untouched", 0f, maxOuterSkirtDiff, 0f)
         assertTrue(
-            "Option 7 must raise minimum medial-root mucosa floor (baseMin=$baseMinRootMucosa -> opt7Min=$opt7MinRootMucosa, maxLift=$maxRootMucosaLift)",
-            opt7MinRootMucosa > baseMinRootMucosa + 0.05f && maxRootMucosaLift > 0.08f
+            "Option 7 must genuinely lift underlying vulva-patch mucosa along the labial root (got maxPatchMucLift=$maxPatchMucLift)",
+            maxPatchMucLift > 0.35f
         )
-        assertTrue("Expected medial labial root alpha lift (> 0.25 avg), got ${rootAlphaLiftSum / rootAlphaSamples}", rootAlphaLiftSum / rootAlphaSamples > 0.25f)
+        assertEquals(
+            "Option 7 must not bleed mucosa onto outer labia majora, mons, or perineum skin",
+            0f,
+            maxOuterSkinMucDiff,
+            1e-5f
+        )
 
-        // 3. Zero geometry defects & exact bit-identical reversion when turned OFF
-        val diag = inspectLabiaHoodArchDiagnostics(scene, opt7State, "Option7")
-        assertEquals(0, diag.windingInvertedCcwCount)
-        assertEquals(0, diag.outerSkirtNonMonotonicSteps)
-        assertEquals(0, diag.innerWallNonMonotonicSteps)
-        assertEquals(0, diag.midlineCrossingVertices)
-        assertEquals(0, diag.glansInterpenetratingVertices)
-        assertEquals(0, diag.visibleArchBelowPatchVertices)
+        // 2. Verify exposed pale rows right at & medial to the visible labial root drop to 0 in BOTH Rest(0) and Self-Spread(0.50),
+        //    and also verify Option 7 works cleanly even when Option 5 (betaV3LabialVestibuleBlend) is OFF!
+        val pCols = BlossomSdfBodyBuilder.VULVA_PATCH_COLS
+        val pRows = BlossomSdfBodyBuilder.VULVA_PATCH_ROWS
+        for (testCase in listOf(
+            "Rest" to baseState.copy(leftOuter = 0f, rightOuter = 0f, leftInner = 0f, rightInner = 0f, betaV3MedialRootContinuity = true, betaV3MedialRootStrength = 0.75f),
+            "SelfSpread" to opt7State,
+            "Opt5Off" to opt7State.copy(betaV3LabialVestibuleBlend = false)
+        )) {
+            val st = testCase.second
+            scene.update(st, includeLithotomyBody = true)
+            val pData = scene.blossomVulvaPatchMesh.vertexData
+            val aData = scene.labiaHoodArchMesh.vertexData
+            val aAlpha = scene.labiaHoodArchAlphaData
+            fun sampleNearestPatch(tx: Float, ty: Float): FloatArray {
+                var bestIdx = 0
+                var bestD2 = Float.POSITIVE_INFINITY
+                for (i in 0 until pCols * pRows) {
+                    val b = i * stride
+                    val dx = pData[b] - tx
+                    val dy = pData[b + 1] - ty
+                    val d2 = dx * dx + dy * dy
+                    if (d2 < bestD2) {
+                        bestD2 = d2
+                        bestIdx = i
+                    }
+                }
+                val b = bestIdx * stride
+                return floatArrayOf(pData[b + 2], pData[b + 6])
+            }
 
+            var exposedPaleRows = 0
+            var minRootPatchMuc = 1f
+            var minRootArchMuc = 1f
+            for (r in 0 until scene.archRows) {
+                val arcS = (r.toFloat() / (scene.archRows - 1)) * 2f - 1f
+                if (abs(arcS) < 0.18f || abs(arcS) > 0.90f) continue
+                for (c in 0 until scene.archCols) {
+                    val vIdx = r * scene.archCols + c
+                    val b = vIdx * stride
+                    val px = aData[b]
+                    val py = aData[b + 1]
+                    val pAtRoot = sampleNearestPatch(px, py)
+                    if (aData[b + 2] >= pAtRoot[0] && aAlpha[vIdx] >= 0.50f) {
+                        val pxMed = px - kotlin.math.sign(px) * 0.010f
+                        val pMed = sampleNearestPatch(pxMed, py)
+                        if (pAtRoot[1] < 0.70f || pMed[1] < 0.70f) exposedPaleRows++
+                        if (pAtRoot[1] < minRootPatchMuc) minRootPatchMuc = pAtRoot[1]
+                        if (aData[b + 6] < minRootArchMuc) minRootArchMuc = aData[b + 6]
+                        break
+                    }
+                }
+            }
+            assertEquals("${testCase.first}: Option 7 must eliminate all exposed pale-skin medial root rows", 0, exposedPaleRows)
+            assertTrue("${testCase.first}: minRootPatchMuc ($minRootPatchMuc) must stay >= 0.70", minRootPatchMuc >= 0.70f)
+            assertTrue("${testCase.first}: minRootArchMuc ($minRootArchMuc) must stay >= 0.70", minRootArchMuc >= 0.70f)
+
+            val diag = inspectLabiaHoodArchDiagnostics(scene, st, "Option7_${testCase.first}")
+            assertEquals(0, diag.windingInvertedCcwCount)
+            assertEquals(0, diag.outerSkirtNonMonotonicSteps)
+            assertEquals(0, diag.innerWallNonMonotonicSteps)
+            assertEquals(0, diag.midlineCrossingVertices)
+            assertEquals(0, diag.glansInterpenetratingVertices)
+            assertEquals(0, diag.visibleArchBelowPatchVertices)
+        }
+
+        // 3. Exact bit-identical reversion when turned OFF
         scene.update(baseState, includeLithotomyBody = true)
         assertTrue("Turning Option 7 OFF must restore arch bit-identically", baseArch.contentEquals(scene.labiaHoodArchMesh.vertexData))
         assertTrue("Turning Option 7 OFF must restore patch bit-identically", basePatch.contentEquals(scene.blossomVulvaPatchMesh.vertexData))
+        assertTrue("Turning Option 7 OFF must restore glans bit-identically", baseGlans.contentEquals(scene.glansMesh.vertexData))
     }
 
     @Test
     fun peakExertionBackwardHeadPitchAndPostPeakRecoveryHoldInvariants() {
-        // 1. Verify negative headPitch (-1f lean-back) and downward (+1f) produce valid outward meshes with hair above mattress
+        // 1. Verify dramatic negative headPitch (-1f lean-back) with large erratic headTurn/roll produces valid outward meshes with hair above mattress
         val scene = VulvaAnatomySceneMesh()
-        val leanBackState = VulvaDeformationState(headPitch = -1.0f, headTurn = 0.18f, headRollOffset = -0.04f)
-        scene.update(leanBackState, includeLithotomyBody = true)
-        assertValidMesh(scene.blossomHeadMesh)
-        assertValidMesh(scene.blossomEyesMesh)
-        assertValidMesh(scene.blossomHairMesh)
-        assertValidMesh(scene.blossomBodyMesh)
-        assertOutwardWindingMatchesNormals("Head(leanBack)", scene.blossomHeadMesh)
         val stride = DynamicGlMesh.FLOATS_PER_VERTEX
-        val hairData = scene.blossomHairMesh.vertexData
-        for (i in 0 until scene.blossomHairMesh.vertexCount) {
-            val y = hairData[i * stride + 1]
-            val z = hairData[i * stride + 2]
-            val minMatZ = BlossomBodyBuilder.mattressSurfaceZ(y) + 0.025f
-            assertTrue("Hair vertex $i at y=$y must stay above mattress ($z >= $minMatZ) when leaning head back", z >= minMatZ)
+        for (turnSign in floatArrayOf(-1f, 1f)) {
+            val leanBackState = VulvaDeformationState(
+                headPitch = -1.0f,
+                headTurn = turnSign * 0.72f,
+                headRollOffset = -turnSign * 0.17f
+            )
+            scene.update(leanBackState, includeLithotomyBody = true)
+            assertValidMesh(scene.blossomHeadMesh)
+            assertValidMesh(scene.blossomEyesMesh)
+            assertValidMesh(scene.blossomHairMesh)
+            assertValidMesh(scene.blossomBodyMesh)
+            assertOutwardWindingMatchesNormals("Head(dramaticLeanBack_$turnSign)", scene.blossomHeadMesh)
+            val hairData = scene.blossomHairMesh.vertexData
+            for (i in 0 until scene.blossomHairMesh.vertexCount) {
+                val y = hairData[i * stride + 1]
+                val z = hairData[i * stride + 2]
+                val minMatZ = BlossomBodyBuilder.mattressSurfaceZ(y) + 0.025f
+                assertTrue("Hair vertex $i at y=$y must stay above mattress ($z >= $minMatZ) during dramatic lean-back", z >= minMatZ)
+            }
         }
 
-        // 2. Verify 2x post-peak heart rate recovery drops ~2x faster than normal and ignores active drive during forced window
+        // 2. Verify tight thigh-squeeze slam (-0.84f spread + -1.12f knee squeeze) pulls thighs & knees
+        //    flush together with valid outward meshes and ZERO midline interpenetration across body, toes, and nails
+        scene.update(VulvaDeformationState(leftLegSpread = 0f, rightLegSpread = 0f), includeLithotomyBody = true)
+        val restBody = scene.blossomBodyMesh.vertexData.copyOf()
+        val restToes = scene.blossomToesMesh.vertexData.copyOf()
+        val restNails = scene.blossomNailsMesh.vertexData.copyOf()
+        val restHead = scene.blossomHeadMesh.vertexData.copyOf()
+        val restHands = scene.blossomHandsMesh.vertexData.copyOf()
+        val restPalms = scene.blossomPalmsMesh.vertexData.copyOf()
+
+        scene.update(VulvaDeformationState(leftLegSpread = -0.30f, rightLegSpread = -0.30f), includeLithotomyBody = true)
+        val manualMinToeX = run {
+            val td = scene.blossomToesMesh.vertexData
+            var minPosX = Float.POSITIVE_INFINITY
+            for (i in 0 until scene.blossomToesMesh.vertexCount) {
+                val x = td[i * stride]
+                if (x > 0f && x < minPosX) minPosX = x
+            }
+            minPosX
+        }
+        scene.update(
+            VulvaDeformationState(
+                leftLegSpread = com.example.ui.components.PEAK_LEG_SLAM_SHUT_TARGET,
+                rightLegSpread = com.example.ui.components.PEAK_LEG_SLAM_SHUT_TARGET
+            ),
+            includeLithotomyBody = true
+        )
+        fun minRightInnerKneeX(bodyData: FloatArray, count: Int): Float {
+            var minPosX = Float.POSITIVE_INFINITY
+            for (i in 0 until count) {
+                val b = i * stride
+                val x = bodyData[b]
+                val y = bodyData[b + 1]
+                if (y in -2.5f..-1.2f && x > 0f && x < minPosX) minPosX = x
+            }
+            return minPosX
+        }
+        val rigidSlamKneeX = minRightInnerKneeX(scene.blossomBodyMesh.vertexData, scene.blossomBodyMesh.vertexCount)
+
+        val slamSqueezeState = VulvaDeformationState(
+            leftLegSpread = com.example.ui.components.PEAK_LEG_SLAM_SHUT_TARGET,
+            rightLegSpread = com.example.ui.components.PEAK_LEG_SLAM_SHUT_TARGET,
+            leftKneeShift = com.example.ui.components.PEAK_KNEE_SLAM_SQUEEZE,
+            rightKneeShift = com.example.ui.components.PEAK_KNEE_SLAM_SQUEEZE
+        )
+        for (st in listOf(
+            slamSqueezeState,
+            VulvaDeformationState(
+                leftLegSpread = BlossomSdfBodyBuilder.PEAK_MIN_LEG_SPREAD,
+                rightLegSpread = BlossomSdfBodyBuilder.PEAK_MIN_LEG_SPREAD,
+                leftKneeShift = -1.15f,
+                rightKneeShift = -1.15f
+            ),
+            VulvaDeformationState(
+                leftLegSpread = com.example.ui.components.PEAK_LEG_SLAM_SHUT_TARGET,
+                rightLegSpread = com.example.ui.components.PEAK_PRE_EVENT_WIDE_STANCE,
+                leftKneeShift = -1.05f,
+                rightKneeShift = 0.80f
+            )
+        )) {
+            scene.update(st, includeLithotomyBody = true)
+            assertValidMesh(scene.blossomBodyMesh)
+            assertValidMesh(scene.blossomToesMesh)
+            assertValidMesh(scene.blossomNailsMesh)
+            assertOutwardWindingMatchesNormals("Body(peakLegs_${st.leftLegSpread}_${st.leftKneeShift})", scene.blossomBodyMesh)
+            val td = scene.blossomToesMesh.vertexData
+            var minRightToeX = Float.POSITIVE_INFINITY
+            var maxLeftToeX = Float.NEGATIVE_INFINITY
+            for (i in 0 until scene.blossomToesMesh.vertexCount) {
+                val x = td[i * stride]
+                if (x >= 0f && x < minRightToeX) minRightToeX = x
+                if (x < 0f && x > maxLeftToeX) maxLeftToeX = x
+            }
+            assertTrue("Right toes must not cross midline (minRightToeX=$minRightToeX)", minRightToeX > 0.02f)
+            assertTrue("Left toes must not cross midline (maxLeftToeX=$maxLeftToeX)", maxLeftToeX < -0.02f)
+            if (st === slamSqueezeState) {
+                val squeezedKneeX = minRightInnerKneeX(scene.blossomBodyMesh.vertexData, scene.blossomBodyMesh.vertexCount)
+                assertTrue(
+                    "Slam-shut toes ($minRightToeX) must draw dramatically closer than manual -0.30f ($manualMinToeX)",
+                    minRightToeX < manualMinToeX - 0.45f
+                )
+                assertTrue(
+                    "Thigh-squeeze slam knee X ($squeezedKneeX) must press much closer than rigid spread alone ($rigidSlamKneeX) without crossing midline",
+                    squeezedKneeX > 0.02f && squeezedKneeX < 0.14f && squeezedKneeX < rigidSlamKneeX - 0.25f
+                )
+            }
+        }
+
+        // 2b. Verify BONUS #1: Planted-foot knee/upper-leg shifting moves knees substantially while keeping feet 100% planted
+        scene.update(
+            VulvaDeformationState(leftLegSpread = 0f, rightLegSpread = 0f, leftKneeShift = -0.90f, rightKneeShift = 0.85f),
+            includeLithotomyBody = true
+        )
+        assertValidMesh(scene.blossomBodyMesh)
+        assertOutwardWindingMatchesNormals("Body(plantedFootKneeShift)", scene.blossomBodyMesh)
+        var maxPlantedToeDelta = 0f
+        for (i in 0 until scene.blossomToesMesh.vertexCount * stride) {
+            val d = abs(scene.blossomToesMesh.vertexData[i] - restToes[i])
+            if (d > maxPlantedToeDelta) maxPlantedToeDelta = d
+        }
+        assertEquals("Planted-foot knee shifting must leave toes/feet 100% planted", 0f, maxPlantedToeDelta, 1e-6f)
+        var maxKneeDelta = 0f
+        for (i in 0 until scene.blossomBodyMesh.vertexCount) {
+            val b = i * stride
+            if (restBody[b + 1] in -2.4f..-1.8f) {
+                val dx = abs(scene.blossomBodyMesh.vertexData[b] - restBody[b])
+                if (dx > maxKneeDelta) maxKneeDelta = dx
+            }
+        }
+        assertTrue("Planted-foot knee shift must visibly displace knees/upper legs (maxKneeDelta=$maxKneeDelta)", maxKneeDelta > 0.35f)
+
+        // 2c. Verify BONUS #2 (Mouth Opening) & BONUS #3 (Subtle Toe Wiggle, Finger Curl, Arm Shift) + exact 0f reversion
+        scene.update(
+            VulvaDeformationState(
+                mouthOpen = 1.0f,
+                leftToeWiggle = 0.78f,
+                rightToeWiggle = -0.68f,
+                leftFingerCurl = 0.80f,
+                rightFingerCurl = 0.55f,
+                leftArmShift = 0.60f,
+                rightArmShift = -0.50f
+            ),
+            includeLithotomyBody = true
+        )
+        assertValidMesh(scene.blossomHeadMesh)
+        assertValidMesh(scene.blossomBodyMesh)
+        assertValidMesh(scene.blossomToesMesh)
+        assertValidMesh(scene.blossomNailsMesh)
+        assertValidMesh(scene.blossomHandsMesh)
+        assertValidMesh(scene.blossomPalmsMesh)
+        assertOutwardWindingMatchesNormals("Head(mouthOpen)", scene.blossomHeadMesh)
+        assertOutwardWindingMatchesNormals("Hands(microCurlShift)", scene.blossomHandsMesh)
+
+        var maxHeadMouthDy = 0f
+        var minOpenMouthAo = 1f
+        for (i in 0 until scene.blossomHeadMesh.vertexCount) {
+            val b = i * stride
+            val dy = abs(scene.blossomHeadMesh.vertexData[b + 1] - restHead[b + 1])
+            if (dy > maxHeadMouthDy) maxHeadMouthDy = dy
+            if (dy > 0.01f && scene.blossomHeadMesh.vertexData[b + 8] < minOpenMouthAo) {
+                minOpenMouthAo = scene.blossomHeadMesh.vertexData[b + 8]
+            }
+        }
+        assertTrue("Mouth opening must visibly part lips/jaw (maxHeadMouthDy=$maxHeadMouthDy)", maxHeadMouthDy > 0.045f)
+        assertTrue("Mouth opening must shade inner oral cavity darker (minOpenMouthAo=$minOpenMouthAo)", minOpenMouthAo < 0.25f)
+
+        var maxToeWiggleDisp = 0f
+        for (i in 0 until scene.blossomToesMesh.vertexCount) {
+            val b = i * stride
+            val d = kotlin.math.hypot(
+                scene.blossomToesMesh.vertexData[b + 1] - restToes[b + 1],
+                scene.blossomToesMesh.vertexData[b + 2] - restToes[b + 2]
+            )
+            if (d > maxToeWiggleDisp) maxToeWiggleDisp = d
+            assertTrue(
+                "Wiggling toe $i must stay above mattress",
+                scene.blossomToesMesh.vertexData[b + 2] >= BlossomBodyBuilder.mattressSurfaceZ(scene.blossomToesMesh.vertexData[b + 1]) + 0.01f
+            )
+        }
+        assertTrue("Toe wiggle must visibly animate toes (maxToeWiggleDisp=$maxToeWiggleDisp)", maxToeWiggleDisp > 0.025f)
+
+        var maxHandMicroDisp = 0f
+        for (i in 0 until scene.blossomHandsMesh.vertexCount) {
+            val b = i * stride
+            val dx = scene.blossomHandsMesh.vertexData[b] - restHands[b]
+            val dy = scene.blossomHandsMesh.vertexData[b + 1] - restHands[b + 1]
+            val dz = scene.blossomHandsMesh.vertexData[b + 2] - restHands[b + 2]
+            val d = kotlin.math.sqrt(dx * dx + dy * dy + dz * dz)
+            if (d > maxHandMicroDisp) maxHandMicroDisp = d
+        }
+        assertTrue("Subtle arm shift + finger curl must visibly animate hands (maxHandMicroDisp=$maxHandMicroDisp)", maxHandMicroDisp > 0.05f)
+
+        for (side in floatArrayOf(-1f, 1f)) {
+            val sol = BlossomArmIkRig.solveSideArmIk(
+                side = side,
+                poseProgress = 0f,
+                liveOuterSpread = 0f,
+                armMicroShift = if (side < 0f) 0.60f else -0.50f,
+                fingerMicroCurl = 0.75f
+            )
+            assertEquals("Upper arm length must remain exact during subtle arm shift", BlossomArmIkRig.UPPER_ARM_LEN, (sol.elbow - sol.shoulder).len(), 1e-3f)
+            assertEquals("Forearm length must remain exact during subtle arm shift", BlossomArmIkRig.FOREARM_LEN, (sol.wrist - sol.elbow).len(), 1e-3f)
+        }
+
+        // Exact bit-identical reversion when all 9 expressive channels return to 0f
+        scene.update(VulvaDeformationState(), includeLithotomyBody = true)
+        assertTrue("Body must restore bit-identically when expressive peak channels return to 0", restBody.contentEquals(scene.blossomBodyMesh.vertexData))
+        assertTrue("Toes must restore bit-identically when toe wiggle returns to 0", restToes.contentEquals(scene.blossomToesMesh.vertexData))
+        assertTrue("All 20 nails must restore bit-identically when toe/finger channels return to 0", restNails.contentEquals(scene.blossomNailsMesh.vertexData))
+        assertTrue("Head must restore bit-identically when mouthOpen returns to 0", restHead.contentEquals(scene.blossomHeadMesh.vertexData))
+        assertTrue("Hands must restore bit-identically when arm/finger channels return to 0", restHands.contentEquals(scene.blossomHandsMesh.vertexData))
+        assertTrue("Palms must restore bit-identically when arm/finger channels return to 0", restPalms.contentEquals(scene.blossomPalmsMesh.vertexData))
+
+        // 3. Verify 136 BPM trigger, 8s pre-event autonomous 136->152 BPM climb, 16s peak, 4s eye closure,
+        //    and desynchronized higher-frequency restless pre-event legs trending closer -> wide stance
+        assertEquals(136f, com.example.ui.components.PEAK_EPISODE_TRIGGER_BPM, 1e-4f)
+        assertEquals(8_000L, com.example.ui.components.PEAK_PRE_EVENT_DURATION_MS)
+        assertEquals(152f, com.example.ui.components.PEAK_PRE_EVENT_TARGET_BPM, 1e-4f)
+        assertEquals(16_000L, com.example.ui.components.PEAK_EPISODE_DURATION_MS)
+        assertEquals(4_000L, com.example.ui.components.PEAK_EYELID_CLOSE_DURATION_MS)
+        assertEquals(125f, com.example.ui.components.PEAK_RECOVERY_FLOOR_BPM, 1e-4f)
+        assertEquals(136f, com.example.ui.components.computePreEventHeartRateBpm(136f, 0L), 1e-3f)
+        assertEquals(144f, com.example.ui.components.computePreEventHeartRateBpm(136f, 4_000L), 1e-2f)
+        assertEquals(152f, com.example.ui.components.computePreEventHeartRateBpm(136f, 8_000L), 1e-3f)
+
+        var minPreLeft = 1f
+        var minPreRight = 1f
+        var earlySum = 0f
+        var earlyCount = 0
+        var lateSum = 0f
+        var lateCount = 0
+        var maxLRDiff = 0f
+        var leftReversals = 0
+        var prevL = 1.0f
+        var prevDir = 0f
+        for (step in 0..240) {
+            val u = step / 240f
+            val (l, r) = com.example.ui.components.computePreEventLegTargets(1.0f, 1.0f, u, dirSign = 1f)
+            if (l < minPreLeft) minPreLeft = l
+            if (r < minPreRight) minPreRight = r
+            val diff = abs(l - r)
+            if (diff > maxLRDiff) maxLRDiff = diff
+            if (u in 0.14f..0.34f) { earlySum += (l + r) * 0.5f; earlyCount++ }
+            if (u in 0.66f..0.92f) { lateSum += (l + r) * 0.5f; lateCount++ }
+            if (step > 0 && u in 0.12f..0.84f) {
+                val dl = l - prevL
+                if (abs(dl) > 0.002f) {
+                    val curDir = if (dl > 0f) 1f else -1f
+                    if (prevDir != 0f && curDir != prevDir) leftReversals++
+                    prevDir = curDir
+                }
+            }
+            prevL = l
+        }
+        val earlyAvg = earlySum / earlyCount
+        val lateAvg = lateSum / lateCount
+        assertTrue("Pre-event legs from max wide must draw tighter than manual -0.30f (minL=$minPreLeft, minR=$minPreRight)", minPreLeft < -0.45f && minPreRight < -0.45f)
+        assertTrue("Pre-event legs must trend from closer together ($earlyAvg) to further apart ($lateAvg)", lateAvg > earlyAvg + 0.45f)
+        assertTrue("Pre-event L/R legs must move desynchronized (maxLRDiff=$maxLRDiff)", maxLRDiff > 0.25f)
+        assertTrue("Pre-event legs must include higher-frequency restless movements (leftReversals=$leftReversals)", leftReversals >= 8)
+        val (endL, endR) = com.example.ui.components.computePreEventLegTargets(1.0f, 1.0f, 1.0f, dirSign = 1f)
+        assertEquals(com.example.ui.components.PEAK_PRE_EVENT_WIDE_STANCE, endL, 1e-3f)
+        assertEquals(com.example.ui.components.PEAK_PRE_EVENT_WIDE_STANCE, endR, 1e-3f)
+        val (endKneeL, endKneeR) = com.example.ui.components.computePreEventKneeShiftTargets(1.0f, dirSign = 1f)
+        assertEquals(0f, endKneeL, 1e-4f)
+        assertEquals(0f, endKneeR, 1e-4f)
+
+        // 4. Verify 2x post-peak heart rate recovery drops ~2x faster than normal AND stops cleanly at 125 BPM floor
         var bpmNormal = 141f
         var bpmFast = 141f
         for (step in 0 until 60) { // 6.0 seconds at 0.1s/step
@@ -3706,7 +3983,7 @@ class BlossomGeometryUnitTest {
             bpmFast = VulvaGlTextureView.stepHeartRateBpm(
                 currentBpm = bpmFast,
                 dtSec = 0.1f,
-                targetSensitivityGain = 1.0f, // Even if touched during 6s forced cooldown, must still drop at 2x
+                targetSensitivityGain = 1.0f,
                 activeDrive = 1.0f,
                 secondsSinceLastStim = 0.1f,
                 recoveryRateMultiplier = 2.0f,
@@ -3720,7 +3997,24 @@ class BlossomGeometryUnitTest {
             fastDrop > normalDrop * 1.55f && fastDrop < normalDrop * 2.15f
         )
 
-        // 3. Verify peak breathing & forced powerful recovery sighs stay anatomically bounded
+        var bpmPostPeak = 152f
+        for (step in 0 until 120) { // 12 seconds of forced recovery with 125 BPM floor
+            bpmPostPeak = VulvaGlTextureView.stepHeartRateBpm(
+                currentBpm = bpmPostPeak,
+                dtSec = 0.1f,
+                targetSensitivityGain = 0f,
+                activeDrive = 0f,
+                secondsSinceLastStim = 5.0f,
+                recoveryRateMultiplier = 2.0f,
+                forceRecovery = true,
+                recoveryFloorBpm = com.example.ui.components.PEAK_RECOVERY_FLOOR_BPM,
+                maxBpm = VulvaGlTextureView.PEAK_MAX_HEART_RATE_BPM
+            )
+            assertTrue("Post-peak cooldown must never undershoot 125 BPM (got $bpmPostPeak)", bpmPostPeak >= 125f - 1e-4f)
+        }
+        assertEquals("Post-peak cooldown must settle cleanly at 125 BPM", 125f, bpmPostPeak, 0.05f)
+
+        // 5. Verify peak breathing & forced powerful recovery sighs stay anatomically bounded
         var maxPeakChest = 0f
         var maxPeakAbd = 0f
         var maxSighChest = 0f
@@ -3728,7 +4022,7 @@ class BlossomGeometryUnitTest {
         for (k in 0 until 64) {
             val p = k / 64f
             val peakDisp = VulvaGlTextureView.evaluateHeartRateBreathingDisplacement(
-                phaseCycles = p, bpm = 141f, stimulus = 1f, isSighCycle = false, depthMultiplier = 1.75f, peakMode = true
+                phaseCycles = p, bpm = 152f, stimulus = 1f, isSighCycle = false, depthMultiplier = 1.95f, peakMode = true
             )
             val sighDisp = VulvaGlTextureView.evaluateHeartRateBreathingDisplacement(
                 phaseCycles = p, bpm = 132f, stimulus = 0f, isSighCycle = true, depthMultiplier = 2.0f, forcePowerfulSigh = true
@@ -3738,7 +4032,7 @@ class BlossomGeometryUnitTest {
             if (sighDisp.first > maxSighChest) maxSighChest = sighDisp.first
             if (sighDisp.second > maxSighAbd) maxSighAbd = sighDisp.second
         }
-        assertTrue("Peak heave must be visibly heavy and bounded ($maxPeakChest, $maxPeakAbd)", maxPeakChest in 0.18f..0.2201f && maxPeakAbd in 0.20f..0.2401f)
+        assertTrue("Peak heave must be visibly heavy and bounded ($maxPeakChest, $maxPeakAbd)", maxPeakChest in 0.20f..0.2421f && maxPeakAbd in 0.22f..0.2621f)
         assertTrue("Post-peak powerful sigh must be deep and bounded ($maxSighChest, $maxSighAbd)", maxSighChest in 0.16f..0.2201f && maxSighAbd in 0.18f..0.2401f)
     }
 

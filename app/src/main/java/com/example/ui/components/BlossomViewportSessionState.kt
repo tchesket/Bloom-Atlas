@@ -99,15 +99,30 @@ class BlossomViewportSessionState {
     internal val lastHeartStimMsState = mutableLongStateOf(0L)
     var lastHeartStimMs: Long by lastHeartStimMsState
 
-    // --- Peak 140 BPM exertion climax episode & post-peak recovery continuity ---
+    // --- Peak 136 BPM -> 8s Pre-Event (136->152 BPM) -> 16s Peak -> 125 BPM Cooldown continuity ---
+    internal val peakPreEventActiveState = mutableStateOf(false)
+    var peakPreEventActive: Boolean by peakPreEventActiveState
+
+    internal val peakPreEventStartMsState = mutableLongStateOf(0L)
+    var peakPreEventStartMs: Long by peakPreEventStartMsState
+
+    internal val peakPreEventStartBpmState = mutableFloatStateOf(PEAK_EPISODE_TRIGGER_BPM)
+    var peakPreEventStartBpm: Float by peakPreEventStartBpmState
+
     internal val peakEpisodeActiveState = mutableStateOf(false)
     var peakEpisodeActive: Boolean by peakEpisodeActiveState
 
     internal val peakEpisodeEndMsState = mutableLongStateOf(0L)
     var peakEpisodeEndMs: Long by peakEpisodeEndMsState
 
+    internal val peakPostCooldownActiveState = mutableStateOf(false)
+    var peakPostCooldownActive: Boolean by peakPostCooldownActiveState
+
     internal val peakRecoveryFastEndMsState = mutableLongStateOf(0L)
     var peakRecoveryFastEndMs: Long by peakRecoveryFastEndMsState
+
+    internal val peakRecoveryHoldUntilMsState = mutableLongStateOf(0L)
+    var peakRecoveryHoldUntilMs: Long by peakRecoveryHoldUntilMsState
 
     internal val peakRefractoryUntilMsState = mutableLongStateOf(0L)
     var peakRefractoryUntilMs: Long by peakRefractoryUntilMsState
@@ -123,6 +138,15 @@ class BlossomViewportSessionState {
     var peakHeadRoll: Float = 0f
     var peakLegShakeL: Float = 0f
     var peakLegShakeR: Float = 0f
+    var peakKneeShiftL: Float = 0f
+    var peakKneeShiftR: Float = 0f
+    var peakToeWiggleL: Float = 0f
+    var peakToeWiggleR: Float = 0f
+    var peakArmShiftL: Float = 0f
+    var peakArmShiftR: Float = 0f
+    var peakFingerCurlL: Float = 0f
+    var peakFingerCurlR: Float = 0f
+    var peakMouthOpen: Float = 0f
 
     // --- Appearance, lighting & viewport mode ---
     internal val hairStyleIndexState = mutableIntStateOf(2)
@@ -202,8 +226,8 @@ class BlossomViewportSessionState {
     internal val betaV3LabiaFoldsStrengthState = mutableFloatStateOf(0.65f)
     var betaV3LabiaFoldsStrength: Float by betaV3LabiaFoldsStrengthState
 
-    // Beta Option #7 (v21.0): Medial Labial Root Color Continuity — OFF by default for isolated A/B evaluation
-    internal val betaV3MedialRootContinuityState = mutableStateOf(false)
+    // Beta Option #7 (v22.0->v23.0): Vestibule-Labial Patch Alignment — ON by default (75% strength)
+    internal val betaV3MedialRootContinuityState = mutableStateOf(true)
     var betaV3MedialRootContinuity: Boolean by betaV3MedialRootContinuityState
     internal val betaV3MedialRootStrengthState = mutableFloatStateOf(0.75f)
     var betaV3MedialRootStrength: Float by betaV3MedialRootStrengthState

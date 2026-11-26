@@ -646,7 +646,7 @@ class VulvaGlTextureView(
         val stimRate = if (targetStim > smoothedStimulus) 3.2f else 0.55f
         smoothedStimulus = (smoothedStimulus + (targetStim - smoothedStimulus) * (dtSec * stimRate).coerceIn(0f, 1f))
             .coerceIn(0f, 1f)
-        val liveBpm = heartRateBpm.coerceIn(RESTING_HEART_RATE_BPM, MAX_HEART_RATE_BPM)
+        val liveBpm = heartRateBpm.coerceIn(RESTING_HEART_RATE_BPM, PEAK_MAX_HEART_RATE_BPM)
         val liveHrNorm = heartRateExertionNorm(liveBpm)
         val deepBreathsEnabled = legsMode && currentDeform.betaLifeDeepBreathsSighs
         if (deepBreathsEnabled != lastDeepBreathEnabled) {
@@ -672,8 +672,8 @@ class VulvaGlTextureView(
                 pendingPostPeakSighs = 0
                 inPostPeakSigh = false
                 breathCycleIsSigh = false
-                peakCycleFreqHz = 0.64f + breathRng.nextFloat() * 0.32f
-                peakCycleDepthMul = 1.28f + breathRng.nextFloat() * 0.46f
+                peakCycleFreqHz = 0.72f + breathRng.nextFloat() * 0.44f
+                peakCycleDepthMul = 1.42f + breathRng.nextFloat() * 0.62f
             }
         }
         val sighTokenNow = postPeakSighToken
@@ -691,12 +691,12 @@ class VulvaGlTextureView(
         if (legsMode) {
             when {
                 peakActiveNow -> {
-                    // Peak ~10s exertion episode: very fast, very heavy, irregular breath speed & fullness
+                    // Peak 12s exertion episode: dramatic, fast, heavily irregular breath speed & fullness
                     val nextPhase = breathPhase + dtSec * peakCycleFreqHz
                     if (nextPhase >= 1.0f) {
                         breathPhase = nextPhase % 1.0f
-                        peakCycleFreqHz = 0.60f + breathRng.nextFloat() * 0.38f
-                        peakCycleDepthMul = 1.22f + breathRng.nextFloat() * 0.56f
+                        peakCycleFreqHz = 0.62f + breathRng.nextFloat() * 0.56f
+                        peakCycleDepthMul = 1.38f + breathRng.nextFloat() * 0.68f
                     } else {
                         breathPhase = nextPhase
                     }
@@ -1392,6 +1392,7 @@ class VulvaGlTextureView(
 
         const val RESTING_HEART_RATE_BPM = 66f
         const val MAX_HEART_RATE_BPM = 142f
+        const val PEAK_MAX_HEART_RATE_BPM = 152f
 
         /**
          * Version 19.0 sympathetic cardiac ramp divisor: slows Blossom's heart-rate rise by 3×
@@ -1406,8 +1407,8 @@ class VulvaGlTextureView(
          * Physiological heart-rate dynamics: rises smoothly (at the v19.0 3× slower build rate)
          * toward a sensitivity-weighted ceiling during active touch/manipulation (highest for
          * clitoral glans/hood, moderate for inner labia and breasts, gentle for outer regions)
-         * and recovers exponentially back to resting BPM after a brief sympathetic inertia beat
-         * once stimulation stops.
+         * and recovers exponentially back to `recoveryFloorBpm` (resting 66 BPM by default, or
+         * 125 BPM during post-peak cooldown) after a brief sympathetic inertia beat once stimulation stops.
          */
         internal fun stepHeartRateBpm(
             currentBpm: Float,
@@ -1416,10 +1417,13 @@ class VulvaGlTextureView(
             activeDrive: Float,
             secondsSinceLastStim: Float,
             recoveryRateMultiplier: Float = 1f,
-            forceRecovery: Boolean = false
+            forceRecovery: Boolean = false,
+            recoveryFloorBpm: Float = RESTING_HEART_RATE_BPM,
+            maxBpm: Float = MAX_HEART_RATE_BPM
         ): Float {
+            val safeMax = kotlin.math.max(maxBpm, MAX_HEART_RATE_BPM)
             val dt = dtSec.coerceIn(0f, 0.25f)
-            if (dt <= 0f) return currentBpm.coerceIn(RESTING_HEART_RATE_BPM, MAX_HEART_RATE_BPM)
+            if (dt <= 0f) return currentBpm.coerceIn(RESTING_HEART_RATE_BPM, safeMax)
             val sens = targetSensitivityGain.coerceIn(0f, 1f)
             val drive = activeDrive.coerceIn(0f, 1f)
             if (!forceRecovery && drive > 0.01f && sens > 0.01f) {
@@ -1428,20 +1432,22 @@ class VulvaGlTextureView(
                 if (currentBpm < ceilingBpm) {
                     val riseRate = ((0.055f + 0.215f * sens) * (0.35f + 0.65f * drive)) / HEART_RATE_RISE_RATE_DIVISOR
                     val next = currentBpm + (ceilingBpm - currentBpm) * (1f - kotlin.math.exp(-dt * riseRate))
-                    return next.coerceIn(RESTING_HEART_RATE_BPM, MAX_HEART_RATE_BPM)
+                    return next.coerceIn(RESTING_HEART_RATE_BPM, safeMax)
                 }
                 // Gentle settle if currently above this lower-sensitivity zone's ceiling
                 val driftRate = 0.025f
                 return (currentBpm + (ceilingBpm - currentBpm) * (1f - kotlin.math.exp(-dt * driftRate)))
-                    .coerceIn(RESTING_HEART_RATE_BPM, MAX_HEART_RATE_BPM)
+                    .coerceIn(RESTING_HEART_RATE_BPM, safeMax)
             }
             // Brief ~1.2s sympathetic inertia after touch stops, then smooth parasympathetic recovery
-            // (post-peak 6s recovery passes recoveryRateMultiplier = 2.0f, forceRecovery = true for 2x cooldown)
+            // (post-peak cooldown passes recoveryRateMultiplier = 2.0f, forceRecovery = true, recoveryFloorBpm = 125f)
+            val floorBpm = recoveryFloorBpm.coerceIn(RESTING_HEART_RATE_BPM, safeMax)
+            if (currentBpm <= floorBpm) return currentBpm.coerceIn(RESTING_HEART_RATE_BPM, safeMax)
             val recoveryRamp = if (forceRecovery) 1f else ((secondsSinceLastStim - 1.1f) / 1.4f).coerceIn(0.10f, 1f)
             val tauSec = 17.0f / recoveryRateMultiplier.coerceAtLeast(0.1f)
             val decayAlpha = 1f - kotlin.math.exp(-dt * recoveryRamp / tauSec)
             val next = currentBpm + (RESTING_HEART_RATE_BPM - currentBpm) * decayAlpha
-            return if (next - RESTING_HEART_RATE_BPM < 0.05f) RESTING_HEART_RATE_BPM else next
+            return if (next - floorBpm < 0.05f) floorBpm else next
         }
 
         /**
@@ -1534,8 +1540,16 @@ class VulvaGlTextureView(
                 peakMode -> 1.32f
                 else -> (if (isSighCycle) 1.12f else 1.0f) * (1.0f + 0.28f * hrNorm)
             }
-            val maxChest = if (peakMode || forcePowerfulSigh) 0.220f else 0.195f
-            val maxAbdomen = if (peakMode || forcePowerfulSigh) 0.240f else 0.215f
+            val maxChest = when {
+                peakMode -> 0.242f
+                forcePowerfulSigh -> 0.220f
+                else -> 0.195f
+            }
+            val maxAbdomen = when {
+                peakMode -> 0.262f
+                forcePowerfulSigh -> 0.240f
+                else -> 0.215f
+            }
             val chestRise = (chestWave * 0.072f * exertionDepth * chestBoost).coerceAtMost(maxChest)
             val abdomenRise = (abdomenWave * 0.096f * exertionDepth).coerceAtMost(maxAbdomen)
             return Pair(chestRise, abdomenRise)
@@ -2362,16 +2376,15 @@ class VulvaGlTextureView(
                 float vestBaseMask = uIsLabiaArchMesh *
                     smoothstep(0.42, 0.88, mucosaColor) *
                     (1.0 - smoothstep(0.16, 0.52, pigmentColor));
-                // Beta v3 Option 7 (Medial Labial Root Color Continuity): prevent vestBaseMask from
-                // starving when mucosal weighting dips at the medial labial root, strictly excluding the free rim.
-                float medRootBaseMask = uIsLabiaArchMesh *
-                    smoothstep(0.16, 0.70, mucosaColor) *
-                    (1.0 - smoothstep(0.20, 0.56, pigmentColor)) *
-                    smoothstep(0.20, 0.58, wetness);
-                vestBaseMask = max(vestBaseMask, medRootBaseMask * v3MedRootStr);
+                // Beta v3 Option 7 (v22.0): when the underlying patch is labia-aligned, ensure the medial
+                // junction on labiaHoodArchMesh sheds arch-only darkening cleanly (even when Option 5 is OFF)
+                // AND taper seamFShadeFade smoothly on the low-mucosa outer cutaneous skirt so it merges into
+                // blossomVulvaPatchMesh with zero outer brightness step!
+                float seamFOuterSkirtFade = mix(1.0, smoothstep(0.12, 0.34, mucosaColor), v3MedRootStr);
                 // Seam F (uBetaWarmTransitionZone): deepen the newly front-lit labiaHoodArchMesh by ~1 warm skin-tone
                 // shade (proportional across light and dark skin tones), fading cleanly to 0 along the outer Seam E skirt.
                 float seamFShadeFade = smoothstep(0.0, 0.55, archAlpha) * smoothstep(0.06, 0.28, mucosaColor + pigmentColor * 0.65);
+                seamFShadeFade *= seamFOuterSkirtFade;
                 seamFShadeFade *= (1.0 - vestBaseMask * max(v3BlendStr, v3MedRootStr) * 0.94);
                 vec3 seamFShadeTarget = mix(albedo * vec3(0.84, 0.77, 0.72), uSkinShadow * vec3(0.96, 0.90, 0.86), 0.24 * (1.0 - mucosaColor));
                 albedo = mix(albedo, seamFShadeTarget, uBetaWarmTransitionZone * seamFShadeFade);
@@ -2383,27 +2396,16 @@ class VulvaGlTextureView(
                 roseBrownStrength *= (1.0 - vestBaseMask * max(v3BlendStr, v3MedRootStr) * 0.92);
                 vec3 warmRoseBrown = mix(uSkinShadow * vec3(0.84, 0.64, 0.56), uMucosaDeep * vec3(0.96, 0.78, 0.70), 0.38);
                 albedo = mix(albedo, warmRoseBrown, roseBrownStrength);
-                if (v3BlendStr > 0.001) {
+                float junctionHarmonyStr = max(v3BlendStr, v3MedRootStr * 0.88);
+                if (junctionHarmonyStr > 0.001) {
                     vec3 vestibuleHarmonyTone = mix(mucosaVar, uMucosaDeep, (1.0 - clamp(ao, 0.48, 1.0)) * 0.26);
-                    albedo = mix(albedo, vestibuleHarmonyTone, vestBaseMask * v3BlendStr * 0.84);
+                    albedo = mix(albedo, vestibuleHarmonyTone, vestBaseMask * junctionHarmonyStr * 0.84);
                     // Gently harmonize the outer vestibule floor margin on the patch side so both sides meet seamlessly
                     float vestOuterRim = (1.0 - uIsLabiaArchMesh) *
                         smoothstep(0.38, 0.88, mucosaColor) *
                         (1.0 - smoothstep(0.84, 0.97, wetness)) *
                         smoothstep(0.24, 0.68, ao);
-                    albedo = mix(albedo, vestibuleHarmonyTone, vestOuterRim * v3BlendStr * 0.34);
-                }
-                if (v3MedRootStr > 0.001) {
-                    // Localized medial-root tone continuity: removes residual pale cutaneous bleed right at
-                    // the labia minora–vestibule junction without globally darkening the labia or altering lighting.
-                    vec3 rootVestTone = mix(mucosaVar, uMucosaDeep, (1.0 - clamp(ao, 0.50, 1.0)) * 0.24);
-                    float paleBleedBand = medRootBaseMask * (1.0 - smoothstep(0.66, 0.96, mucosaColor));
-                    albedo = mix(albedo, rootVestTone, clamp((paleBleedBand * 0.92 + medRootBaseMask * 0.42) * v3MedRootStr, 0.0, 0.92));
-                    float patchRootBand = (1.0 - uIsLabiaArchMesh) *
-                        smoothstep(0.22, 0.74, mucosaColor) *
-                        (1.0 - smoothstep(0.76, 0.98, mucosaColor)) *
-                        smoothstep(0.24, 0.66, ao);
-                    albedo = mix(albedo, rootVestTone, patchRootBand * v3MedRootStr * 0.52);
+                    albedo = mix(albedo, vestibuleHarmonyTone, vestOuterRim * junctionHarmonyStr * 0.34);
                 }
                 if (v3PigStr > 0.001) {
                     // Organic subcutaneous vascular transition & gentle non-uniform melanin tone modulation (safely clamped at 3x)

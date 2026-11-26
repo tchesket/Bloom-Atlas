@@ -93,4 +93,87 @@ class AnatomyHapticsEngine(context: Context) {
             // Gracefully ignore
         }
     }
+
+    /**
+     * Plays a smooth continuous vibration slice whose intensity ramps cleanly from low (`0f`)
+     * to maximum (`1f`). Uses hardware amplitude control when available, falling back to a
+     * smooth high-rate duty-cycle waveform on vibrators without amplitude control.
+     */
+    fun playContinuousIntensity(intensity01: Float, durationMs: Long = 240L) {
+        val v = vibrator ?: return
+        if (!v.hasVibrator()) return
+        val clamped = intensity01.coerceIn(0f, 1f)
+        val safeDur = durationMs.coerceIn(60L, 1_000L)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (v.hasAmplitudeControl()) {
+                    // Perceptually smooth climb from gentle rumble (28/255) up to full continuous motor output (255/255)
+                    val shaped = clamped * (0.42f + 0.58f * clamped)
+                    val amp = (28f + 227f * shaped).toInt().coerceIn(28, 255)
+                    v.vibrate(VibrationEffect.createOneShot(safeDur, amp))
+                } else if (clamped >= 0.85f) {
+                    v.vibrate(VibrationEffect.createOneShot(safeDur, VibrationEffect.DEFAULT_AMPLITUDE))
+                } else {
+                    // Duty-cycle intensity ramp for fixed-amplitude vibrators
+                    val periodMs = 40L
+                    val onMs = (12L + (26f * clamped).toLong()).coerceIn(12L, 38L)
+                    val offMs = (periodMs - onMs).coerceAtLeast(2L)
+                    val cycles = (safeDur / periodMs).toInt().coerceIn(2, 12)
+                    val timings = LongArray(cycles * 2)
+                    val amps = IntArray(cycles * 2)
+                    for (i in 0 until cycles) {
+                        timings[i * 2] = onMs
+                        amps[i * 2] = VibrationEffect.DEFAULT_AMPLITUDE
+                        timings[i * 2 + 1] = offMs
+                        amps[i * 2 + 1] = 0
+                    }
+                    v.vibrate(VibrationEffect.createWaveform(timings, amps, -1))
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                v.vibrate(safeDur)
+            }
+        } catch (_: Exception) {
+            // Gracefully ignore if device restricts vibrator
+        }
+    }
+
+    /**
+     * Plays a high-intensity, high-frequency, slightly irregular pulsing vibration waveform
+     * chunk during the 12-second peak episode.
+     */
+    fun playIrregularPeakWaveform(timings: LongArray, amplitudes: IntArray) {
+        if (timings.isEmpty() || timings.size != amplitudes.size) return
+        val v = vibrator ?: return
+        if (!v.hasVibrator()) return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val safeAmps = if (v.hasAmplitudeControl()) {
+                    IntArray(amplitudes.size) { i ->
+                        val a = amplitudes[i]
+                        if (a <= 0) 0 else a.coerceIn(1, 255)
+                    }
+                } else {
+                    IntArray(amplitudes.size) { i ->
+                        if (amplitudes[i] <= 0) 0 else VibrationEffect.DEFAULT_AMPLITUDE
+                    }
+                }
+                v.vibrate(VibrationEffect.createWaveform(timings, safeAmps, -1))
+            } else {
+                @Suppress("DEPRECATION")
+                v.vibrate(timings, -1)
+            }
+        } catch (_: Exception) {
+            // Gracefully ignore
+        }
+    }
+
+    /** Immediately stops any active continuous or pulsing vibration. */
+    fun cancel() {
+        try {
+            vibrator?.cancel()
+        } catch (_: Exception) {
+            // Gracefully ignore
+        }
+    }
 }

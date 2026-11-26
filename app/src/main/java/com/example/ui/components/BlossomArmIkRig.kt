@@ -137,7 +137,9 @@ internal object BlossomArmIkRig {
         val poseHand: OrthoFrame,
         val wristTwistRad: Float,
         val fingerCurlWeight: Float,
-        val poseProgress: Float
+        val poseProgress: Float,
+        val fingerMicroCurl: Float = 0f,
+        val isActivePose: Boolean = false
     )
 
     internal data class FingerFlexPose(
@@ -263,9 +265,13 @@ internal object BlossomArmIkRig {
     fun solveSideArmIk(
         side: Float,
         poseProgress: Float,
-        liveOuterSpread: Float
+        liveOuterSpread: Float,
+        armMicroShift: Float = 0f,
+        fingerMicroCurl: Float = 0f
     ): SideArmIkSolution {
         val p = poseProgress.coerceIn(0f, 1f)
+        val microArm = armMicroShift.coerceIn(-1f, 1f)
+        val microFinger = fingerMicroCurl.coerceIn(0f, 1f)
 
         val s0 = Vec3(side * SHOULDER_AX, SHOULDER_Y, SHOULDER_Z)
         val e0 = Vec3(side * ELBOW_AX, ELBOW_Y, ELBOW_Z)
@@ -276,7 +282,7 @@ internal object BlossomArmIkRig {
         val restForearm = buildBoneFrame(e0, w0, Vec3(0f, 0f, 1f))
         val restHand = buildBoneFrame(w0, palmTip0, Vec3(0f, 0f, 1f))
 
-        if (p <= 0.0001f) {
+        if (p <= 0.0001f && abs(microArm) <= 1e-4f && microFinger <= 1e-4f) {
             return SideArmIkSolution(
                 side = side,
                 shoulder = s0,
@@ -290,16 +296,85 @@ internal object BlossomArmIkRig {
                 poseHand = restHand,
                 wristTwistRad = 0f,
                 fingerCurlWeight = 0f,
-                poseProgress = 0f
+                poseProgress = 0f,
+                fingerMicroCurl = 0f,
+                isActivePose = false
+            )
+        }
+
+        // Rest-side subtle arm & finger micro-movement (strictly 2-bone length-preserving & above mattress!)
+        if (p <= 0.0001f) {
+            val shoulder = Vec3(
+                s0.x + side * 0.014f * microArm,
+                s0.y + 0.032f * abs(microArm),
+                s0.z + 0.026f * abs(microArm)
+            )
+            var wrist = Vec3(
+                w0.x - side * (0.075f * max(0f, microArm) - 0.055f * max(0f, -microArm)),
+                w0.y + 0.145f * microArm,
+                w0.z + 0.058f * abs(microArm) + 0.024f * microFinger
+            )
+            val maxReach = (UPPER_ARM_LEN + FOREARM_LEN) * 0.992f
+            val minReach = abs(UPPER_ARM_LEN - FOREARM_LEN) + 0.32f
+            val swVec = wrist - shoulder
+            val swDistRaw = swVec.len().coerceAtLeast(1e-5f)
+            val swDist = swDistRaw.coerceIn(minReach, maxReach)
+            if (abs(swDist - swDistRaw) > 1e-5f) {
+                wrist = shoulder + swVec * (swDist / swDistRaw)
+            }
+            val swDir = (wrist - shoulder) * (1f / swDist)
+            val restDir = (w0 - s0).normalized()
+            val restElbowOffset = (e0 - s0) - restDir * (e0 - s0).dot(restDir)
+            val poleRest = restElbowOffset.normalized()
+            var polePerp = poleRest - swDir * poleRest.dot(swDir)
+            if (polePerp.len() < 1e-4f) {
+                polePerp = Vec3(side * 0.85f, 0f, -0.52f) - swDir * (Vec3(side * 0.85f, 0f, -0.52f).dot(swDir))
+            }
+            polePerp = polePerp.normalized()
+            val a = (UPPER_ARM_LEN * UPPER_ARM_LEN - FOREARM_LEN * FOREARM_LEN + swDist * swDist) / (2f * swDist)
+            val h = sqrt((UPPER_ARM_LEN * UPPER_ARM_LEN - a * a).coerceAtLeast(0f))
+            val elbow = shoulder + swDir * a + polePerp * h
+
+            val poseUpper = buildBoneFrame(shoulder, elbow, Vec3(0f, 0f, 1f))
+            val poseForearm = buildBoneFrame(elbow, wrist, Vec3(0f, 0f, 1f))
+            val subtleHandDir = Vec3(
+                restHand.axisY.x - side * 0.06f * microArm,
+                restHand.axisY.y,
+                restHand.axisY.z + 0.05f * abs(microArm) + 0.04f * microFinger
+            ).normalized()
+            val subtleDorsal = Vec3(
+                -side * (0.14f * microArm + 0.08f * microFinger),
+                0.04f * microArm,
+                1.0f
+            ).normalized()
+            val poseHand = buildFrameFromYAndZHint(wrist, subtleHandDir, subtleDorsal)
+            val wristTwist = (0.16f * microArm + 0.08f * microFinger).coerceIn(-0.35f, 0.35f)
+            return SideArmIkSolution(
+                side = side,
+                shoulder = shoulder,
+                elbow = elbow,
+                wrist = wrist,
+                restUpper = restUpper,
+                poseUpper = poseUpper,
+                restForearm = restForearm,
+                poseForearm = poseForearm,
+                restHand = restHand,
+                poseHand = poseHand,
+                wristTwistRad = wristTwist,
+                fingerCurlWeight = 0f,
+                poseProgress = 0f,
+                fingerMicroCurl = microFinger,
+                isActivePose = true
             )
         }
 
         // 1. Subtle natural scapular protraction + gentle lateral clearance past fuller breasts
         val reachT = smoothStep(0.05f, 0.65f, p)
+        val microFade = (1f - p * 0.82f).coerceIn(0.18f, 1f)
         val shoulder = Vec3(
-            s0.x + side * 0.078f * reachT,
-            s0.y - 0.17f * reachT,
-            s0.z + 0.24f * reachT
+            s0.x + side * (0.078f * reachT + 0.012f * microArm * microFade),
+            s0.y - 0.17f * reachT + 0.024f * abs(microArm) * microFade,
+            s0.z + 0.24f * reachT + 0.020f * abs(microArm) * microFade
         )
 
         // 2. Cubic Bezier wrist trajectory calibrated for lengthened anatomical feminine arms & hands
@@ -396,7 +471,9 @@ internal object BlossomArmIkRig {
             poseHand = poseHand,
             wristTwistRad = wristTwistRad,
             fingerCurlWeight = fingerCurlWeight,
-            poseProgress = p
+            poseProgress = p,
+            fingerMicroCurl = microFinger * (1f - p * 0.78f).coerceIn(0.15f, 1f),
+            isActivePose = true
         )
     }
 
@@ -406,21 +483,43 @@ internal object BlossomArmIkRig {
      *    so it forms a clean open thumb-index V-web and rests softly atop the upper groin/thigh!
      *  - Index & Middle: gentle anatomical 3-phalanx spreading arch onto the outer labia majora
      *  - Ring & Pinky: crisp ~158-165 deg 3-bone knuckle tuck snugly into palm (NEVER >180 deg backwards J-hook!)
+     *  - Optional `microCurl` (`0f..1f`) adds delicate organic finger curling/gripping flexion across all 5 digits.
      */
-    fun fingerFlexForIndex(fingerIndex: Int, curlWeight: Float): FingerFlexPose {
+    fun fingerFlexForIndex(fingerIndex: Int, curlWeight: Float, microCurl: Float = 0f): FingerFlexPose {
         val w = curlWeight.coerceIn(0f, 1f)
+        val m = microCurl.coerceIn(0f, 1f)
         return when (fingerIndex) {
             0 -> FingerFlexPose(
-                mcpFlexRad = 0.12f * w,
-                pipFlexRad = 0.18f * w,
+                mcpFlexRad = 0.12f * w + 0.16f * m,
+                pipFlexRad = 0.18f * w + 0.22f * m,
                 dipFlexRad = 0f,
-                splayRad = -0.14f * w,
-                rollRad = 0.46f + 0.16f * w
+                splayRad = -0.14f * w - 0.05f * m,
+                rollRad = 0.46f + 0.16f * w + 0.08f * m
             )
-            1 -> FingerFlexPose(mcpFlexRad = 0.08f * w, pipFlexRad = 0.18f * w, dipFlexRad = 0.10f * w, splayRad = 0.01f * w)
-            2 -> FingerFlexPose(mcpFlexRad = 0.06f * w, pipFlexRad = 0.16f * w, dipFlexRad = 0.10f * w, splayRad = -0.02f * w)
-            3 -> FingerFlexPose(mcpFlexRad = 1.18f * w, pipFlexRad = 1.35f * w, dipFlexRad = 0.36f * w, splayRad = -0.05f * w)
-            else -> FingerFlexPose(mcpFlexRad = 1.24f * w, pipFlexRad = 1.38f * w, dipFlexRad = 0.38f * w, splayRad = -0.07f * w)
+            1 -> FingerFlexPose(
+                mcpFlexRad = 0.08f * w + 0.24f * m,
+                pipFlexRad = 0.18f * w + 0.34f * m,
+                dipFlexRad = 0.10f * w + 0.16f * m,
+                splayRad = 0.01f * w + 0.03f * m
+            )
+            2 -> FingerFlexPose(
+                mcpFlexRad = 0.06f * w + 0.30f * m,
+                pipFlexRad = 0.16f * w + 0.40f * m,
+                dipFlexRad = 0.10f * w + 0.20f * m,
+                splayRad = -0.02f * w
+            )
+            3 -> FingerFlexPose(
+                mcpFlexRad = (1.18f * w + 0.34f * m).coerceAtMost(1.30f),
+                pipFlexRad = (1.35f * w + 0.44f * m).coerceAtMost(1.45f),
+                dipFlexRad = (0.36f * w + 0.22f * m).coerceAtMost(0.45f),
+                splayRad = -0.05f * w - 0.02f * m
+            )
+            else -> FingerFlexPose(
+                mcpFlexRad = (1.24f * w + 0.38f * m).coerceAtMost(1.34f),
+                pipFlexRad = (1.38f * w + 0.46f * m).coerceAtMost(1.48f),
+                dipFlexRad = (0.38f * w + 0.24f * m).coerceAtMost(0.46f),
+                splayRad = -0.07f * w - 0.03f * m
+            )
         }
     }
 
@@ -437,10 +536,14 @@ internal object BlossomArmIkRig {
         cache: ArmSkinCache,
         poseProgress: Float,
         leftOuterSpread: Float,
-        rightOuterSpread: Float
+        rightOuterSpread: Float,
+        leftArmMicroShift: Float = 0f,
+        rightArmMicroShift: Float = 0f,
+        leftFingerMicroCurl: Float = 0f,
+        rightFingerMicroCurl: Float = 0f
     ) {
-        val leftSol = solveSideArmIk(-1f, poseProgress, leftOuterSpread)
-        val rightSol = solveSideArmIk(+1f, poseProgress, rightOuterSpread)
+        val leftSol = solveSideArmIk(-1f, poseProgress, leftOuterSpread, leftArmMicroShift, leftFingerMicroCurl)
+        val rightSol = solveSideArmIk(+1f, poseProgress, rightOuterSpread, rightArmMicroShift, rightFingerMicroCurl)
 
         val stride = DynamicGlMesh.FLOATS_PER_VERTEX
         val bData = bodyMesh.vertexData
@@ -459,7 +562,7 @@ internal object BlossomArmIkRig {
             val px = bBase[src]; val py = bBase[src + 1]; val pz = bBase[src + 2]
             val nx = bBase[src + 3]; val ny = bBase[src + 4]; val nz = bBase[src + 5]
 
-            if (sol.poseProgress <= 0.0001f) {
+            if (!sol.isActivePose) {
                 val dst = bIdx[k] * stride
                 bData[dst] = px; bData[dst + 1] = py; bData[dst + 2] = pz
                 bData[dst + 3] = nx; bData[dst + 4] = ny; bData[dst + 5] = nz

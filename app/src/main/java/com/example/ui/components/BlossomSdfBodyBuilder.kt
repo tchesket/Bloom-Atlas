@@ -2648,12 +2648,16 @@ internal object BlossomSdfBodyBuilder {
     const val HIP_PIVOT_Y = 0.26f
     const val HIP_PIVOT_Z = -0.22f
     const val MAX_LEG_SPREAD_RAD = 0.25f
+    const val MANUAL_MIN_LEG_SPREAD = -0.30f
+    const val PEAK_MIN_LEG_SPREAD = -1.00f
 
     class LegSkinCache(
         val bodyVertIndices: IntArray,
         val bodyBasePosNorm: FloatArray,
         val bodyWeights: FloatArray,
         val bodySides: FloatArray,
+        val bodyKneeShiftWeights: FloatArray,
+        val bodyKneeNormalTilt: FloatArray,
         val toesBasePosNorm: FloatArray,
         val toesSides: FloatArray,
         val toeNailStartVert: Int,
@@ -2673,6 +2677,8 @@ internal object BlossomSdfBodyBuilder {
         val idxBuf = IntArray(bodyMesh.vertexCount)
         val weightBuf = FloatArray(bodyMesh.vertexCount)
         val sideBuf = FloatArray(bodyMesh.vertexCount)
+        val kneeWeightBuf = FloatArray(bodyMesh.vertexCount)
+        val kneeTiltBuf = FloatArray(bodyMesh.vertexCount)
         var count = 0
 
         // Femur bone vector in +X half-space (Hip -> Knee)
@@ -2703,9 +2709,18 @@ internal object BlossomSdfBodyBuilder {
             val lowerLimbFull = smoothStep(-1.05f, -1.65f, y)
             val w = max(femRamp * groinYGuard, lowerLimbFull) * patchGuard
             if (w > 0.001f) {
+                // Planted-foot knee/upper-leg shift weight: 0 at pelvis & vulva, rises smoothly to 1.0 at knee,
+                // and tapers cleanly back to 0.0 above ankle/foot (y <= -3.85) so feet stay 100% planted!
+                val thighRamp = smoothStep(0.08f, 0.92f, hFem) * groinYGuard * patchGuard
+                val ankleAnchor = smoothStep(-3.86f, -2.02f, y)
+                val kw = (thighRamp * ankleAnchor).coerceIn(0f, 1f)
+                // Smoothly rotates thigh normals one way and calf normals the opposite way around the knee crest
+                val tiltDir = (smoothStep(-2.12f, -1.58f, y) * 2f - 1f) * kw
                 idxBuf[count] = i
                 weightBuf[count] = w.coerceIn(0f, 1f)
                 sideBuf[count] = if (x >= 0f) 1f else -1f
+                kneeWeightBuf[count] = kw
+                kneeTiltBuf[count] = tiltDir
                 count++
             }
         }
@@ -2713,6 +2728,8 @@ internal object BlossomSdfBodyBuilder {
         val bodyIndices = idxBuf.copyOf(count)
         val bodyWeights = weightBuf.copyOf(count)
         val bodySides = sideBuf.copyOf(count)
+        val bodyKneeWeights = kneeWeightBuf.copyOf(count)
+        val bodyKneeTilt = kneeTiltBuf.copyOf(count)
         val bodyBase = FloatArray(count * 6)
         for (k in 0 until count) {
             val src = bodyIndices[k] * stride
@@ -2749,6 +2766,8 @@ internal object BlossomSdfBodyBuilder {
             bodyBasePosNorm = bodyBase,
             bodyWeights = bodyWeights,
             bodySides = bodySides,
+            bodyKneeShiftWeights = bodyKneeWeights,
+            bodyKneeNormalTilt = bodyKneeTilt,
             toesBasePosNorm = toesBase,
             toesSides = toesSides,
             toeNailStartVert = toeNailStartVert,
@@ -2761,7 +2780,7 @@ internal object BlossomSdfBodyBuilder {
      * Evaluates the exact world-space position of any leg point after interactive hip-socket abduction.
      */
     fun transformLegPoint(x: Float, y: Float, z: Float, side: Float, spread: Float, weight: Float = 1f): FloatArray {
-        val clampedSpread = spread.coerceIn(-0.35f, 1.0f)
+        val clampedSpread = spread.coerceIn(PEAK_MIN_LEG_SPREAD, 1.0f)
         val angle = side * clampedSpread * MAX_LEG_SPREAD_RAD * weight
         val cosA = cos(angle)
         val sinA = sin(angle)
@@ -2782,17 +2801,29 @@ internal object BlossomSdfBodyBuilder {
         leftLegSpread: Float,
         rightLegSpread: Float,
         includeToesAndNails: Boolean = true,
-        commitBody: Boolean = true
+        commitBody: Boolean = true,
+        leftKneeShift: Float = 0f,
+        rightKneeShift: Float = 0f,
+        leftToeWiggle: Float = 0f,
+        rightToeWiggle: Float = 0f
     ) {
         val stride = DynamicGlMesh.FLOATS_PER_VERTEX
-        val leftS = leftLegSpread.coerceIn(-0.35f, 1.0f)
-        val rightS = rightLegSpread.coerceIn(-0.35f, 1.0f)
+        val leftS = leftLegSpread.coerceIn(PEAK_MIN_LEG_SPREAD, 1.0f)
+        val rightS = rightLegSpread.coerceIn(PEAK_MIN_LEG_SPREAD, 1.0f)
+        val leftKs = leftKneeShift.coerceIn(-1.15f, 1.0f)
+        val rightKs = rightKneeShift.coerceIn(-1.15f, 1.0f)
+        val hasKneeShift = abs(leftKs) > 1e-4f || abs(rightKs) > 1e-4f
+        val leftTw = leftToeWiggle.coerceIn(-1f, 1f)
+        val rightTw = rightToeWiggle.coerceIn(-1f, 1f)
+        val hasToeWiggle = abs(leftTw) > 1e-4f || abs(rightTw) > 1e-4f
 
         val bData = bodyMesh.vertexData
         val bIdx = cache.bodyVertIndices
         val bBase = cache.bodyBasePosNorm
         val bWeights = cache.bodyWeights
         val bSides = cache.bodySides
+        val bKneeW = cache.bodyKneeShiftWeights
+        val bKneeTilt = cache.bodyKneeNormalTilt
         for (k in bIdx.indices) {
             val side = bSides[k]
             val spread = if (side < 0f) leftS else rightS
@@ -2810,13 +2841,49 @@ internal object BlossomSdfBodyBuilder {
             val ry = y - HIP_PIVOT_Y
             val kneeDrop = -0.14f * spread * w * smoothStep(-0.55f, 1.50f, z)
 
+            var outX = pivotX + rx * cosA - ry * sinA
+            var outY = HIP_PIVOT_Y + rx * sinA + ry * cosA
+            var outZ = z + kneeDrop
+            var outNx = nx * cosA - ny * sinA
+            var outNy = nx * sinA + ny * cosA
+            var outNz = nz
+
+            if (hasKneeShift) {
+                val kw = bKneeW[k]
+                if (kw > 0.0005f) {
+                    val ks = if (side < 0f) leftKs else rightKs
+                    if (abs(ks) > 1e-4f) {
+                        val lateralAmp = if (ks < 0f) 0.94f else 0.78f
+                        var shiftedX = outX + side * ks * lateralAmp * kw
+                        // Soft anatomical midline contact barrier so squeezed thighs/knees press snugly together with ZERO interpenetration
+                        val signedX = shiftedX * side
+                        if (signedX < 0.055f) {
+                            val compressed = 0.026f + 0.029f * exp(((signedX - 0.055f) / 0.065f).coerceAtLeast(-12f))
+                            shiftedX = side * compressed
+                        }
+                        outX = shiftedX
+                        outZ += -0.095f * ks * kw * smoothStep(0.05f, 1.55f, z)
+
+                        val tiltAngle = side * ks * 0.21f * bKneeTilt[k]
+                        if (abs(tiltAngle) > 1e-4f) {
+                            val ct = cos(tiltAngle)
+                            val st = sin(tiltAngle)
+                            val rnx = outNx * ct - outNy * st
+                            val rny = outNx * st + outNy * ct
+                            outNx = rnx
+                            outNy = rny
+                        }
+                    }
+                }
+            }
+
             val dst = bIdx[k] * stride
-            bData[dst] = pivotX + rx * cosA - ry * sinA
-            bData[dst + 1] = HIP_PIVOT_Y + rx * sinA + ry * cosA
-            bData[dst + 2] = z + kneeDrop
-            bData[dst + 3] = nx * cosA - ny * sinA
-            bData[dst + 4] = nx * sinA + ny * cosA
-            bData[dst + 5] = nz
+            bData[dst] = outX
+            bData[dst + 1] = outY
+            bData[dst + 2] = outZ
+            bData[dst + 3] = outNx
+            bData[dst + 4] = outNy
+            bData[dst + 5] = outNz
         }
         if (commitBody) {
             bodyMesh.commitVertices()
@@ -2824,6 +2891,7 @@ internal object BlossomSdfBodyBuilder {
 
         if (!includeToesAndNails) return
 
+        val toeFloorZ = BlossomBodyBuilder.MATTRESS_TOP_Z + 0.014f
         val tData = toesMesh.vertexData
         val tBase = cache.toesBasePosNorm
         val tSides = cache.toesSides
@@ -2836,8 +2904,22 @@ internal object BlossomSdfBodyBuilder {
             val pivotX = side * HIP_PIVOT_AX
 
             val src = i * 6
-            val x = tBase[src]; val y = tBase[src + 1]; val z = tBase[src + 2]
+            var x = tBase[src]; var y = tBase[src + 1]; var z = tBase[src + 2]
             val nx = tBase[src + 3]; val ny = tBase[src + 4]; val nz = tBase[src + 5]
+
+            if (hasToeWiggle) {
+                val tw = if (side < 0f) leftTw else rightTw
+                if (abs(tw) > 1e-4f) {
+                    val toeS = smoothStep(-5.06f, -5.56f, y)
+                    if (toeS > 0.001f) {
+                        val toeWave = 0.72f + 0.36f * cos(((abs(x) - 1.62f) * 6.5f) - tw * 1.1f)
+                        val liftZ = tw * 0.044f * toeS * toeWave
+                        val curlY = max(0f, -tw) * 0.022f * toeS * toeWave
+                        y += curlY
+                        z = max(z + liftZ, toeFloorZ)
+                    }
+                }
+            }
 
             val rx = x - pivotX
             val ry = y - HIP_PIVOT_Y
@@ -2865,8 +2947,22 @@ internal object BlossomSdfBodyBuilder {
             val pivotX = side * HIP_PIVOT_AX
 
             val src = k * 6
-            val x = nBase[src]; val y = nBase[src + 1]; val z = nBase[src + 2]
+            var x = nBase[src]; var y = nBase[src + 1]; var z = nBase[src + 2]
             val nx = nBase[src + 3]; val ny = nBase[src + 4]; val nz = nBase[src + 5]
+
+            if (hasToeWiggle) {
+                val tw = if (side < 0f) leftTw else rightTw
+                if (abs(tw) > 1e-4f) {
+                    val toeS = smoothStep(-5.06f, -5.56f, y)
+                    if (toeS > 0.001f) {
+                        val toeWave = 0.72f + 0.36f * cos(((abs(x) - 1.62f) * 6.5f) - tw * 1.1f)
+                        val liftZ = tw * 0.044f * toeS * toeWave
+                        val curlY = max(0f, -tw) * 0.022f * toeS * toeWave
+                        y += curlY
+                        z = max(z + liftZ, toeFloorZ + 0.004f)
+                    }
+                }
+            }
 
             val rx = x - pivotX
             val ry = y - HIP_PIVOT_Y

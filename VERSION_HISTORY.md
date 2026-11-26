@@ -1,5 +1,33 @@
 # Bloom Atlas — Version History
 
+## Version 23.0 (`versionCode = 23`)
+**Date:** 2026-11-26
+
+- **Beta Option #7 Promoted to Default ON (`BlossomViewportSessionState.kt`)**
+  - Enabled **Vestibule-Labial Patch Alignment** (`betaV3MedialRootContinuity`) by default at 75% strength while keeping it independently toggleable in Beta Lab.
+- **Heart Rate HUD Test Trigger Button (`InteractiveVulva3DCanvas.kt`)**
+  - Added a compact **"Trigger 136"** button directly underneath the optional top-left Heart Rate HUD pill that immediately sets heart rate to `136 BPM` and clears refractory/cooldown timers so the full peak sequence can be tested on demand.
+- **Refined 8s Pre-Event & 16s Peak Sequence Choreography (`InteractiveVulva3DCanvas.kt`, `BlossomSdfBodyBuilder.kt`, `BlossomUpperBodyBuilder.kt`, `BlossomArmIkRig.kt`, `VulvaGeometryBuilder.kt`)**
+  - **Extended Timings & Natural Pacing:** Extended the pre-event build-up to **8 seconds** (autonomous `136 -> 152 BPM` climb + ramping continuous vibration) and the main peak event to **16 seconds**, while slowing peak head movements by **60%** (`2.5×` durations) and leg movements by **40%** (`1.67×` durations).
+  - **Desynchronized, Restless Pre-Event Legs:** Replaced the synchronized back-and-forth sway with independently phased, higher-frequency restless leg and knee movements that draw closer together early and trend progressively wider into the wide stance at `t = 8s`.
+  - **Tighter Thigh-Squeeze Slam & Planted-Foot Knee Shifting:** Added a dedicated thigh/knee lateral rig with a C1 soft-tissue midline barrier (feet remain 100% planted while knees and upper legs shift) so the initial slam genuinely squeezes her thighs and knees flush together without interpenetration, and the 16-second event naturally mixes planted-foot knee shifting with whole-leg sweeps and shaking.
+  - **Mouth Opening & Subtle Extremity Realism:** Added a precomputed anatomical mouth-opening morph (lips parting, mandible drop, recessed darkened oral cavity) that opens right at the start of the 16-second event with organic breath modulation, alongside subtle independent toe wiggling (with synced toenails), subtle finger curling (with synced fingernails), and gentle length-preserving 2-bone arm shifting.
+
+---
+
+## Version 22.0 (`versionCode = 22`)
+**Date:** 2026-11-26
+
+- **Replaced Beta Option #7 — Vestibule-Labial Patch Alignment (`VulvaGeometryBuilder.kt`, `VulvaGlRenderer.kt`, `InteractiveVulva3DCanvas.kt`)**
+  - Root-cause audit confirmed the persistent pale, body-skin-colored bands at the inner labia–vestibule junction were literally the exposed underlying `blossomVulvaPatchMesh` showing cutaneous skin coloration (`mucosa = 0.14–0.42`) because `vestEllipse` was narrower and out of phase with `labiaHoodArchMesh`'s actual attachment centerline (including spread, asymmetry, and organic meander) while deep `innerTuck` and `innerRootAlpha` exposed it (and v21.0's `rootRimBand` mask was mathematically subsumed by `vestibuleColorMask`, producing `0.0` change on the patch).
+  - Replaced Option #7 (still OFF by default, `75%` slider default with toggle memory) to align the underlying vulva-patch mucosal/wetness/AO/pigment footprint directly to `labiaHoodArchMesh`'s exact attachment centerline (feathering cleanly under the opaque arch core with zero bleed onto outer labia majora, mons, or perineum), sync `labiaHoodArchMesh` ground height to the active beta anterior surface LUT, tighten medial `innerTuck`, and smoothly fade arch-only outer-skirt shading so both medial and outer boundaries merge seamlessly.
+- **Redesigned 136 BPM 3-Phase Peak Exertion Sequence (`InteractiveVulva3DCanvas.kt`, `AnatomyHapticsEngine.kt`, `BlossomSdfBodyBuilder.kt`, `VulvaGlRenderer.kt`)**
+  - **136 BPM Trigger & 7-Second Pre-Event Delay:** Triggers at **136 BPM** (down from 140 BPM) with a 7-second build-up before the main event: the Heart Rate HUD pill turns **emerald green and slowly pulsates** (when visible), heart rate autonomously climbs steadily from **136 -> 152 BPM** regardless of user touch, continuous phone vibration ramps smoothly from low to high intensity, and her legs sway slowly side-to-side with growing amplitude (animating closer together than the manual `-0.30f` limit even from max placement) before opening into a wide stance at `t = 7s`.
+  - **12-Second Dramatic Peak Event:** Extended from 10s to **12 seconds** with much more dramatic irregular movements across legs, head, breathing, and blinking: legs slam tightly shut (`-0.94f`, verified zero midline interpenetration) -> slowly part open to default (`0f`) over ~1 second -> shake independently AND sweep side-to-side asymmetrically; eyelids close for **4 full seconds** before opening into rapid irregular peak blinking; head throws deeply back with wider erratic turns/rolls and heavy irregular breathing; and vibration switches to high-intensity, high-frequency, slightly irregular pulsing for the full 12 seconds (with safe cancellation on exit/pause/dispose).
+  - **125 BPM Post-Peak Cooldown Floor:** At the end of the 12 seconds, triggers 2–3 powerful recovery sighs and fast heart-rate recovery that slows down **only until reaching 125 BPM** (holding cleanly at 125 BPM rather than plunging straight back to rest).
+
+---
+
 ## Version 21.0 (`versionCode = 21`)
 **Date:** 2026-11-26
 

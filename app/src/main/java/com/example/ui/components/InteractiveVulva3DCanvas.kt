@@ -41,6 +41,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -108,6 +109,7 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * Vulva soft-tissue elasticity Beta slider helpers (Version 21.0):
@@ -119,10 +121,129 @@ internal const val VULVA_ELASTIC_DEFAULT_RESISTANCE = 0.50f
 internal const val VULVA_ELASTIC_MAX_RESISTANCE = 0.60f
 internal const val VULVA_ELASTIC_CURVE_REF = 0.40f
 
-/** Peak 140 BPM physiological exertion episode timings (v21.0). */
-internal const val PEAK_EPISODE_TRIGGER_BPM = 140f
-internal const val PEAK_EPISODE_DURATION_MS = 10_000L
+/**
+ * Peak physiological sequence timings (v23.0):
+ *  - Trigger at 136 BPM -> 8-second pre-event (autonomous 136->152 BPM climb, continuous ramping
+ *    vibration, green slowly pulsating HR HUD, desynchronized higher-frequency restless leg &
+ *    planted-foot knee movement trending from closer together -> wide stance at t = 8s, plus subtle
+ *    building toe/finger/arm tension)
+ *  - Followed by 16-second dramatic peak episode (tight thigh-squeeze slam -> smooth part open to
+ *    default 0f -> 40%-slower legs mixing planted-foot knee shifting with whole-leg sweeps & shakes,
+ *    60%-slower dramatic head arcs, 4s eyelid closure -> rapid irregular blinking, mouth opening
+ *    right at start with organic breath modulation, subtle toe wiggling + finger curling + arm
+ *    shifting, and high-intensity high-frequency irregular pulsing vibration)
+ *  - Followed by post-peak recovery sighs and fast HR cooldown stopping cleanly at 125 BPM.
+ */
+internal const val PEAK_EPISODE_TRIGGER_BPM = 136f
+internal const val PEAK_PRE_EVENT_DURATION_MS = 8_000L
+internal const val PEAK_PRE_EVENT_TARGET_BPM = 152f
+internal const val PEAK_EPISODE_DURATION_MS = 16_000L
+internal const val PEAK_EYELID_CLOSE_DURATION_MS = 4_000L
+internal const val PEAK_LEG_SLAM_SHUT_TARGET = -0.84f
+internal const val PEAK_KNEE_SLAM_SQUEEZE = -1.12f
+internal const val PEAK_LEG_PART_OPEN_DURATION_MS = 1_250
+internal const val PEAK_PRE_EVENT_WIDE_STANCE = 0.94f
+internal const val PEAK_RECOVERY_FLOOR_BPM = 125f
 internal const val PEAK_FAST_RECOVERY_DURATION_MS = 6_000L
+internal const val PEAK_POST_125_HOLD_DURATION_MS = 15_000L
+
+/** Autonomous heart rate ramp during the 8-second pre-event delay (136 -> 152 BPM regardless of touch). */
+internal fun computePreEventHeartRateBpm(startBpm: Float, elapsedMs: Long): Float {
+    val start = startBpm.coerceIn(PEAK_EPISODE_TRIGGER_BPM, PEAK_PRE_EVENT_TARGET_BPM)
+    val u = (elapsedMs.toFloat() / PEAK_PRE_EVENT_DURATION_MS.toFloat()).coerceIn(0f, 1f)
+    return (start + (PEAK_PRE_EVENT_TARGET_BPM - start) * u)
+        .coerceIn(PEAK_EPISODE_TRIGGER_BPM, PEAK_PRE_EVENT_TARGET_BPM)
+}
+
+/**
+ * Evaluates desynchronized, higher-frequency restless pre-event leg spread targets
+ * `(leftLegSpread, rightLegSpread)` across `u in 0..1` (0..8s).
+ *
+ * Unlike a uniform mirror-locked sway, left and right legs move at irrational frequency ratios and
+ * offset phases with layered higher-frequency restless quivers/hitches growing in amplitude over
+ * time, while following a clear macro trend from closer together (drawing tighter than manual
+ * `-0.30f` even from `+1.0f`) progressively outward into a wide stance (`+0.94f, +0.94f`) at `u = 1`.
+ */
+internal fun computePreEventLegTargets(
+    startLeft: Float,
+    startRight: Float,
+    uRaw: Float,
+    dirSign: Float = 1f
+): Pair<Float, Float> {
+    val u = uRaw.coerceIn(0f, 1f)
+    val tau = (2.0 * Math.PI).toFloat()
+
+    // Macro stance trend: draw legs closer together early (~ -0.46f) then gradually open wider
+    // across u = 0.20..0.84 before opening cleanly into wide stance (+0.94f) at u = 1.0
+    val drawCloser = smoothStepPose(0.00f, 0.22f, u)
+    val openTrend = smoothStepPose(0.24f, 0.86f, u)
+    val macroBase = (-0.46f) + (0.48f - (-0.46f)) * openTrend
+
+    // Growing restlessness envelope (tapers cleanly to 0 into the final wide stance)
+    val wideBlend = smoothStepPose(0.82f, 1.00f, u)
+    val restlessEnv = (0.20f + 0.80f * smoothStepPose(0.06f, 0.78f, u)) * (1f - wideBlend)
+
+    // Left leg: independent slow shift + mid restless wave + high-frequency irregular quiver (~1.4-2.5 Hz)
+    val lSlow = sin(tau * (1.85f * u + 0.35f * u * u) + 0.35f) * 0.24f
+    val lMid = sin(tau * (4.70f * u) + 1.10f) * 0.14f
+    val lHigh = (sin(tau * (11.8f * u) + 0.65f) * 0.085f +
+        sin(tau * (19.3f * u) + 2.15f) * 0.055f) * (0.65f + 0.35f * sin(tau * 2.9f * u))
+    val offsetL = (lSlow + lMid + lHigh) * restlessEnv * dirSign
+
+    // Right leg: irrational frequency ratios & phase offsets so L and R are genuinely desynchronized
+    val rSlow = sin(tau * (2.53f * u + 0.42f * u * u) + 2.15f) * 0.25f
+    val rMid = sin(tau * (6.15f * u) + 3.40f) * 0.14f
+    val rHigh = (sin(tau * (14.6f * u) + 2.75f) * 0.085f +
+        sin(tau * (23.7f * u) + 0.90f) * 0.055f) * (0.65f + 0.35f * sin(tau * 3.6f * u + 1.4f))
+    val offsetR = (rSlow + rMid + rHigh) * restlessEnv * (-dirSign)
+
+    val rawL = (macroBase + offsetL).coerceIn(BlossomSdfBodyBuilder.PEAK_MIN_LEG_SPREAD, 1f)
+    val rawR = (macroBase + offsetR).coerceIn(BlossomSdfBodyBuilder.PEAK_MIN_LEG_SPREAD, 1f)
+
+    // Seamless blend in from starting leg placement over the first ~14% (~1.1s)
+    val blendIn = smoothStepPose(0f, 0.14f, u) * (0.35f + 0.65f * drawCloser)
+    val easedL = startLeft + (rawL - startLeft) * blendIn
+    val easedR = startRight + (rawR - startRight) * blendIn
+
+    val finalL = (easedL + (PEAK_PRE_EVENT_WIDE_STANCE - easedL) * wideBlend)
+        .coerceIn(BlossomSdfBodyBuilder.PEAK_MIN_LEG_SPREAD, 1f)
+    val finalR = (easedR + (PEAK_PRE_EVENT_WIDE_STANCE - easedR) * wideBlend)
+        .coerceIn(BlossomSdfBodyBuilder.PEAK_MIN_LEG_SPREAD, 1f)
+    return Pair(finalL, finalR)
+}
+
+/**
+ * Evaluates independent planted-foot knee/upper-leg shift targets `(leftKneeShift, rightKneeShift)`
+ * across `u in 0..1` during the 8-second pre-event: knees fidget and press subtly inward early,
+ * weave independently with higher-frequency restless micro-shifts, and taper cleanly back to `0f`
+ * right at `u = 1.0` so the wide stance precedes the thigh-squeeze slam cleanly.
+ */
+internal fun computePreEventKneeShiftTargets(
+    uRaw: Float,
+    dirSign: Float = 1f
+): Pair<Float, Float> {
+    val u = uRaw.coerceIn(0f, 1f)
+    val tau = (2.0 * Math.PI).toFloat()
+    val envIn = smoothStepPose(0.03f, 0.18f, u)
+    val envOut = 1f - smoothStepPose(0.82f, 1.00f, u)
+    val env = envIn * envOut
+    val earlyPress = -0.34f * (1f - smoothStepPose(0.18f, 0.62f, u))
+
+    val kL = earlyPress + dirSign * (
+        sin(tau * (2.95f * u) + 0.55f) * 0.34f +
+            sin(tau * (9.40f * u) + 1.80f) * 0.16f +
+            sin(tau * (16.7f * u) + 0.40f) * 0.08f
+        )
+    val kR = earlyPress - dirSign * (
+        sin(tau * (3.73f * u) + 2.40f) * 0.34f +
+            sin(tau * (11.3f * u) + 0.70f) * 0.16f +
+            sin(tau * (20.1f * u) + 2.90f) * 0.08f
+        )
+    return Pair(
+        (kL * env).coerceIn(-0.92f, 0.85f),
+        (kR * env).coerceIn(-0.92f, 0.85f)
+    )
+}
 
 internal fun vulvaElasticPullScale(resistance: Float): Float {
     val r = resistance.coerceIn(0f, VULVA_ELASTIC_MAX_RESISTANCE)
@@ -294,10 +415,16 @@ fun InteractiveVulva3DCanvas(
     var heartRateDrive by sessionState.heartRateDriveState
     var lastHeartStimMs by sessionState.lastHeartStimMsState
     val heartPulseScale = remember { Animatable(1f) }
-    // Peak 140 BPM exertion climax episode & post-peak recovery channels (persisted across scroll)
+    val heartPillPulseScale = remember { Animatable(1f) }
+    // Peak 136 BPM -> 7s Pre-Event -> 12s Peak -> 125 BPM Cooldown channels (persisted across scroll)
+    var peakPreEventActive by sessionState.peakPreEventActiveState
+    var peakPreEventStartMs by sessionState.peakPreEventStartMsState
+    var peakPreEventStartBpm by sessionState.peakPreEventStartBpmState
     var peakEpisodeActive by sessionState.peakEpisodeActiveState
     var peakEpisodeEndMs by sessionState.peakEpisodeEndMsState
+    var peakPostCooldownActive by sessionState.peakPostCooldownActiveState
     var peakRecoveryFastEndMs by sessionState.peakRecoveryFastEndMsState
+    var peakRecoveryHoldUntilMs by sessionState.peakRecoveryHoldUntilMsState
     var peakRefractoryUntilMs by sessionState.peakRefractoryUntilMsState
     var postPeakSighToken by sessionState.postPeakSighTokenState
     var postPeakSighCount by sessionState.postPeakSighCountState
@@ -306,6 +433,15 @@ fun InteractiveVulva3DCanvas(
     val peakHeadRoll = remember(sessionState) { Animatable(sessionState.peakHeadRoll) }
     val peakLegShakeL = remember(sessionState) { Animatable(sessionState.peakLegShakeL) }
     val peakLegShakeR = remember(sessionState) { Animatable(sessionState.peakLegShakeR) }
+    val peakKneeShiftL = remember(sessionState) { Animatable(sessionState.peakKneeShiftL) }
+    val peakKneeShiftR = remember(sessionState) { Animatable(sessionState.peakKneeShiftR) }
+    val peakToeWiggleL = remember(sessionState) { Animatable(sessionState.peakToeWiggleL) }
+    val peakToeWiggleR = remember(sessionState) { Animatable(sessionState.peakToeWiggleR) }
+    val peakArmShiftL = remember(sessionState) { Animatable(sessionState.peakArmShiftL) }
+    val peakArmShiftR = remember(sessionState) { Animatable(sessionState.peakArmShiftR) }
+    val peakFingerCurlL = remember(sessionState) { Animatable(sessionState.peakFingerCurlL) }
+    val peakFingerCurlR = remember(sessionState) { Animatable(sessionState.peakFingerCurlR) }
+    val peakMouthOpen = remember(sessionState) { Animatable(sessionState.peakMouthOpen) }
     // Animated self-spread hand/arm IK pose (0 = relaxed at sides, 1 = hands holding labia open)
     var blossomSpreadPoseActive by sessionState.blossomSpreadPoseActiveState
     val selfSpreadPose = remember(sessionState) { Animatable(sessionState.selfSpreadPose) }
@@ -420,6 +556,15 @@ fun InteractiveVulva3DCanvas(
         sessionState.peakHeadRoll = peakHeadRoll.value
         sessionState.peakLegShakeL = peakLegShakeL.value
         sessionState.peakLegShakeR = peakLegShakeR.value
+        sessionState.peakKneeShiftL = peakKneeShiftL.value
+        sessionState.peakKneeShiftR = peakKneeShiftR.value
+        sessionState.peakToeWiggleL = peakToeWiggleL.value
+        sessionState.peakToeWiggleR = peakToeWiggleR.value
+        sessionState.peakArmShiftL = peakArmShiftL.value
+        sessionState.peakArmShiftR = peakArmShiftR.value
+        sessionState.peakFingerCurlL = peakFingerCurlL.value
+        sessionState.peakFingerCurlR = peakFingerCurlR.value
+        sessionState.peakMouthOpen = peakMouthOpen.value
         sessionState.selfSpreadPose = selfSpreadPose.value
         sessionState.camYaw = camYaw.value
         sessionState.camPitch = camPitch.value
@@ -430,7 +575,10 @@ fun InteractiveVulva3DCanvas(
 
     SideEffect { persistAnimatablesToSession() }
     DisposableEffect(sessionState) {
-        onDispose { persistAnimatablesToSession() }
+        onDispose {
+            hapticsEngine.cancel()
+            persistAnimatablesToSession()
+        }
     }
 
     // Live 3D skin sensory glow under fingertip
@@ -458,6 +606,7 @@ fun InteractiveVulva3DCanvas(
     val latestBetaLife2PosturalSettling by rememberUpdatedState(betaLife2PosturalSettling)
     val latestBetaVulvaElasticity by rememberUpdatedState(activeVulvaElasticity)
     val latestBetaBreastSizeBoost by rememberUpdatedState(activeBreastSizeBoost)
+    val latestPeakPreEventActive by rememberUpdatedState(peakPreEventActive)
     val latestPeakEpisodeActive by rememberUpdatedState(peakEpisodeActive)
 
     fun registerPhysiologicalStimulus(level: Float, isDragMotion: Boolean = false) {
@@ -465,8 +614,9 @@ fun InteractiveVulva3DCanvas(
         val nowMs = System.currentTimeMillis()
         lastStimulusTouchMs = nowMs
         touchStimulus = max(touchStimulus, clamped)
-        // During the 6-second post-peak 2x recovery cooldown, let heart rate drop cleanly without touch bumps
-        if (nowMs < peakRecoveryFastEndMs) return
+        // During the 7s autonomous pre-event, 12s peak episode, or post-peak drop down to 125 BPM,
+        // let the physiological sequence control heart rate cleanly without stray touch jumps
+        if (peakPreEventActive || peakEpisodeActive || peakPostCooldownActive) return
         lastHeartStimMs = nowMs
         // Weight sensitivity smoothly upward toward the most sensitive active contact zone
         heartRateSensitivity = max(heartRateSensitivity * 0.86f, clamped)
@@ -540,13 +690,26 @@ fun InteractiveVulva3DCanvas(
             coroutineScope.launch { settleHeadRoll.animateTo(0f, positionalSpring) }
             coroutineScope.launch { settleLegL.animateTo(0f, positionalSpring) }
             coroutineScope.launch { settleLegR.animateTo(0f, positionalSpring) }
+            peakPreEventActive = false
             peakEpisodeActive = false
+            peakPostCooldownActive = false
             peakRecoveryFastEndMs = 0L
+            peakRecoveryHoldUntilMs = 0L
+            hapticsEngine.cancel()
             coroutineScope.launch { peakHeadPitch.animateTo(0f, positionalSpring) }
             coroutineScope.launch { peakHeadTurn.animateTo(0f, positionalSpring) }
             coroutineScope.launch { peakHeadRoll.animateTo(0f, positionalSpring) }
             coroutineScope.launch { peakLegShakeL.animateTo(0f, positionalSpring) }
             coroutineScope.launch { peakLegShakeR.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { peakKneeShiftL.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { peakKneeShiftR.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { peakToeWiggleL.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { peakToeWiggleR.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { peakArmShiftL.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { peakArmShiftR.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { peakFingerCurlL.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { peakFingerCurlR.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { peakMouthOpen.animateTo(0f, positionalSpring) }
         }
     }
 
@@ -644,16 +807,22 @@ fun InteractiveVulva3DCanvas(
         }
     }
 
-    // Smoothly integrate physiological heart rate, trigger 10s peak exertion climax at >= 140 BPM,
-    // and execute 6-second 2× fast recovery followed by normal recovery.
+    // Smoothly integrate physiological heart rate and drive the 3-phase 136 BPM peak sequence:
+    //   Phase 1 (7s pre-event): triggered at 136 BPM -> autonomous HR climb 136 -> 152 BPM
+    //   Phase 2 (12s peak):     sustained at 152 BPM with dramatic choreography + irregular pulsing vibration
+    //   Phase 3 (cooldown):     2-3 powerful sighs + 2x HR recovery stopping cleanly at 125 BPM
     LaunchedEffect(showExperimentalLegs) {
         if (!showExperimentalLegs) {
             touchStimulus = 0f
             heartRateBpm = VulvaGlTextureView.RESTING_HEART_RATE_BPM
             heartRateSensitivity = 0f
             heartRateDrive = 0f
+            peakPreEventActive = false
             peakEpisodeActive = false
+            peakPostCooldownActive = false
             peakRecoveryFastEndMs = 0L
+            peakRecoveryHoldUntilMs = 0L
+            hapticsEngine.cancel()
             return@LaunchedEffect
         }
         val peakRng = kotlin.random.Random(System.currentTimeMillis() xor 0x3D9E51A7L)
@@ -672,24 +841,37 @@ fun InteractiveVulva3DCanvas(
                 }
             }
 
-            // Trigger 10-second peak climax episode when heart rate reaches 140 BPM
-            if (!peakEpisodeActive && heartRateBpm >= PEAK_EPISODE_TRIGGER_BPM && nowMs >= peakRefractoryUntilMs) {
+            // Phase 1 Trigger: enter 7-second pre-event delay immediately upon hitting 136 BPM
+            if (!peakPreEventActive && !peakEpisodeActive && !peakPostCooldownActive &&
+                heartRateBpm >= PEAK_EPISODE_TRIGGER_BPM && nowMs >= peakRefractoryUntilMs
+            ) {
+                peakPreEventActive = true
+                peakPreEventStartMs = nowMs
+                peakPreEventStartBpm = heartRateBpm.coerceIn(PEAK_EPISODE_TRIGGER_BPM, PEAK_PRE_EVENT_TARGET_BPM)
+                peakRecoveryHoldUntilMs = 0L
+            }
+
+            // Phase 1 -> Phase 2 Transition: after 7s pre-event, start the 12-second peak event at 152 BPM
+            if (peakPreEventActive && nowMs - peakPreEventStartMs >= PEAK_PRE_EVENT_DURATION_MS) {
+                peakPreEventActive = false
                 peakEpisodeActive = true
                 peakEpisodeEndMs = nowMs + PEAK_EPISODE_DURATION_MS
+                heartRateBpm = PEAK_PRE_EVENT_TARGET_BPM
             }
-            // End peak episode after 10 seconds -> trigger 2–3 powerful slow sighs & 6s 2× HR recovery
+
+            // Phase 2 -> Phase 3 Transition: end 12-second peak event -> recovery sighs + cooldown ONLY down to 125 BPM
             if (peakEpisodeActive && nowMs >= peakEpisodeEndMs) {
                 peakEpisodeActive = false
+                peakPostCooldownActive = true
                 postPeakSighCount = 2 + peakRng.nextInt(2)
                 postPeakSighToken++
                 peakRecoveryFastEndMs = nowMs + PEAK_FAST_RECOVERY_DURATION_MS
-                peakRefractoryUntilMs = nowMs + PEAK_FAST_RECOVERY_DURATION_MS + 1_500L
+                peakRefractoryUntilMs = nowMs + 4_000L
                 heartRateDrive = 0f
                 heartRateSensitivity = 0f
                 lastHeartStimMs = nowMs - 3_000L
             }
 
-            val inFastPostPeakRecovery = !peakEpisodeActive && nowMs < peakRecoveryFastEndMs
             val secsSinceHeartStim = ((nowMs - lastHeartStimMs).coerceAtLeast(0L)) / 1000f
             if (secsSinceHeartStim > 0.28f && heartRateDrive > 0f) {
                 heartRateDrive = (heartRateDrive - dtSec * 2.2f).coerceAtLeast(0f)
@@ -697,51 +879,215 @@ fun InteractiveVulva3DCanvas(
             if (secsSinceHeartStim > 1.2f && heartRateSensitivity > 0f) {
                 heartRateSensitivity = (heartRateSensitivity - dtSec * 0.18f).coerceAtLeast(0f)
             }
-            heartRateBpm = if (peakEpisodeActive) {
-                // Keep heart rate sustained in peak 140..142 BPM band throughout the 10-second episode
-                heartRateBpm.coerceIn(PEAK_EPISODE_TRIGGER_BPM, VulvaGlTextureView.MAX_HEART_RATE_BPM)
-            } else {
-                VulvaGlTextureView.stepHeartRateBpm(
-                    currentBpm = heartRateBpm,
-                    dtSec = dtSec,
-                    targetSensitivityGain = heartRateSensitivity,
-                    activeDrive = heartRateDrive,
-                    secondsSinceLastStim = secsSinceHeartStim,
-                    recoveryRateMultiplier = if (inFastPostPeakRecovery) 2.0f else 1.0f,
-                    forceRecovery = inFastPostPeakRecovery
-                )
+
+            heartRateBpm = when {
+                peakPreEventActive -> {
+                    // Autonomous steady climb from 136 -> 152 BPM across the 7-second pre-event, regardless of touch
+                    computePreEventHeartRateBpm(peakPreEventStartBpm, nowMs - peakPreEventStartMs)
+                }
+                peakEpisodeActive -> {
+                    // Sustained at peak 152 BPM throughout the 12-second main event
+                    PEAK_PRE_EVENT_TARGET_BPM
+                }
+                peakPostCooldownActive -> {
+                    val cooledBpm = VulvaGlTextureView.stepHeartRateBpm(
+                        currentBpm = heartRateBpm,
+                        dtSec = dtSec,
+                        targetSensitivityGain = 0f,
+                        activeDrive = 0f,
+                        secondsSinceLastStim = 5.0f,
+                        recoveryRateMultiplier = 2.0f,
+                        forceRecovery = true,
+                        recoveryFloorBpm = PEAK_RECOVERY_FLOOR_BPM,
+                        maxBpm = VulvaGlTextureView.PEAK_MAX_HEART_RATE_BPM
+                    )
+                    if (cooledBpm <= PEAK_RECOVERY_FLOOR_BPM + 0.05f || nowMs >= peakRecoveryFastEndMs) {
+                        peakPostCooldownActive = false
+                        peakRecoveryFastEndMs = 0L
+                        peakRecoveryHoldUntilMs = nowMs + PEAK_POST_125_HOLD_DURATION_MS
+                        peakRefractoryUntilMs = nowMs + 900L
+                        lastHeartStimMs = nowMs
+                        max(cooledBpm, PEAK_RECOVERY_FLOOR_BPM)
+                    } else {
+                        cooledBpm
+                    }
+                }
+                else -> {
+                    val holdFloor = if (nowMs < peakRecoveryHoldUntilMs) {
+                        PEAK_RECOVERY_FLOOR_BPM
+                    } else {
+                        VulvaGlTextureView.RESTING_HEART_RATE_BPM
+                    }
+                    VulvaGlTextureView.stepHeartRateBpm(
+                        currentBpm = heartRateBpm,
+                        dtSec = dtSec,
+                        targetSensitivityGain = heartRateSensitivity,
+                        activeDrive = heartRateDrive,
+                        secondsSinceLastStim = secsSinceHeartStim,
+                        recoveryRateMultiplier = 1.0f,
+                        forceRecovery = false,
+                        recoveryFloorBpm = holdFloor,
+                        maxBpm = VulvaGlTextureView.MAX_HEART_RATE_BPM
+                    )
+                }
             }
         }
     }
 
-    // Coordinated ~10-second Peak Exertion Sequence (triggered at >= 140 BPM):
-    //  - Legs: quickly slam shut at start, then shake erratically & independently for the remainder of the 10s
-    //  - Head: first looks straight down (~1.1s), then leans all the way back with quick, small erratic side-to-side shifts
-    //  - Blinking: rapid cadence, mostly double blinks, plus 2 randomly placed 1–2s sustained eye-closures
-    //  - Post-10s: smoothly eases all channels back to normal (while renderer runs 2–3 powerful slow sighs)
+    // Phase 1 — 8-Second Pre-Event Choreography (136 -> 152 BPM):
+    //  - Continuous phone vibration ramping smoothly from low intensity to full high intensity
+    //  - Desynchronized, higher-frequency restless leg & planted-foot knee movement tending from
+    //    closer together -> wider stance at t = 8s, plus subtle building toe/finger/arm tension
+    LaunchedEffect(showExperimentalLegs, peakPreEventActive) {
+        if (!showExperimentalLegs || !peakPreEventActive) {
+            if (!latestPeakEpisodeActive) {
+                hapticsEngine.cancel()
+                val relaxSpec = tween<Float>(durationMillis = 480, easing = FastOutSlowInEasing)
+                coroutineScope.launch { peakKneeShiftL.animateTo(0f, relaxSpec) }
+                coroutineScope.launch { peakKneeShiftR.animateTo(0f, relaxSpec) }
+                coroutineScope.launch { peakToeWiggleL.animateTo(0f, relaxSpec) }
+                coroutineScope.launch { peakToeWiggleR.animateTo(0f, relaxSpec) }
+                coroutineScope.launch { peakArmShiftL.animateTo(0f, relaxSpec) }
+                coroutineScope.launch { peakArmShiftR.animateTo(0f, relaxSpec) }
+                coroutineScope.launch { peakFingerCurlL.animateTo(0f, relaxSpec) }
+                coroutineScope.launch { peakFingerCurlR.animateTo(0f, relaxSpec) }
+            }
+            return@LaunchedEffect
+        }
+        val startMs = peakPreEventStartMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+        val endMs = startMs + PEAK_PRE_EVENT_DURATION_MS
+        val preRng = kotlin.random.Random(startMs xor 0x2F4A6C8EL)
+        val startL = leftLegSpread.value
+        val startR = rightLegSpread.value
+        val dirSign = when {
+            startL - startR > 0.15f -> 1f
+            startR - startL > 0.15f -> -1f
+            else -> if (preRng.nextBoolean()) 1f else -1f
+        }
+
+        // Clear any leftover micro leg-settle offsets cleanly
+        launch { settleLegL.animateTo(0f, tween(180)) }
+        launch { settleLegR.animateTo(0f, tween(180)) }
+        launch { peakLegShakeL.animateTo(0f, tween(180)) }
+        launch { peakLegShakeR.animateTo(0f, tween(180)) }
+
+        // Continuous vibration smoothly ramping from low -> high intensity across the 8 seconds
+        val vibrationJob = launch {
+            try {
+                while (System.currentTimeMillis() < endMs) {
+                    val now = System.currentTimeMillis()
+                    val remaining = (endMs - now).coerceAtLeast(0L)
+                    if (remaining <= 20L) break
+                    val progress = ((now - startMs).toFloat() / PEAK_PRE_EVENT_DURATION_MS.toFloat()).coerceIn(0f, 1f)
+                    if (latestHapticsEnabled) {
+                        val sliceMs = min(240L, remaining + 60L).coerceAtLeast(70L)
+                        hapticsEngine.playContinuousIntensity(progress, durationMs = sliceMs)
+                    } else {
+                        hapticsEngine.cancel()
+                    }
+                    delay(min(155L, remaining))
+                }
+            } finally {
+                if (!latestPeakEpisodeActive) {
+                    hapticsEngine.cancel()
+                }
+            }
+        }
+
+        // Desynchronized restless legs + planted-foot knee fidgets + building subtle toe/finger/arm tension
+        val swayJob = launch {
+            val tau = (2.0 * Math.PI).toFloat()
+            while (true) {
+                val now = System.currentTimeMillis()
+                val u = ((now - startMs).toFloat() / PEAK_PRE_EVENT_DURATION_MS.toFloat()).coerceIn(0f, 1f)
+                val (targetL, targetR) = computePreEventLegTargets(startL, startR, u, dirSign)
+                val (kneeL, kneeR) = computePreEventKneeShiftTargets(u, dirSign)
+                leftLegSpread.snapTo(targetL)
+                rightLegSpread.snapTo(targetR)
+                peakKneeShiftL.snapTo(kneeL)
+                peakKneeShiftR.snapTo(kneeR)
+
+                // Subtle building toe wiggling, finger curling, and arm tension across the 8s build-up
+                val buildEnv = smoothStepPose(0.10f, 0.88f, u)
+                peakToeWiggleL.snapTo((sin(tau * 6.4f * u + 0.5f) * 0.34f + sin(tau * 11.2f * u) * 0.14f) * buildEnv)
+                peakToeWiggleR.snapTo((sin(tau * 7.9f * u + 2.2f) * 0.34f + sin(tau * 13.5f * u + 1.1f) * 0.14f) * buildEnv)
+                peakFingerCurlL.snapTo(((0.22f + 0.20f * sin(tau * 2.3f * u + 0.4f)) * buildEnv).coerceIn(0f, 0.55f))
+                peakFingerCurlR.snapTo(((0.22f + 0.20f * sin(tau * 2.9f * u + 2.1f)) * buildEnv).coerceIn(0f, 0.55f))
+                peakArmShiftL.snapTo((sin(tau * 1.45f * u + 0.2f) * 0.26f) * buildEnv)
+                peakArmShiftR.snapTo((sin(tau * 1.88f * u + 2.3f) * 0.26f) * buildEnv)
+
+                if (now >= endMs) break
+                delay(16L)
+            }
+        }
+
+        vibrationJob.join()
+        swayJob.join()
+    }
+
+    // Phase 2 — 16-Second Dramatic Peak Event Choreography (starts right after 8s pre-event at 152 BPM):
+    //  - Vibration: switches from continuous to high-intensity, high-frequency, slightly irregular pulsing
+    //  - Legs (40% slower = 1.67x durations): slam thighs tightly squeezed together (-0.84f spread +
+    //    -1.12f knee squeeze) -> part open slowly to default (0f) over ~1.25s -> mix planted-foot
+    //    knee/upper-leg shifting (feet stay planted while knees shift) with independent whole-leg
+    //    sweeps and irregular shaking for the remainder of the 16s
+    //  - Head (60% slower = 2.5x durations): deep downward dip, then slow dramatic lean-back with
+    //    large irregular side-to-side swings & rolls throughout the 16s
+    //  - Eyelids: close tightly for 4 full seconds, then open back up into dramatic irregular blinking
+    //  - Mouth: opens smoothly right at start of the 16s with organic breath-gasp modulation
+    //  - Extremities: subtle independent toe wiggling, finger curling, and gentle arm shifting
     var wasPeakEpisodeActive by remember(sessionState) { mutableStateOf(sessionState.peakEpisodeActive) }
     LaunchedEffect(showExperimentalLegs, peakEpisodeActive) {
         if (!showExperimentalLegs) {
+            hapticsEngine.cancel()
             peakHeadPitch.snapTo(0f)
             peakHeadTurn.snapTo(0f)
             peakHeadRoll.snapTo(0f)
             peakLegShakeL.snapTo(0f)
             peakLegShakeR.snapTo(0f)
+            peakKneeShiftL.snapTo(0f)
+            peakKneeShiftR.snapTo(0f)
+            peakToeWiggleL.snapTo(0f)
+            peakToeWiggleR.snapTo(0f)
+            peakArmShiftL.snapTo(0f)
+            peakArmShiftR.snapTo(0f)
+            peakFingerCurlL.snapTo(0f)
+            peakFingerCurlR.snapTo(0f)
+            peakMouthOpen.snapTo(0f)
             wasPeakEpisodeActive = false
             return@LaunchedEffect
         }
         if (!peakEpisodeActive) {
-            val headReturnSpec = tween<Float>(durationMillis = 1050, easing = FastOutSlowInEasing)
-            val shakeStopSpec = tween<Float>(durationMillis = 420, easing = FastOutSlowInEasing)
+            if (!latestPeakPreEventActive) {
+                hapticsEngine.cancel()
+            }
+            val headReturnSpec = tween<Float>(durationMillis = 1250, easing = FastOutSlowInEasing)
+            val shakeStopSpec = tween<Float>(durationMillis = 560, easing = FastOutSlowInEasing)
+            val mouthCloseSpec = tween<Float>(durationMillis = 780, easing = FastOutSlowInEasing)
+            val extremRelaxSpec = tween<Float>(durationMillis = 980, easing = FastOutSlowInEasing)
             coroutineScope.launch { peakHeadPitch.animateTo(0f, headReturnSpec) }
             coroutineScope.launch { peakHeadTurn.animateTo(0f, headReturnSpec) }
             coroutineScope.launch { peakHeadRoll.animateTo(0f, headReturnSpec) }
             coroutineScope.launch { peakLegShakeL.animateTo(0f, shakeStopSpec) }
             coroutineScope.launch { peakLegShakeR.animateTo(0f, shakeStopSpec) }
+            coroutineScope.launch { peakMouthOpen.animateTo(0f, mouthCloseSpec) }
+            if (!latestPeakPreEventActive) {
+                coroutineScope.launch { peakKneeShiftL.animateTo(0f, extremRelaxSpec) }
+                coroutineScope.launch { peakKneeShiftR.animateTo(0f, extremRelaxSpec) }
+                coroutineScope.launch { peakToeWiggleL.animateTo(0f, extremRelaxSpec) }
+                coroutineScope.launch { peakToeWiggleR.animateTo(0f, extremRelaxSpec) }
+                coroutineScope.launch { peakArmShiftL.animateTo(0f, extremRelaxSpec) }
+                coroutineScope.launch { peakArmShiftR.animateTo(0f, extremRelaxSpec) }
+                coroutineScope.launch { peakFingerCurlL.animateTo(0f, extremRelaxSpec) }
+                coroutineScope.launch { peakFingerCurlR.animateTo(0f, extremRelaxSpec) }
+            }
             if (wasPeakEpisodeActive) {
                 wasPeakEpisodeActive = false
-                // Gently relax legs from tightly slammed shut back toward comfortable neutral rest
-                val legRelaxSpec = tween<Float>(durationMillis = 1700, easing = FastOutSlowInEasing)
+                // Ensure eyelids open cleanly and legs relax smoothly back toward comfortable default stance
+                val eyeOpenSpec = tween<Float>(durationMillis = 280, easing = FastOutSlowInEasing)
+                val legRelaxSpec = tween<Float>(durationMillis = 1950, easing = FastOutSlowInEasing)
+                coroutineScope.launch { eyeBlink.animateTo(0f, eyeOpenSpec) }
+                coroutineScope.launch { eyeBlinkR.animateTo(0f, eyeOpenSpec) }
                 coroutineScope.launch { leftLegSpread.animateTo(0f, legRelaxSpec) }
                 coroutineScope.launch { rightLegSpread.animateTo(0f, legRelaxSpec) }
             }
@@ -751,91 +1097,276 @@ fun InteractiveVulva3DCanvas(
         wasPeakEpisodeActive = true
         val startMs = System.currentTimeMillis()
         val endMs = peakEpisodeEndMs.coerceAtLeast(startMs + 1_000L)
-        val totalWindowMs = (endMs - startMs).coerceAtLeast(1_500L)
         val headRng = kotlin.random.Random(startMs xor 0x41B2C3D4L)
         val legLRng = kotlin.random.Random(startMs xor 0x19F8E7D6L)
         val legRRng = kotlin.random.Random(startMs xor 0x72A4B6C8L)
+        val legDriftLRng = kotlin.random.Random(startMs xor 0x3A17F429L)
+        val legDriftRRng = kotlin.random.Random(startMs xor 0x6E82C51BL)
         val blinkRng = kotlin.random.Random(startMs xor 0x55C3E1A9L)
+        val vibRng = kotlin.random.Random(startMs xor 0x8D3F1E27L)
+        val mouthRng = kotlin.random.Random(startMs xor 0x29A7C4F1L)
+        val extremLRng = kotlin.random.Random(startMs xor 0x61C2E3F4L)
+        val extremRRng = kotlin.random.Random(startMs xor 0x94D5A6B7L)
 
-        // 1. Legs: immediately snap/close shut from whatever position they're in, then shake erratically & independently
+        // 0. High-intensity, high-frequency, slightly irregular pulsing phone vibration for the full 16s
+        val pulseVibrationJob = launch {
+            try {
+                while (System.currentTimeMillis() < endMs) {
+                    val remaining = (endMs - System.currentTimeMillis()).coerceAtLeast(0L)
+                    if (remaining <= 30L) break
+                    if (!latestHapticsEnabled) {
+                        hapticsEngine.cancel()
+                        delay(min(100L, remaining))
+                        continue
+                    }
+                    val pulseCount = 6 + vibRng.nextInt(5)
+                    val timingsList = ArrayList<Long>(pulseCount * 2)
+                    val ampsList = ArrayList<Int>(pulseCount * 2)
+                    var chunkMs = 0L
+                    for (p in 0 until pulseCount) {
+                        val onMs = (26 + vibRng.nextInt(28)).toLong()
+                        val offMs = when {
+                            vibRng.nextFloat() < 0.22f -> (14 + vibRng.nextInt(14)).toLong()
+                            vibRng.nextFloat() < 0.16f -> (58 + vibRng.nextInt(32)).toLong()
+                            else -> (22 + vibRng.nextInt(26)).toLong()
+                        }
+                        if (chunkMs + onMs > remaining) break
+                        val amp = 212 + vibRng.nextInt(44)
+                        timingsList.add(onMs)
+                        ampsList.add(amp)
+                        chunkMs += onMs
+                        if (chunkMs + offMs <= remaining) {
+                            timingsList.add(offMs)
+                            ampsList.add(0)
+                            chunkMs += offMs
+                        }
+                    }
+                    if (timingsList.isEmpty()) break
+                    hapticsEngine.playIrregularPeakWaveform(
+                        timings = timingsList.toLongArray(),
+                        amplitudes = ampsList.toIntArray()
+                    )
+                    delay((chunkMs - 10L).coerceAtLeast(25L))
+                }
+            } finally {
+                hapticsEngine.cancel()
+            }
+        }
+
+        // 1. Legs (40% slower = 1.67x durations):
+        //    Slam thighs tightly squeezed together -> slowly part open to default (0f) ->
+        //    mix planted-foot knee/upper-leg shifting with independent whole-leg sweeps & shaking
         val legsJob = launch {
-            val slamDur = 235
-            val jCloseL = launch { leftLegSpread.animateTo(-0.28f, tween(slamDur, easing = FastOutSlowInEasing)) }
-            val jCloseR = launch { rightLegSpread.animateTo(-0.28f, tween(slamDur + 25, easing = FastOutSlowInEasing)) }
+            val slamDurL = 290
+            val slamDurR = 320
+            val jCloseL = launch { leftLegSpread.animateTo(PEAK_LEG_SLAM_SHUT_TARGET, tween(slamDurL, easing = FastOutSlowInEasing)) }
+            val jCloseR = launch { rightLegSpread.animateTo(PEAK_LEG_SLAM_SHUT_TARGET, tween(slamDurR, easing = FastOutSlowInEasing)) }
+            val jSqueezeL = launch { peakKneeShiftL.animateTo(PEAK_KNEE_SLAM_SQUEEZE, tween(slamDurL + 25, easing = FastOutSlowInEasing)) }
+            val jSqueezeR = launch { peakKneeShiftR.animateTo(PEAK_KNEE_SLAM_SQUEEZE, tween(slamDurR + 25, easing = FastOutSlowInEasing)) }
             val jClearL = launch { settleLegL.animateTo(0f, tween(140)) }
             val jClearR = launch { settleLegR.animateTo(0f, tween(140)) }
-            jCloseL.join(); jCloseR.join(); jClearL.join(); jClearR.join()
+            jCloseL.join(); jCloseR.join(); jSqueezeL.join(); jSqueezeR.join(); jClearL.join(); jClearR.join()
 
+            // Brief tense thigh-clinch hold (~260ms) before parting open
+            delay(260L)
+
+            // Slowly part open to default position (0f) over ~1.25 seconds
+            if (System.currentTimeMillis() < endMs) {
+                val partDur = min(PEAK_LEG_PART_OPEN_DURATION_MS.toLong(), (endMs - System.currentTimeMillis()).coerceAtLeast(220L)).toInt()
+                val jOpenL = launch { leftLegSpread.animateTo(0f, tween(partDur, easing = FastOutSlowInEasing)) }
+                val jOpenR = launch { rightLegSpread.animateTo(0f, tween(partDur, easing = FastOutSlowInEasing)) }
+                val jKneeOpenL = launch { peakKneeShiftL.animateTo(0f, tween(partDur, easing = FastOutSlowInEasing)) }
+                val jKneeOpenR = launch { peakKneeShiftR.animateTo(0f, tween(partDur, easing = FastOutSlowInEasing)) }
+                jOpenL.join(); jOpenR.join(); jKneeOpenL.join(); jKneeOpenR.join()
+            }
+
+            var leftFootPlanted = false
+            var rightFootPlanted = false
+
+            // Independent Left Leg: alternates between Planted-Foot Knee Shifting and Whole-Leg Sweeps (40% slower)
+            val leftDriftJob = launch {
+                var sideSign = if (legDriftLRng.nextBoolean()) 1f else -1f
+                var firstPlantedPass = true
+                while (System.currentTimeMillis() < endMs) {
+                    val usePlantedKneeMode = firstPlantedPass || legDriftLRng.nextFloat() < 0.50f
+                    firstPlantedPass = false
+                    if (usePlantedKneeMode) {
+                        // Plant foot steadily while knee & upper leg shift back and forth (including inward thigh press)
+                        leftFootPlanted = true
+                        val plantedFootSpread = (-0.18f + legDriftLRng.nextFloat() * 0.56f)
+                        leftLegSpread.animateTo(plantedFootSpread, tween(420 + legDriftLRng.nextInt(260), easing = FastOutSlowInEasing))
+                        val kneeCycles = 2 + legDriftLRng.nextInt(3)
+                        for (c in 0 until kneeCycles) {
+                            if (System.currentTimeMillis() >= endMs) break
+                            sideSign = -sideSign
+                            val kneeTarget = if (sideSign < 0f) {
+                                -(0.45f + legDriftLRng.nextFloat() * 0.62f) // deep inward thigh-squeeze press (-0.45..-1.07)
+                            } else {
+                                0.32f + legDriftLRng.nextFloat() * 0.54f // outward knee roll (+0.32..+0.86)
+                            }
+                            val kneeDur = 420 + legDriftLRng.nextInt(460)
+                            peakKneeShiftL.animateTo(kneeTarget, tween(kneeDur, easing = FastOutSlowInEasing))
+                            if (legDriftLRng.nextFloat() < 0.34f && System.currentTimeMillis() < endMs) {
+                                delay((95 + legDriftLRng.nextInt(185)).toLong())
+                            }
+                        }
+                        leftFootPlanted = false
+                    } else {
+                        // Whole-leg spread sweep (40% slower: 400..1100ms) with organic knee follow-through
+                        sideSign = if (legDriftLRng.nextFloat() < 0.72f) -sideSign else sideSign
+                        val rawTarget = if (sideSign > 0f) {
+                            0.18f + legDriftLRng.nextFloat() * 0.64f
+                        } else {
+                            -(0.18f + legDriftLRng.nextFloat() * 0.58f)
+                        }
+                        val kneeFollow = if (sideSign < 0f) {
+                            -(0.32f + legDriftLRng.nextFloat() * 0.68f) // natural inward thigh clinch
+                        } else {
+                            -0.12f + legDriftLRng.nextFloat() * 0.48f
+                        }
+                        val moveDur = 400 + legDriftLRng.nextInt(700)
+                        val jSpread = launch { leftLegSpread.animateTo(rawTarget, tween(moveDur, easing = FastOutSlowInEasing)) }
+                        val jKnee = launch { peakKneeShiftL.animateTo(kneeFollow, tween(moveDur + 60, easing = FastOutSlowInEasing)) }
+                        jSpread.join(); jKnee.join()
+                        if (legDriftLRng.nextFloat() < 0.36f && System.currentTimeMillis() < endMs) {
+                            delay((95 + legDriftLRng.nextInt(230)).toLong())
+                        }
+                    }
+                }
+            }
+
+            // Independent Right Leg: staggered phase alternating Planted-Foot Knee Shifting and Whole-Leg Sweeps (40% slower)
+            val rightDriftJob = launch {
+                delay((185 + legDriftRRng.nextInt(240)).toLong())
+                var sideSign = if (legDriftRRng.nextBoolean()) 1f else -1f
+                while (System.currentTimeMillis() < endMs) {
+                    val usePlantedKneeMode = legDriftRRng.nextFloat() < 0.50f
+                    if (usePlantedKneeMode) {
+                        rightFootPlanted = true
+                        val plantedFootSpread = (-0.18f + legDriftRRng.nextFloat() * 0.56f)
+                        rightLegSpread.animateTo(plantedFootSpread, tween(410 + legDriftRRng.nextInt(270), easing = FastOutSlowInEasing))
+                        val kneeCycles = 2 + legDriftRRng.nextInt(3)
+                        for (c in 0 until kneeCycles) {
+                            if (System.currentTimeMillis() >= endMs) break
+                            sideSign = -sideSign
+                            val kneeTarget = if (sideSign < 0f) {
+                                -(0.45f + legDriftRRng.nextFloat() * 0.62f)
+                            } else {
+                                0.32f + legDriftRRng.nextFloat() * 0.54f
+                            }
+                            val kneeDur = 410 + legDriftRRng.nextInt(480)
+                            peakKneeShiftR.animateTo(kneeTarget, tween(kneeDur, easing = FastOutSlowInEasing))
+                            if (legDriftRRng.nextFloat() < 0.34f && System.currentTimeMillis() < endMs) {
+                                delay((95 + legDriftRRng.nextInt(190)).toLong())
+                            }
+                        }
+                        rightFootPlanted = false
+                    } else {
+                        sideSign = if (legDriftRRng.nextFloat() < 0.72f) -sideSign else sideSign
+                        val rawTarget = if (sideSign > 0f) {
+                            0.18f + legDriftRRng.nextFloat() * 0.64f
+                        } else {
+                            -(0.18f + legDriftRRng.nextFloat() * 0.58f)
+                        }
+                        val kneeFollow = if (sideSign < 0f) {
+                            -(0.32f + legDriftRRng.nextFloat() * 0.68f)
+                        } else {
+                            -0.12f + legDriftRRng.nextFloat() * 0.48f
+                        }
+                        val moveDur = 390 + legDriftRRng.nextInt(710)
+                        val jSpread = launch { rightLegSpread.animateTo(rawTarget, tween(moveDur, easing = FastOutSlowInEasing)) }
+                        val jKnee = launch { peakKneeShiftR.animateTo(kneeFollow, tween(moveDur + 60, easing = FastOutSlowInEasing)) }
+                        jSpread.join(); jKnee.join()
+                        if (legDriftRRng.nextFloat() < 0.36f && System.currentTimeMillis() < endMs) {
+                            delay((90 + legDriftRRng.nextInt(235)).toLong())
+                        }
+                    }
+                }
+            }
+
+            // Independent leg tremor/shakes (40% slower: 75..205ms; attenuated while foot is planted!)
             val leftShakeJob = launch {
                 while (System.currentTimeMillis() < endMs) {
-                    val burstAmp = 0.025f + legLRng.nextFloat() * 0.090f
-                    val upDur = 60 + legLRng.nextInt(95)
-                    val downDur = 65 + legLRng.nextInt(105)
+                    val plantedScale = if (leftFootPlanted) 0.14f else 1.0f
+                    val burstDir = if (legLRng.nextFloat() < 0.56f) 1f else -1f
+                    val burstAmp = burstDir * (0.090f + legLRng.nextFloat() * 0.155f) * plantedScale
+                    val upDur = 76 + legLRng.nextInt(120)
+                    val downDur = 86 + legLRng.nextInt(135)
                     peakLegShakeL.animateTo(burstAmp, tween(upDur, easing = FastOutSlowInEasing))
-                    val returnFloor = legLRng.nextFloat() * 0.022f
-                    peakLegShakeL.animateTo(returnFloor, tween(downDur, easing = FastOutSlowInEasing))
-                    if (legLRng.nextFloat() < 0.28f) {
-                        delay((45 + legLRng.nextInt(110)).toLong())
+                    val rebound = -burstDir * (0.042f + legLRng.nextFloat() * 0.105f) * plantedScale
+                    peakLegShakeL.animateTo(rebound, tween(downDur, easing = FastOutSlowInEasing))
+                    if (legLRng.nextFloat() < 0.26f) {
+                        delay((58 + legLRng.nextInt(140)).toLong())
                     }
                 }
             }
             val rightShakeJob = launch {
-                delay((35 + legRRng.nextInt(70)).toLong())
+                delay((54 + legRRng.nextInt(108)).toLong())
                 while (System.currentTimeMillis() < endMs) {
-                    val burstAmp = 0.025f + legRRng.nextFloat() * 0.090f
-                    val upDur = 58 + legRRng.nextInt(100)
-                    val downDur = 62 + legRRng.nextInt(110)
+                    val plantedScale = if (rightFootPlanted) 0.14f else 1.0f
+                    val burstDir = if (legRRng.nextFloat() < 0.56f) 1f else -1f
+                    val burstAmp = burstDir * (0.090f + legRRng.nextFloat() * 0.155f) * plantedScale
+                    val upDur = 74 + legRRng.nextInt(124)
+                    val downDur = 84 + legRRng.nextInt(140)
                     peakLegShakeR.animateTo(burstAmp, tween(upDur, easing = FastOutSlowInEasing))
-                    val returnFloor = legRRng.nextFloat() * 0.022f
-                    peakLegShakeR.animateTo(returnFloor, tween(downDur, easing = FastOutSlowInEasing))
-                    if (legRRng.nextFloat() < 0.28f) {
-                        delay((40 + legRRng.nextInt(115)).toLong())
+                    val rebound = -burstDir * (0.042f + legRRng.nextFloat() * 0.105f) * plantedScale
+                    peakLegShakeR.animateTo(rebound, tween(downDur, easing = FastOutSlowInEasing))
+                    if (legRRng.nextFloat() < 0.26f) {
+                        delay((54 + legRRng.nextInt(148)).toLong())
                     }
                 }
             }
+            leftDriftJob.join()
+            rightDriftJob.join()
             leftShakeJob.join()
             rightShakeJob.join()
         }
 
-        // 2. Head: look straight down first (~1.1s), then lean all the way back for remainder of 10s,
-        //    with small, quick, erratic side-to-side movements throughout
+        // 2. Head (60% slower = 2.5x durations): deep downward dip, then slow dramatic lean-back with
+        //    large organic pitch heaves, wide irregular side-to-side head turns, and pronounced rolls
         val headPitchJob = launch {
-            launch { headPitch.animateTo(0f, tween(220, easing = FastOutSlowInEasing)) }
-            launch { idleHeadPitch.animateTo(0f, tween(220, easing = FastOutSlowInEasing)) }
-            // Phase 1: Look straight down (+1.0f) briefly at the start of the 10s episode
-            peakHeadPitch.animateTo(1.0f, tween(260, easing = FastOutSlowInEasing))
-            delay(840L)
+            launch { headPitch.animateTo(0f, tween(360, easing = FastOutSlowInEasing)) }
+            launch { idleHeadPitch.animateTo(0f, tween(360, easing = FastOutSlowInEasing)) }
+            // Dip head down (+1.0f) as thighs squeeze shut (2.5x slower than 210ms)
+            peakHeadPitch.animateTo(1.0f, tween(520, easing = FastOutSlowInEasing))
+            delay(950L)
             if (System.currentTimeMillis() < endMs) {
-                // Phase 2: Lean head all the way back (-1.0f) for the remainder of the 10s
-                peakHeadPitch.animateTo(-1.0f, tween(520, easing = FastOutSlowInEasing))
+                // Throw head deeply back (-1.0f) in 920ms, then execute slow, expressive pitch arcs
+                peakHeadPitch.animateTo(-1.0f, tween(920, easing = FastOutSlowInEasing))
                 while (System.currentTimeMillis() < endMs) {
-                    val subtleHeave = -0.89f - headRng.nextFloat() * 0.11f
-                    peakHeadPitch.animateTo(subtleHeave, tween(260 + headRng.nextInt(240), easing = FastOutSlowInEasing))
+                    val heaveTarget = if (headRng.nextFloat() < 0.34f) {
+                        -(0.42f + headRng.nextFloat() * 0.26f)
+                    } else {
+                        -(0.82f + headRng.nextFloat() * 0.18f)
+                    }
+                    peakHeadPitch.animateTo(heaveTarget, tween(440 + headRng.nextInt(580), easing = FastOutSlowInEasing))
+                    if (headRng.nextFloat() < 0.28f && System.currentTimeMillis() < endMs) {
+                        delay((105 + headRng.nextInt(235)).toLong())
+                    }
                 }
             }
         }
         val headSideJob = launch {
             var sideSign = if (headRng.nextBoolean()) 1f else -1f
             while (System.currentTimeMillis() < endMs) {
-                sideSign = if (headRng.nextFloat() < 0.78f) -sideSign else sideSign
-                // Small, quick, erratic side-to-side shifts (not dramatic wide swings)
-                val turnTarget = sideSign * (0.09f + headRng.nextFloat() * 0.13f)
-                val rollTarget = -sideSign * (0.025f + headRng.nextFloat() * 0.032f)
-                val moveDur = 125 + headRng.nextInt(165)
+                sideSign = if (headRng.nextFloat() < 0.74f) -sideSign else sideSign
+                val turnTarget = sideSign * (0.28f + headRng.nextFloat() * 0.44f)
+                val rollTarget = -sideSign * (0.070f + headRng.nextFloat() * 0.100f)
+                val moveDur = 280 + headRng.nextInt(380) // 60% slower (2.5x of 110..265ms)
                 val jT = launch { peakHeadTurn.animateTo(turnTarget, tween(moveDur, easing = FastOutSlowInEasing)) }
-                val jR = launch { peakHeadRoll.animateTo(rollTarget, tween(moveDur + 20, easing = FastOutSlowInEasing)) }
+                val jR = launch { peakHeadRoll.animateTo(rollTarget, tween(moveDur + 45, easing = FastOutSlowInEasing)) }
                 jT.join(); jR.join()
-                delay((35 + headRng.nextInt(105)).toLong())
+                if (headRng.nextFloat() < 0.32f && System.currentTimeMillis() < endMs) {
+                    val jitterTurn = turnTarget * (0.58f + headRng.nextFloat() * 0.26f)
+                    peakHeadTurn.animateTo(jitterTurn, tween(195 + headRng.nextInt(135), easing = FastOutSlowInEasing))
+                }
+                delay((75 + headRng.nextInt(185)).toLong())
             }
         }
 
-        // 3. Peak blinking: much faster cadence, mostly double blinks, plus 2 randomly placed 1–2s sustained closures
+        // 3. Eyelids: close tightly for 4 full seconds at start, then open back up into dramatic
+        //    rapid irregular peak blinking & flutter bursts for the remaining ~12 seconds
         val peakBlinkJob = launch {
-            val hold1AtMs = startMs + (totalWindowMs * (0.18f + blinkRng.nextFloat() * 0.22f)).toLong()
-            val hold2AtMs = startMs + (totalWindowMs * (0.56f + blinkRng.nextFloat() * 0.22f)).toLong()
-            var hold1Done = false
-            var hold2Done = false
-
             suspend fun runPeakBlink(amp: Float, closeMs: Int, holdMs: Long, openMs: Int) {
                 val asym = latestBetaLife2AsymmetricBlinking
                 if (!asym) {
@@ -862,55 +1393,165 @@ fun InteractiveVulva3DCanvas(
                 jL.join(); jR.join()
             }
 
+            // Sustained 4-second full eyelid closure right at start of the 16s peak event
+            val closeL = launch { eyeBlink.animateTo(1f, tween(115, easing = FastOutSlowInEasing)) }
+            val closeR = launch { eyeBlinkR.animateTo(1f, tween(122, easing = FastOutSlowInEasing)) }
+            closeL.join(); closeR.join()
+            val fourSecHold = PEAK_EYELID_CLOSE_DURATION_MS.coerceAtMost((endMs - System.currentTimeMillis()).coerceAtLeast(250L))
+            delay(fourSecHold)
+            val openL = launch { eyeBlink.animateTo(0f, tween(230, easing = FastOutSlowInEasing)) }
+            val openR = launch { eyeBlinkR.animateTo(0f, tween(245, easing = FastOutSlowInEasing)) }
+            openL.join(); openR.join()
+
+            var extraHoldCount = 0
             while (System.currentTimeMillis() < endMs) {
-                val now = System.currentTimeMillis()
-                val triggerHold1 = !hold1Done && now >= hold1AtMs
-                val triggerHold2 = !hold2Done && hold1Done && now >= hold2AtMs
-                if (triggerHold1 || triggerHold2) {
-                    if (triggerHold1) hold1Done = true else hold2Done = true
-                    val shutMs = (1150 + blinkRng.nextInt(750)).toLong()
-                    val clampedShutMs = shutMs.coerceAtMost((endMs - System.currentTimeMillis()).coerceAtLeast(250L))
-                    runPeakBlink(amp = 1f, closeMs = 85, holdMs = clampedShutMs, openMs = 150)
+                if (extraHoldCount < 2 && blinkRng.nextFloat() < 0.18f) {
+                    extraHoldCount++
+                    val shutMs = (680 + blinkRng.nextInt(580)).toLong()
+                    val clampedShutMs = shutMs.coerceAtMost((endMs - System.currentTimeMillis()).coerceAtLeast(180L))
+                    runPeakBlink(amp = 1f, closeMs = 70, holdMs = clampedShutMs, openMs = 155)
                 } else {
-                    val closeMs = 54 + blinkRng.nextInt(22)
-                    val holdMs = (16 + blinkRng.nextInt(18)).toLong()
-                    val openMs = 92 + blinkRng.nextInt(38)
+                    val closeMs = 46 + blinkRng.nextInt(22)
+                    val holdMs = (14 + blinkRng.nextInt(18)).toLong()
+                    val openMs = 82 + blinkRng.nextInt(36)
                     runPeakBlink(1f, closeMs, holdMs, openMs)
-                    // Mostly double blinks (~78%) during peak exertion
-                    if (blinkRng.nextFloat() < 0.78f && System.currentTimeMillis() < endMs) {
-                        delay((75 + blinkRng.nextInt(65)).toLong())
-                        runPeakBlink(0.92f + blinkRng.nextFloat() * 0.08f, 52 + blinkRng.nextInt(18), 16L + blinkRng.nextInt(16), 90 + blinkRng.nextInt(34))
+                    if (blinkRng.nextFloat() < 0.80f && System.currentTimeMillis() < endMs) {
+                        delay((60 + blinkRng.nextInt(55)).toLong())
+                        runPeakBlink(0.94f + blinkRng.nextFloat() * 0.06f, 44 + blinkRng.nextInt(18), 14L + blinkRng.nextInt(16), 82 + blinkRng.nextInt(32))
+                        if (blinkRng.nextFloat() < 0.35f && System.currentTimeMillis() < endMs) {
+                            delay((55 + blinkRng.nextInt(45)).toLong())
+                            runPeakBlink(0.88f + blinkRng.nextFloat() * 0.12f, 44 + blinkRng.nextInt(16), 14L + blinkRng.nextInt(14), 84 + blinkRng.nextInt(30))
+                        }
                     }
                 }
-                delay((170 + blinkRng.nextInt(250)).toLong())
+                delay((135 + blinkRng.nextInt(225)).toLong())
             }
         }
 
+        // 4. Mouth (Bonus #2): smoothly opens right at the start of the 16-second event and modulates
+        //    organically with breath/gasp waves before softening cleanly at the end
+        val mouthJob = launch {
+            peakMouthOpen.animateTo(0.94f, tween(340, easing = FastOutSlowInEasing))
+            delay(480L)
+            while (System.currentTimeMillis() < endMs) {
+                val remainFrac = ((endMs - System.currentTimeMillis()).toFloat() / PEAK_EPISODE_DURATION_MS.toFloat()).coerceIn(0f, 1f)
+                val targetOpen = if (remainFrac < 0.12f) {
+                    0.35f + mouthRng.nextFloat() * 0.25f
+                } else {
+                    0.62f + mouthRng.nextFloat() * 0.38f
+                }
+                peakMouthOpen.animateTo(targetOpen, tween(540 + mouthRng.nextInt(560), easing = FastOutSlowInEasing))
+                if (mouthRng.nextFloat() < 0.30f && System.currentTimeMillis() < endMs) {
+                    delay((140 + mouthRng.nextInt(260)).toLong())
+                }
+            }
+        }
+
+        // 5. Subtle Extremities (Bonus #3): independent toe wiggling, subtle finger curling, and gentle arm shifting
+        val extremitiesJob = launch {
+            val toesLJob = launch {
+                while (System.currentTimeMillis() < endMs) {
+                    val target = -0.68f + extremLRng.nextFloat() * 1.46f // -0.68..+0.78
+                    peakToeWiggleL.animateTo(target, tween(290 + extremLRng.nextInt(380), easing = FastOutSlowInEasing))
+                    if (extremLRng.nextFloat() < 0.32f && System.currentTimeMillis() < endMs) {
+                        delay((90 + extremLRng.nextInt(170)).toLong())
+                    }
+                }
+            }
+            val toesRJob = launch {
+                delay((120 + extremRRng.nextInt(180)).toLong())
+                while (System.currentTimeMillis() < endMs) {
+                    val target = -0.68f + extremRRng.nextFloat() * 1.46f
+                    peakToeWiggleR.animateTo(target, tween(280 + extremRRng.nextInt(400), easing = FastOutSlowInEasing))
+                    if (extremRRng.nextFloat() < 0.32f && System.currentTimeMillis() < endMs) {
+                        delay((85 + extremRRng.nextInt(175)).toLong())
+                    }
+                }
+            }
+            val fingersLJob = launch {
+                while (System.currentTimeMillis() < endMs) {
+                    val target = 0.18f + extremLRng.nextFloat() * 0.66f // subtle curl/grip 0.18..0.84
+                    peakFingerCurlL.animateTo(target, tween(460 + extremLRng.nextInt(520), easing = FastOutSlowInEasing))
+                    if (extremLRng.nextFloat() < 0.35f && System.currentTimeMillis() < endMs) {
+                        delay((150 + extremLRng.nextInt(240)).toLong())
+                    }
+                }
+            }
+            val fingersRJob = launch {
+                delay((175 + extremRRng.nextInt(220)).toLong())
+                while (System.currentTimeMillis() < endMs) {
+                    val target = 0.18f + extremRRng.nextFloat() * 0.66f
+                    peakFingerCurlR.animateTo(target, tween(450 + extremRRng.nextInt(540), easing = FastOutSlowInEasing))
+                    if (extremRRng.nextFloat() < 0.35f && System.currentTimeMillis() < endMs) {
+                        delay((140 + extremRRng.nextInt(250)).toLong())
+                    }
+                }
+            }
+            val armsLJob = launch {
+                while (System.currentTimeMillis() < endMs) {
+                    val target = -0.52f + extremLRng.nextFloat() * 1.14f // subtle arm shift -0.52..+0.62
+                    peakArmShiftL.animateTo(target, tween(760 + extremLRng.nextInt(720), easing = FastOutSlowInEasing))
+                    if (extremLRng.nextFloat() < 0.40f && System.currentTimeMillis() < endMs) {
+                        delay((210 + extremLRng.nextInt(320)).toLong())
+                    }
+                }
+            }
+            val armsRJob = launch {
+                delay((260 + extremRRng.nextInt(320)).toLong())
+                while (System.currentTimeMillis() < endMs) {
+                    val target = -0.52f + extremRRng.nextFloat() * 1.14f
+                    peakArmShiftR.animateTo(target, tween(740 + extremRRng.nextInt(750), easing = FastOutSlowInEasing))
+                    if (extremRRng.nextFloat() < 0.40f && System.currentTimeMillis() < endMs) {
+                        delay((200 + extremRRng.nextInt(330)).toLong())
+                    }
+                }
+            }
+            toesLJob.join(); toesRJob.join()
+            fingersLJob.join(); fingersRJob.join()
+            armsLJob.join(); armsRJob.join()
+        }
+
+        pulseVibrationJob.join()
         legsJob.join()
         headPitchJob.join()
         headSideJob.join()
         peakBlinkJob.join()
+        mouthJob.join()
+        extremitiesJob.join()
     }
 
-    // Gentle beat-synchronized pulse for the optional top-left Heart Rate HUD badge
-    LaunchedEffect(showExperimentalLegs, betaLife2ShowHeartRate) {
+    // Beat-synchronized pulse for the optional top-left Heart Rate HUD badge, switching to a slow,
+    // glowing green pulsation across the entire pill during the 7-second pre-event delay
+    LaunchedEffect(showExperimentalLegs, betaLife2ShowHeartRate, peakPreEventActive) {
         if (!showExperimentalLegs || !betaLife2ShowHeartRate) {
             heartPulseScale.snapTo(1f)
+            heartPillPulseScale.snapTo(1f)
             return@LaunchedEffect
         }
+        if (peakPreEventActive) {
+            while (true) {
+                val upPill = launch { heartPillPulseScale.animateTo(1.13f, tween(680, easing = FastOutSlowInEasing)) }
+                val upHeart = launch { heartPulseScale.animateTo(1.24f, tween(680, easing = FastOutSlowInEasing)) }
+                upPill.join(); upHeart.join()
+                val downPill = launch { heartPillPulseScale.animateTo(0.98f, tween(680, easing = FastOutSlowInEasing)) }
+                val downHeart = launch { heartPulseScale.animateTo(0.96f, tween(680, easing = FastOutSlowInEasing)) }
+                downPill.join(); downHeart.join()
+            }
+        }
+        heartPillPulseScale.animateTo(1f, tween(220, easing = FastOutSlowInEasing))
         while (true) {
             val bpm = latestHeartRateBpm.coerceIn(
                 VulvaGlTextureView.RESTING_HEART_RATE_BPM,
-                VulvaGlTextureView.MAX_HEART_RATE_BPM
+                VulvaGlTextureView.PEAK_MAX_HEART_RATE_BPM
             )
-            val beatPeriodMs = (60_000f / bpm).roundToInt().coerceIn(380, 1050)
+            val beatPeriodMs = (60_000f / bpm).roundToInt().coerceIn(360, 1050)
             val hrNorm = VulvaGlTextureView.heartRateExertionNorm(bpm)
-            val systoleScale = 1.12f + 0.08f * hrNorm
-            val systoleMs = (beatPeriodMs * 0.18f).roundToInt().coerceIn(75, 160)
-            val diastoleMs = (beatPeriodMs * 0.28f).roundToInt().coerceIn(110, 240)
+            val systoleScale = 1.12f + 0.09f * hrNorm
+            val systoleMs = (beatPeriodMs * 0.18f).roundToInt().coerceIn(70, 160)
+            val diastoleMs = (beatPeriodMs * 0.28f).roundToInt().coerceIn(105, 240)
             heartPulseScale.animateTo(systoleScale, tween(systoleMs, easing = FastOutSlowInEasing))
             heartPulseScale.animateTo(1.0f, tween(diastoleMs, easing = FastOutSlowInEasing))
-            val pauseMs = (beatPeriodMs - systoleMs - diastoleMs).coerceAtLeast(90).toLong()
+            val pauseMs = (beatPeriodMs - systoleMs - diastoleMs).coerceAtLeast(80).toLong()
             delay(pauseMs)
         }
     }
@@ -1516,6 +2157,15 @@ fun InteractiveVulva3DCanvas(
         }
     }
 
+    val activeLegMinSpread = if (
+        peakPreEventActive || peakEpisodeActive ||
+        leftLegSpread.value < BlossomSdfBodyBuilder.MANUAL_MIN_LEG_SPREAD ||
+        rightLegSpread.value < BlossomSdfBodyBuilder.MANUAL_MIN_LEG_SPREAD
+    ) {
+        BlossomSdfBodyBuilder.PEAK_MIN_LEG_SPREAD
+    } else {
+        BlossomSdfBodyBuilder.MANUAL_MIN_LEG_SPREAD
+    }
     val currentDeform = VulvaDeformationState(
         leftOuter = leftOuterSpread.value,
         rightOuter = rightOuterSpread.value,
@@ -1527,8 +2177,8 @@ fun InteractiveVulva3DCanvas(
         rightBreastX = rightBreastX.value,
         rightBreastY = rightBreastY.value,
         breastSize = breastSize,
-        leftLegSpread = (leftLegSpread.value + settleLegL.value + peakLegShakeL.value).coerceIn(-0.30f, 1f),
-        rightLegSpread = (rightLegSpread.value + settleLegR.value + peakLegShakeR.value).coerceIn(-0.30f, 1f),
+        leftLegSpread = (leftLegSpread.value + settleLegL.value + peakLegShakeL.value).coerceIn(activeLegMinSpread, 1f),
+        rightLegSpread = (rightLegSpread.value + settleLegR.value + peakLegShakeR.value).coerceIn(activeLegMinSpread, 1f),
         selfSpreadPose = selfSpreadPose.value,
         headTurn = (headTurn.value + idleHeadTurn.value + settleHeadTurn.value + peakHeadTurn.value).coerceIn(-1f, 1f),
         headPitch = (headPitch.value + idleHeadPitch.value + settleHeadPitch.value + peakHeadPitch.value).coerceIn(-1f, 1f),
@@ -1566,7 +2216,16 @@ fun InteractiveVulva3DCanvas(
         eyelidGazeTrack = if (betaLife2EyelidTracking) 1f else 0f,
         swallowPhase = swallowPhase.value,
         nostrilBreath = nostrilBreath.value,
-        livingWarmth = livingWarmth.value
+        livingWarmth = livingWarmth.value,
+        leftKneeShift = peakKneeShiftL.value,
+        rightKneeShift = peakKneeShiftR.value,
+        leftToeWiggle = peakToeWiggleL.value,
+        rightToeWiggle = peakToeWiggleR.value,
+        leftArmShift = peakArmShiftL.value,
+        rightArmShift = peakArmShiftR.value,
+        leftFingerCurl = peakFingerCurlL.value,
+        rightFingerCurl = peakFingerCurlR.value,
+        mouthOpen = peakMouthOpen.value
     )
     val currentCam = VulvaCamera3D(
         yawDeg = camYaw.value,
@@ -1611,7 +2270,10 @@ fun InteractiveVulva3DCanvas(
                 DisposableEffect(lifecycleOwner, glViewRef) {
                     val observer = LifecycleEventObserver { _, event ->
                         when (event) {
-                            Lifecycle.Event.ON_PAUSE -> glViewRef?.setRenderingPaused(true)
+                            Lifecycle.Event.ON_PAUSE -> {
+                                hapticsEngine.cancel()
+                                glViewRef?.setRenderingPaused(true)
+                            }
                             Lifecycle.Event.ON_RESUME -> glViewRef?.setRenderingPaused(false)
                             else -> Unit
                         }
@@ -2092,9 +2754,9 @@ fun InteractiveVulva3DCanvas(
                                             }
                                         }
 
-                                        if (dLeftLeg != 0f || dRightLeg != 0f) {
-                                            val nextLL = (leftLegSpread.value + dLeftLeg).coerceIn(-0.30f, 1f)
-                                            val nextRL = (rightLegSpread.value + dRightLeg).coerceIn(-0.30f, 1f)
+                                        if ((dLeftLeg != 0f || dRightLeg != 0f) && !latestPeakPreEventActive && !latestPeakEpisodeActive) {
+                                            val nextLL = (leftLegSpread.value + dLeftLeg).coerceIn(BlossomSdfBodyBuilder.MANUAL_MIN_LEG_SPREAD, 1f)
+                                            val nextRL = (rightLegSpread.value + dRightLeg).coerceIn(BlossomSdfBodyBuilder.MANUAL_MIN_LEG_SPREAD, 1f)
                                             coroutineScope.launch {
                                                 leftLegSpread.snapTo(nextLL)
                                                 rightLegSpread.snapTo(nextRL)
@@ -2226,50 +2888,131 @@ fun InteractiveVulva3DCanvas(
                 ) {
                     val bpmInt = heartRateBpm.roundToInt()
                     val hrNorm = VulvaGlTextureView.heartRateExertionNorm(heartRateBpm)
-                    val heartTint = Color(
-                        red = 1.0f,
-                        green = (0.48f - 0.18f * hrNorm).coerceIn(0.24f, 0.55f),
-                        blue = (0.56f - 0.24f * hrNorm).coerceIn(0.26f, 0.60f),
-                        alpha = 1.0f
-                    )
-                    Surface(
-                        modifier = Modifier
-                            .testTag("heart_rate_hud_pill")
-                            .semantics {
-                                contentDescription = "Heart rate $bpmInt beats per minute"
-                            },
-                        shape = RoundedCornerShape(20.dp),
-                        color = Color(0xFF1D1416).copy(alpha = 0.80f),
-                        border = androidx.compose.foundation.BorderStroke(
-                            width = 1.dp,
-                            color = heartTint.copy(alpha = 0.32f + 0.38f * hrNorm)
-                        ),
-                        shadowElevation = 4.dp
+                    val preGreenPulseFrac = ((heartPillPulseScale.value - 0.98f) / 0.15f).coerceIn(0f, 1f)
+                    val heartTint = if (peakPreEventActive) {
+                        Color(
+                            red = 0.20f + 0.14f * preGreenPulseFrac,
+                            green = 0.88f + 0.12f * preGreenPulseFrac,
+                            blue = 0.48f + 0.16f * preGreenPulseFrac,
+                            alpha = 1.0f
+                        )
+                    } else {
+                        Color(
+                            red = 1.0f,
+                            green = (0.48f - 0.18f * hrNorm).coerceIn(0.24f, 0.55f),
+                            blue = (0.56f - 0.24f * hrNorm).coerceIn(0.26f, 0.60f),
+                            alpha = 1.0f
+                        )
+                    }
+                    val pillBackground = if (peakPreEventActive) {
+                        Color(0xFF0E2B1C).copy(alpha = 0.84f + 0.10f * preGreenPulseFrac)
+                    } else {
+                        Color(0xFF1D1416).copy(alpha = 0.80f)
+                    }
+                    val pillBorderColor = if (peakPreEventActive) {
+                        heartTint.copy(alpha = 0.55f + 0.42f * preGreenPulseFrac)
+                    } else {
+                        heartTint.copy(alpha = 0.32f + 0.38f * hrNorm)
+                    }
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalAlignment = Alignment.Start
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        Surface(
+                            modifier = Modifier
+                                .scale(heartPillPulseScale.value)
+                                .testTag("heart_rate_hud_pill")
+                                .semantics {
+                                    contentDescription = "Heart rate $bpmInt beats per minute"
+                                },
+                            shape = RoundedCornerShape(20.dp),
+                            color = pillBackground,
+                            border = androidx.compose.foundation.BorderStroke(
+                                width = if (peakPreEventActive) 1.5.dp else 1.dp,
+                                color = pillBorderColor
+                            ),
+                            shadowElevation = 4.dp
                         ) {
-                            Icon(
-                                imageVector = Icons.Filled.Favorite,
-                                contentDescription = null,
-                                tint = heartTint,
-                                modifier = Modifier
-                                    .size(15.dp)
-                                    .scale(heartPulseScale.value)
-                            )
-                            Text(
-                                text = "$bpmInt",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = "BPM",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.White.copy(alpha = 0.72f)
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Favorite,
+                                    contentDescription = null,
+                                    tint = heartTint,
+                                    modifier = Modifier
+                                        .size(15.dp)
+                                        .scale(heartPulseScale.value)
+                                )
+                                Text(
+                                    text = "$bpmInt",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (peakPreEventActive) Color(0xFFE6FFF1) else Color.White
+                                )
+                                Text(
+                                    text = "BPM",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (peakPreEventActive) Color(0xFF8CFFB8) else Color.White.copy(alpha = 0.72f)
+                                )
+                            }
+                        }
+
+                        val sequenceRunning = peakPreEventActive || peakEpisodeActive
+                        Surface(
+                            onClick = {
+                                if (latestHapticsEnabled) {
+                                    composeHaptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
+                                peakPreEventActive = false
+                                peakEpisodeActive = false
+                                peakPostCooldownActive = false
+                                peakRecoveryFastEndMs = 0L
+                                peakRecoveryHoldUntilMs = 0L
+                                peakRefractoryUntilMs = 0L
+                                heartRateBpm = PEAK_EPISODE_TRIGGER_BPM
+                            },
+                            modifier = Modifier
+                                .testTag("trigger_peak_hr_button")
+                                .semantics {
+                                    contentDescription = "Set heart rate to 136 BPM to test peak sequence"
+                                },
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (sequenceRunning) {
+                                Color(0xFF103322).copy(alpha = 0.84f)
+                            } else {
+                                Color(0xFF26181C).copy(alpha = 0.82f)
+                            },
+                            border = androidx.compose.foundation.BorderStroke(
+                                width = 1.dp,
+                                color = if (sequenceRunning) {
+                                    Color(0xFF56F09B).copy(alpha = 0.62f)
+                                } else {
+                                    Color(0xFFFFB74D).copy(alpha = 0.52f)
+                                }
+                            ),
+                            shadowElevation = 3.dp
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Bolt,
+                                    contentDescription = null,
+                                    tint = if (sequenceRunning) Color(0xFF69F0AE) else Color(0xFFFFCA68),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = if (sequenceRunning) "Restart 136" else "Trigger 136",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (sequenceRunning) Color(0xFFD9FFE8) else Color(0xFFFFE6B8)
+                                )
+                            }
                         }
                     }
                 }
@@ -2658,8 +3401,8 @@ fun InteractiveVulva3DCanvas(
                                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
                                     )
                                     VulvaBetaToggleRow(
-                                        title = "7. Medial root color continuity",
-                                        subtitle = "Eliminates pale tone band at the inner labia–vestibule junction",
+                                        title = "7. Vestibule-labial patch alignment",
+                                        subtitle = "Aligns underlying mucosal patch to inner labia to remove pale skin bands",
                                         checked = betaV3MedialRootContinuity,
                                         tag = "toggle_beta_v3_medial_root_continuity",
                                         compact = true,
@@ -2670,7 +3413,7 @@ fun InteractiveVulva3DCanvas(
                                     )
                                     AnimatedVisibility(visible = betaV3MedialRootContinuity) {
                                         BetaStrengthSliderRow(
-                                            label = "Medial root continuity",
+                                            label = "Patch alignment strength",
                                             value = betaV3MedialRootStrength,
                                             tag = "slider_beta_v3_medial_root_strength",
                                             onValueChange = { betaV3MedialRootStrength = it }

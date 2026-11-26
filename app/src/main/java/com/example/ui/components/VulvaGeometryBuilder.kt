@@ -133,7 +133,17 @@ data class VulvaDeformationState(
     val eyelidGazeTrack: Float = 0f,
     val swallowPhase: Float = 0f,
     val nostrilBreath: Float = 0f,
-    val livingWarmth: Float = 0f
+    val livingWarmth: Float = 0f,
+    // Peak exertion & expressive micro-kinematics (all strictly 0f at rest for bit-identical baseline)
+    val leftKneeShift: Float = 0f,
+    val rightKneeShift: Float = 0f,
+    val leftToeWiggle: Float = 0f,
+    val rightToeWiggle: Float = 0f,
+    val leftArmShift: Float = 0f,
+    val rightArmShift: Float = 0f,
+    val leftFingerCurl: Float = 0f,
+    val rightFingerCurl: Float = 0f,
+    val mouthOpen: Float = 0f
 )
 
 class DynamicGlMesh(
@@ -244,6 +254,10 @@ class VulvaAnatomySceneMesh {
     internal val blossomHeadNeckHairBetaCache: BlossomUpperBodyBuilder.HeadNeckHairBetaCache
     private var lastAppliedLeftLegSpread = Float.NaN
     private var lastAppliedRightLegSpread = Float.NaN
+    private var lastAppliedLeftKneeShift = Float.NaN
+    private var lastAppliedRightKneeShift = Float.NaN
+    private var lastAppliedLeftToeWiggle = Float.NaN
+    private var lastAppliedRightToeWiggle = Float.NaN
     private var lastAppliedLeftGluteX = Float.NaN
     private var lastAppliedLeftGluteY = Float.NaN
     private var lastAppliedRightGluteX = Float.NaN
@@ -251,6 +265,10 @@ class VulvaAnatomySceneMesh {
     private var lastAppliedSelfSpreadPose = Float.NaN
     private var lastAppliedArmLeftOuter = Float.NaN
     private var lastAppliedArmRightOuter = Float.NaN
+    private var lastAppliedLeftArmShift = Float.NaN
+    private var lastAppliedRightArmShift = Float.NaN
+    private var lastAppliedLeftFingerCurl = Float.NaN
+    private var lastAppliedRightFingerCurl = Float.NaN
     private var lastAppliedHeadTurn = Float.NaN
     private var lastAppliedHeadPitch = Float.NaN
     private var lastAppliedEyeBlink = Float.NaN
@@ -264,6 +282,7 @@ class VulvaAnatomySceneMesh {
     private var lastAppliedFaceLipSoft = Float.NaN
     private var lastAppliedSwallowPhase = Float.NaN
     private var lastAppliedNostrilBreath = Float.NaN
+    private var lastAppliedMouthOpen = Float.NaN
     private var lastAppliedBreastLeftX = Float.NaN
     private var lastAppliedBreastLeftY = Float.NaN
     private var lastAppliedBreastRightX = Float.NaN
@@ -320,6 +339,9 @@ class VulvaAnatomySceneMesh {
     val blossomEyesMesh: DynamicGlMesh
     val blossomHairMesh: DynamicGlMesh
     private val blossomAnteriorLut = BlossomSdfBodyBuilder.buildAnteriorSurfaceLut()
+    private var syncedAnteriorLut: BlossomSdfBodyBuilder.AnteriorSurfaceLut? = null
+    private var syncedLutShortPerineum = false
+    private var syncedLutSoftButtock = false
     private val baselineVulvaPatchCache = BlossomSdfBodyBuilder.buildVulvaPatchCache()
     private val blossomVulvaPatchCache = BlossomSdfBodyBuilder.BlossomVulvaPatchCache(
         BlossomSdfBodyBuilder.VULVA_PATCH_COLS,
@@ -637,8 +659,13 @@ class VulvaAnatomySceneMesh {
                 lastAppliedBreastSize = state.breastSize
                 lastAppliedBreastSizeBoost = state.betaBreastSizeBoost
             }
-            val legsChanged = state.leftLegSpread != lastAppliedLeftLegSpread ||
+            val legsSpreadChanged = state.leftLegSpread != lastAppliedLeftLegSpread ||
                 state.rightLegSpread != lastAppliedRightLegSpread
+            val kneeShiftChanged = state.leftKneeShift != lastAppliedLeftKneeShift ||
+                state.rightKneeShift != lastAppliedRightKneeShift
+            val toesChanged = state.leftToeWiggle != lastAppliedLeftToeWiggle ||
+                state.rightToeWiggle != lastAppliedRightToeWiggle
+            val legsChanged = legsSpreadChanged || kneeShiftChanged || toesChanged
             val glutesChanged = state.leftGluteX != lastAppliedLeftGluteX ||
                 state.leftGluteY != lastAppliedLeftGluteY ||
                 state.rightGluteX != lastAppliedRightGluteX ||
@@ -651,8 +678,12 @@ class VulvaAnatomySceneMesh {
                     cache = blossomLegSkinCache,
                     leftLegSpread = state.leftLegSpread,
                     rightLegSpread = state.rightLegSpread,
-                    includeToesAndNails = legsChanged,
-                    commitBody = false
+                    includeToesAndNails = legsSpreadChanged || toesChanged,
+                    commitBody = false,
+                    leftKneeShift = state.leftKneeShift,
+                    rightKneeShift = state.rightKneeShift,
+                    leftToeWiggle = state.leftToeWiggle,
+                    rightToeWiggle = state.rightToeWiggle
                 )
                 BlossomSdfBodyBuilder.applyGluteElasticity(
                     bodyMesh = blossomBodyMesh,
@@ -664,12 +695,20 @@ class VulvaAnatomySceneMesh {
                 )
                 lastAppliedLeftLegSpread = state.leftLegSpread
                 lastAppliedRightLegSpread = state.rightLegSpread
+                lastAppliedLeftKneeShift = state.leftKneeShift
+                lastAppliedRightKneeShift = state.rightKneeShift
+                lastAppliedLeftToeWiggle = state.leftToeWiggle
+                lastAppliedRightToeWiggle = state.rightToeWiggle
                 lastAppliedLeftGluteX = state.leftGluteX
                 lastAppliedLeftGluteY = state.leftGluteY
                 lastAppliedRightGluteX = state.rightGluteX
                 lastAppliedRightGluteY = state.rightGluteY
             }
             val armPoseNeedsUpdate = state.selfSpreadPose != lastAppliedSelfSpreadPose ||
+                state.leftArmShift != lastAppliedLeftArmShift ||
+                state.rightArmShift != lastAppliedRightArmShift ||
+                state.leftFingerCurl != lastAppliedLeftFingerCurl ||
+                state.rightFingerCurl != lastAppliedRightFingerCurl ||
                 (state.selfSpreadPose > 0.001f &&
                     (state.leftOuter != lastAppliedArmLeftOuter || state.rightOuter != lastAppliedArmRightOuter))
             if (armPoseNeedsUpdate) {
@@ -681,11 +720,19 @@ class VulvaAnatomySceneMesh {
                     cache = blossomArmSkinCache,
                     poseProgress = state.selfSpreadPose,
                     leftOuterSpread = state.leftOuter,
-                    rightOuterSpread = state.rightOuter
+                    rightOuterSpread = state.rightOuter,
+                    leftArmMicroShift = state.leftArmShift,
+                    rightArmMicroShift = state.rightArmShift,
+                    leftFingerMicroCurl = state.leftFingerCurl,
+                    rightFingerMicroCurl = state.rightFingerCurl
                 )
                 lastAppliedSelfSpreadPose = state.selfSpreadPose
                 lastAppliedArmLeftOuter = state.leftOuter
                 lastAppliedArmRightOuter = state.rightOuter
+                lastAppliedLeftArmShift = state.leftArmShift
+                lastAppliedRightArmShift = state.rightArmShift
+                lastAppliedLeftFingerCurl = state.leftFingerCurl
+                lastAppliedRightFingerCurl = state.rightFingerCurl
             }
             if (state.headTurn != lastAppliedHeadTurn ||
                 state.headPitch != lastAppliedHeadPitch ||
@@ -699,7 +746,8 @@ class VulvaAnatomySceneMesh {
                 state.faceBrow != lastAppliedFaceBrow ||
                 state.faceLipSoft != lastAppliedFaceLipSoft ||
                 state.swallowPhase != lastAppliedSwallowPhase ||
-                state.nostrilBreath != lastAppliedNostrilBreath
+                state.nostrilBreath != lastAppliedNostrilBreath ||
+                state.mouthOpen != lastAppliedMouthOpen
             ) {
                 BlossomUpperBodyBuilder.applyHeadTurn(
                     bodyMesh = blossomBodyMesh,
@@ -719,7 +767,8 @@ class VulvaAnatomySceneMesh {
                     eyeBlinkRightOffset = state.eyeBlinkRightOffset,
                     eyelidGazeTrack = state.eyelidGazeTrack,
                     swallowPhase = state.swallowPhase,
-                    nostrilBreath = state.nostrilBreath
+                    nostrilBreath = state.nostrilBreath,
+                    mouthOpen = state.mouthOpen
                 )
                 lastAppliedHeadTurn = state.headTurn
                 lastAppliedHeadPitch = state.headPitch
@@ -734,6 +783,7 @@ class VulvaAnatomySceneMesh {
                 lastAppliedFaceLipSoft = state.faceLipSoft
                 lastAppliedSwallowPhase = state.swallowPhase
                 lastAppliedNostrilBreath = state.nostrilBreath
+                lastAppliedMouthOpen = state.mouthOpen
             }
         } else {
             val pelvisVulvaNeedsUpdate = lastVulvaLithotomy != false ||
@@ -831,9 +881,35 @@ class VulvaAnatomySceneMesh {
     // -------------------------------------------------------------------------
     // SHARED EXACT CENTRAL BODY SURFACE HEIGHT (FLUSH ROOT ANCHORING!)
     // -------------------------------------------------------------------------
-    private fun evaluateCentralBaseCurveZ(x: Float, y: Float, includeLithotomy: Boolean): Float {
+    private fun resolveAnteriorLut(s: VulvaDeformationState): BlossomSdfBodyBuilder.AnteriorSurfaceLut {
+        if (!s.betaV3MedialRootContinuity || (!s.betaShortPerineum && !s.betaSoftButtockTable)) {
+            return blossomAnteriorLut
+        }
+        val cached = syncedAnteriorLut
+        if (cached != null &&
+            syncedLutShortPerineum == s.betaShortPerineum &&
+            syncedLutSoftButtock == s.betaSoftButtockTable
+        ) {
+            return cached
+        }
+        val rebuilt = BlossomSdfBodyBuilder.buildAnteriorSurfaceLut(
+            betaShortPerineum = s.betaShortPerineum,
+            betaSoftButtockTable = s.betaSoftButtockTable
+        )
+        syncedAnteriorLut = rebuilt
+        syncedLutShortPerineum = s.betaShortPerineum
+        syncedLutSoftButtock = s.betaSoftButtockTable
+        return rebuilt
+    }
+
+    private fun evaluateCentralBaseCurveZ(
+        x: Float,
+        y: Float,
+        includeLithotomy: Boolean,
+        lut: BlossomSdfBodyBuilder.AnteriorSurfaceLut = blossomAnteriorLut
+    ): Float {
         return if (includeLithotomy) {
-            blossomAnteriorLut.sampleZ(x, y)
+            lut.sampleZ(x, y)
         } else {
             0.09f - 0.28f * x * x - 0.22f * max(0f, -y - 0.54f).let { it * it } -
                 0.12f * max(0f, y - 0.72f).let { it * it }
@@ -841,7 +917,7 @@ class VulvaAnatomySceneMesh {
     }
 
     private fun sampleBodySurfaceZ(x: Float, y: Float, s: VulvaDeformationState, includeLithotomy: Boolean): Float {
-        val baseZ = evaluateCentralBaseCurveZ(x, y, includeLithotomy)
+        val baseZ = evaluateCentralBaseCurveZ(x, y, includeLithotomy, resolveAnteriorLut(s))
         val detail = evaluateVulvaDetail(x, y, s, scratchDetailSample)
         return baseZ + detail.dz
     }
@@ -1188,14 +1264,46 @@ class VulvaAnatomySceneMesh {
         } else {
             insideVestibule
         }
-        // Beta v3 Option 7: keep the immediate patch-side labial-attachment rim warm mucosal tissue
-        // so the medial labial root never samples pale cutaneous skin underneath (zero dz or AO change).
-        val effectiveVestibuleColorMask = if (medRootS > 1e-5f) {
-            val rootRimBand = (1f - smoothStep(0.62f, 1.38f, vestEllipse)) *
-                smoothBell(y, -0.44f, 0.30f, 0.09f) * medRootS
-            max(vestibuleColorMask, rootRimBand * 0.86f).coerceIn(0f, 1f)
+        // Beta v3 Option 7 (v22.0): align the underlying vulva-patch vestibular mucosal footprint
+        // directly to labiaHoodArchMesh's actual attachment centerline (including spread, asymmetry &
+        // organic meander) so the exposed patch medial to and beneath the inner labia root is always
+        // continuous wet vestibule mucosa rather than pale cutaneous body skin (0 dz change, 0 outer majora bleed).
+        val effectiveVestibuleColorMask: Float
+        if (medRootS > 1e-5f) {
+            val apexY = 0.292f + s.hoodRetract * 0.088f
+            val bottomY = -0.448f
+            val ySpan = apexY - bottomY
+            val yNorm = ((y - bottomY) / ySpan).coerceIn(0f, 1f)
+            val cosArc = (2f * yNorm - 1f).coerceIn(-1f, 1f)
+            val absS = kotlin.math.acos(cosArc.toDouble()).toFloat() / PI.toFloat()
+            val sinArc = sqrt((1f - cosArc * cosArc).coerceAtLeast(0f))
+            val isLeftSide = x < 0f
+            val innerOpenSide = if (isLeftSide) s.leftInner else s.rightInner
+            val outerOpenSide = if (isLeftSide) s.leftOuter else s.rightOuter
+            val hoodMaskA = exp(-(absS / 0.17f).let { it * it })
+            val sideSpreadMaskA = smoothStep(0.08f, 0.36f, absS) * smoothStep(1.0f, 0.70f, absS)
+            val asymArchS = if (s.betaV3AnatomicalAsymmetry) s.betaV3AsymmetryStrength.coerceIn(0f, 1f) * 3.0f else 0f
+            val foldArchS = if (s.betaV3IntricateLabiaFolds) s.betaV3LabiaFoldsStrength.coerceIn(0f, 1f) else 0f
+            val archWidthAsym = if (asymArchS > 1e-5f) {
+                val sideBias = if (isLeftSide) 0.0048f else -0.0036f
+                asymArchS * sideBias * smoothStep(0.10f, 0.42f, absS) * smoothStep(1.0f, 0.72f, absS)
+            } else 0f
+            val organicMeander = if (foldArchS > 1e-5f && absS > 0.02f) {
+                val mPhase = if (isLeftSide) 0.75f else 2.95f
+                val mMask = smoothStep(0.12f, 0.34f, absS) * smoothStep(0.96f, 0.68f, absS)
+                (0.0085f * sin(absS * 12.8f + mPhase) + 0.0048f * cos(absS * 23.4f - mPhase * 1.2f)) * mMask * foldArchS
+            } else 0f
+            val baseHalfW = (0.036f + 0.036f * sinArc + hoodMaskA * s.hoodRetract * 0.016f + archWidthAsym + organicMeander)
+                .coerceAtLeast(0.022f)
+            val dynamicSpr = (innerOpenSide * 0.145f + outerOpenSide * 0.058f) * sideSpreadMaskA
+            val archCenterAbsX = sinArc * (baseHalfW + dynamicSpr) + (1f - sinArc) * 0.006f * smoothStep(0.75f, 1.0f, absS)
+            val yAlignGate = smoothStep(bottomY - 0.015f, bottomY + 0.055f, y) *
+                (1f - smoothStep(0.205f, 0.285f, y))
+            val labiaAlignMask = (1f - smoothStep(archCenterAbsX + 0.004f, archCenterAbsX + 0.044f, abs(x))) * yAlignGate
+            val alignedTarget = max(vestibuleColorMask, labiaAlignMask)
+            effectiveVestibuleColorMask = (vestibuleColorMask + (alignedTarget - vestibuleColorMask) * medRootS).coerceIn(0f, 1f)
         } else {
-            vestibuleColorMask
+            effectiveVestibuleColorMask = vestibuleColorMask
         }
         val warmInnerLabiaMajora = if (s.betaSoftLabiaInteriorEdge) {
             val warmY = smoothStep(SEAM_C_WARM_MAJORA_Y_OUTER_LO, -0.36f, y) *
@@ -1211,9 +1319,9 @@ class VulvaAnatomySceneMesh {
             exp(-iR2 * 1.05f) * 0.34f +
             exp(-aR2 * 4.0f) * 0.10f).coerceIn(0f, 0.86f)
 
-        val closedCleftDarkening = (1f - cavityOpen * 0.72f) * vestibuleColorMask * 0.42f
+        val closedCleftDarkening = (1f - cavityOpen * 0.72f) * effectiveVestibuleColorMask * 0.42f
         val introAo = exp(-iR2 * 1.55f) * 0.84f
-        val urethralAo = exp(-uR2 * 12.0f) * 0.44f * vestibuleColorMask
+        val urethralAo = exp(-uR2 * 12.0f) * 0.44f * effectiveVestibuleColorMask
         val anusCenterAo = exp(-aR2 * 4.4f) * 0.66f + (0.5f - 0.5f * cos(aAngle * 11f + 0.4f)) * radialFoldMask * 0.20f
         // Softer groin & sulcus occlusion eliminates any dark outer halo ring around the pelvic patch
         val groinColorWeight = if (s.betaSoftLabiaInteriorEdge) {
@@ -1260,9 +1368,9 @@ class VulvaAnatomySceneMesh {
         val majoraBodyPigment = if (s.betaSoftLabiaInteriorEdge) {
             val lExp = if (x < leftCrestX) SEAM_C_MAJORA_PIG_OUTER_EXP else 0.72f
             val rExp = if (x > rightCrestX) SEAM_C_MAJORA_PIG_OUTER_EXP else 0.72f
-            (exp(-lDist * lDist * lExp) + exp(-rDist * rDist * rExp)) * pigmentFullnessCurve * (1f - vestibuleColorMask * 0.65f)
+            (exp(-lDist * lDist * lExp) + exp(-rDist * rDist * rExp)) * pigmentFullnessCurve * (1f - effectiveVestibuleColorMask * 0.65f)
         } else {
-            (exp(-lDist * lDist * 0.72f) + exp(-rDist * rDist * 0.72f)) * fullnessCurve * (1f - insideVestibule * 0.65f)
+            (exp(-lDist * lDist * 0.72f) + exp(-rDist * rDist * 0.72f)) * fullnessCurve * (1f - max(insideVestibule, effectiveVestibuleColorMask) * 0.65f)
         }
         val medialMargin = if (s.betaSoftLabiaInteriorEdge) {
             val mLeftCenter = leftCrestX * 0.62f
@@ -1744,11 +1852,21 @@ class VulvaAnatomySceneMesh {
                 val py = cy[r] + oy[r] * lateralOffset
 
                 // EXACT FLUSH ANCHORING + EXACT UNDERLYING MATERIAL SAMPLING (zero allocation)!
+                val activeLut = resolveAnteriorLut(s)
                 val groundMat = evaluateVulvaDetail(px, py, s, scratchDetailSample)
-                val groundZ = evaluateCentralBaseCurveZ(px, py, includeLithotomy) + groundMat.dz
+                val groundZ = evaluateCentralBaseCurveZ(px, py, includeLithotomy, activeLut) + groundMat.dz
 
                 // Micro-tuck only at extreme outer boundary AFTER normal & material already match ground 100%
-                val innerTuck = -0.014f * (1f - smoothStep(0.0f, 0.16f, u))
+                // Beta v3 Option 7 (v22.0): tighten medial innerTuck to a crisp micro-tuck right at u = 0..0.065
+                // so u = 0 stays strictly below patchZ (zero floating edge) while u >= 0.04 rises cleanly without
+                // exposing a deep underlying patch shelf or letting the lower patch poke through the arch.
+                val baseInnerTuck = -0.014f * (1f - smoothStep(0.0f, 0.16f, u))
+                val innerTuck = if (medRootS > 1e-5f) {
+                    val cleanInnerTuck = -0.0038f * (1f - smoothStep(0.0f, 0.065f, u))
+                    baseInnerTuck * (1f - medRootS) + cleanInnerTuck * medRootS
+                } else {
+                    baseInnerTuck
+                }
                 val outerTuck = -0.0034f * smoothStep(0.91f, 1.0f, u)
                 val rawTipSink = -0.012f * (1f - fourchetteTaper)
                 val tipSink = if (s.betaV2SeamOnlyPolyOffset) {
@@ -1801,9 +1919,10 @@ class VulvaAnatomySceneMesh {
                     0.16f * freeEdgeRim * hoodMask + foldCrevice * 0.12f + tanglePigDelta)
                     .coerceIn(0f, 1f)
 
-                // Beta v3 Toggle 5 (Soft Labial-Vestibule Color Blend): ease the dark rootShadow band at the
-                // medial labial base so it merges into the vulvar vestibule without a harsh dark line!
-                val rootShadow = (1f - smoothStep(0.0f, 0.22f, u)) * 0.26f * (1f - 0.86f * blendS * labiaMask) +
+                // Beta v3 Toggle 5 (Soft Labial-Vestibule Color Blend) & Option 7: ease the dark rootShadow band
+                // at the medial labial base so it merges into the aligned vestibule floor without a harsh line!
+                val rootShadowEase = max(blendS, medRootS * 0.88f)
+                val rootShadow = (1f - smoothStep(0.0f, 0.22f, u)) * 0.26f * (1f - 0.86f * rootShadowEase * labiaMask) +
                     smoothStep(0.62f, 0.84f, u) * 0.06f * labiaMask
                 val tangleAoDrop = if (innerTangleMask > 1e-5f) {
                     ((-innerTangleWave).coerceAtLeast(0f) * 0.14f) * innerTangleMask
@@ -1820,15 +1939,19 @@ class VulvaAnatomySceneMesh {
                     smoothStep(seamStart, 0.84f, u)
                 }
                 val tipBlend = 1f - fourchetteTaper
-                // Beta v3 Toggle 5: also smoothly blend the medial labial base (u -> 0) directly into the
-                // exact underlying vulvar vestibule material (mucosa, wetness, AO, pigment)!
+                // Beta v3 Toggle 5 & Option 7: smoothly blend the medial labial base (u -> 0) directly into the
+                // exact underlying (now labia-aligned!) vulvar vestibule material (mucosa, wetness, AO, pigment)!
                 val innerBaseBlend = if (blendS > 1e-5f) {
                     (1f - smoothStep(0.0f, crestU * (0.68f + 0.30f * blendS), u)) * labiaMask * (0.94f * blendS)
                 } else 0f
+                val alignedRootBlend = if (medRootS > 1e-5f) {
+                    (1f - smoothStep(0.0f, crestU * 0.72f, u)) * labiaMask * (0.92f * medRootS)
+                } else 0f
+                val medialBaseBlend = max(innerBaseBlend, alignedRootBlend)
                 val bodyLerp = if (s.betaSoftArchEdge) {
-                    max(max(seamBlend, tipBlend), innerBaseBlend).coerceIn(0f, 1f)
+                    max(max(seamBlend, tipBlend), medialBaseBlend).coerceIn(0f, 1f)
                 } else {
-                    max(max(seamBlend, tipBlend * 0.90f), innerBaseBlend).coerceIn(0f, 1f)
+                    max(max(seamBlend, tipBlend * 0.90f), medialBaseBlend).coerceIn(0f, 1f)
                 }
 
                 // Seam E (betaSoftArchEdge): match exact surrounding vulva-patch material (baseAo, basePigment,
@@ -1846,8 +1969,8 @@ class VulvaAnatomySceneMesh {
                             betaShortPerineum = s.betaShortPerineum,
                             betaBlendVulvaSeamColor = s.betaBlendVulvaSeamColor
                         )
-                        val patchBaseAo = blossomAnteriorLut.sampleAo(px, py)
-                        val patchBasePigment = blossomAnteriorLut.samplePigment(px, py)
+                        val patchBaseAo = activeLut.sampleAo(px, py)
+                        val patchBasePigment = activeLut.samplePigment(px, py)
                         targetMucosa = (groundMat.mucosa * patchMatMask).coerceIn(0f, 1f)
                         targetWetness = (BlossomSdfBodyBuilder.BODY_BASE_WETNESS + groundMat.wetness * patchMatMask).coerceIn(0f, 1f)
                         val patchDetailAo = 1f - (1f - groundMat.ao) * patchMatMask
@@ -1860,17 +1983,11 @@ class VulvaAnatomySceneMesh {
                         targetPigment = groundMat.pigment
                     }
                     val uAlpha = 1f - smoothStep(SEAM_E_ARCH_ALPHA_U_START, SEAM_E_ARCH_ALPHA_U_END, u)
-                    // Beta v3 Toggle 5: softly feather only the extreme buried medial root (u < 0.11, inside innerTuck)
-                    // so the base of the labia minora dissolves seamlessly into the vestibule floor with 0 hard line!
+                    // Beta v3 Toggle 5: softly feather only the extreme buried medial root (u < 0.115) so the
+                    // medial labial base dissolves seamlessly into the underlying mucosal vestibule floor!
                     val innerRootAlpha = if (blendS > 1e-5f) {
                         val medFeather = smoothStep(0.0f, 0.115f, u)
-                        val rawAlpha = 1f - (1f - medFeather) * blendS * labiaMask
-                        // Beta v3 Option 7: prevent medial root alpha feathering from exposing lighter underlying skin
-                        if (medRootS > 1e-5f) {
-                            rawAlpha + (1f - rawAlpha) * (0.90f * medRootS * labiaMask)
-                        } else {
-                            rawAlpha
-                        }
+                        1f - (1f - medFeather) * blendS * labiaMask
                     } else 1f
                     val tipGate = 1f - smoothStep(0.25f, 0.78f, fourchetteTaper)
                     val elevAbovePatch = pz - groundZ
@@ -1884,27 +2001,8 @@ class VulvaAnatomySceneMesh {
                     archAlpha = 1f
                 }
 
-                // Beta v3 Option 7: strictly within the medial labial root zone (u < crestU * 0.88), maintain
-                // warm mucosal continuity in targetMucosa/targetWetness so bodyLerp never drags the root toward
-                // pale cutaneous skin (zero effect on geometry, normals, outer skirt u >= crestU, or free rim).
-                val medialRootZone = if (medRootS > 1e-5f) {
-                    (1f - smoothStep(0f, crestU * 0.88f, u)) * labiaMask * medRootS
-                } else 0f
-                val effectiveTargetMucosa = if (medialRootZone > 1e-5f) {
-                    val medialMucosaFloor = 0.78f + 0.14f * (1f - smoothStep(0f, 0.25f, u))
-                    targetMucosa + (max(targetMucosa, medialMucosaFloor) - targetMucosa) * medialRootZone
-                } else {
-                    targetMucosa
-                }
-                val effectiveTargetWetness = if (medialRootZone > 1e-5f) {
-                    val medialWetFloor = 0.50f + 0.10f * (1f - smoothStep(0f, 0.25f, u))
-                    targetWetness + (max(targetWetness, medialWetFloor) - targetWetness) * medialRootZone
-                } else {
-                    targetWetness
-                }
-
-                val finalMucosa = archMucosa * (1f - bodyLerp) + effectiveTargetMucosa * bodyLerp
-                val finalWetness = archWetness * (1f - bodyLerp) + effectiveTargetWetness * bodyLerp
+                val finalMucosa = archMucosa * (1f - bodyLerp) + targetMucosa * bodyLerp
+                val finalWetness = archWetness * (1f - bodyLerp) + targetWetness * bodyLerp
                 val finalAo = archAo * (1f - bodyLerp) + targetAo * bodyLerp
                 val finalPigment = archPigment * (1f - bodyLerp) + targetPigment * bodyLerp
 

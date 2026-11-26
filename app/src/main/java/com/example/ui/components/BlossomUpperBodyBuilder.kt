@@ -542,7 +542,7 @@ internal object BlossomUpperBodyBuilder {
             val twistedForearm = if (sides[i] < 0f) leftTwistedForearm else rightTwistedForearm
             val tHand = wHand[i]
 
-            if (sol.poseProgress <= 0.0001f) {
+            if (!sol.isActivePose) {
                 dst[base] = px; dst[base + 1] = py; dst[base + 2] = pz
                 dst[base + 3] = nx; dst[base + 4] = ny; dst[base + 5] = nz
             } else if (tHand < 0.999f) {
@@ -654,13 +654,13 @@ internal object BlossomUpperBodyBuilder {
         var fingerIdx = 0
         for (side in sides) {
             val sol = if (side < 0f) leftSol else rightSol
-            val isResting = sol.poseProgress <= 0.0001f
+            val isResting = !sol.isActivePose
             val floorClampW = 1f - smoothStep(0f, 0.10f, sol.poseProgress)
 
             for (specIdx in fingerSpecs.indices) {
                 val spec = fingerSpecs[specIdx]
                 val baseVert = fingerIdx * vertsPerFinger
-                val flex = BlossomArmIkRig.fingerFlexForIndex(specIdx, sol.fingerCurlWeight)
+                val flex = BlossomArmIkRig.fingerFlexForIndex(specIdx, sol.fingerCurlWeight, sol.fingerMicroCurl)
 
                 for (r in 0 until rows) {
                     val s = fingerRowParameterS(r, rows, spec.isThumb)
@@ -791,12 +791,12 @@ internal object BlossomUpperBodyBuilder {
         var nailIdx = 0
         for (side in sides) {
             val sol = if (side < 0f) leftSol else rightSol
-            val isResting = sol.poseProgress <= 0.0001f
+            val isResting = !sol.isActivePose
 
             for (specIdx in fingerSpecs.indices) {
                 val spec = fingerSpecs[specIdx]
                 val baseVert = nailIdx * vertsPerNail
-                val flex = BlossomArmIkRig.fingerFlexForIndex(specIdx, sol.fingerCurlWeight)
+                val flex = BlossomArmIkRig.fingerFlexForIndex(specIdx, sol.fingerCurlWeight, sol.fingerMicroCurl)
 
                 for (r in 0 until nailRows) {
                     val v = r.toFloat() / (nailRows - 1)
@@ -1992,7 +1992,11 @@ internal object BlossomUpperBodyBuilder {
         val nostrilMorphDeltaPosNorm: FloatArray,
         val throatNeckLocalIndices: IntArray,
         val throatNeckY: FloatArray,
-        val throatNeckWeights: FloatArray
+        val throatNeckWeights: FloatArray,
+        val mouthOpenIndices: IntArray,
+        val mouthOpenDeltaPosNorm: FloatArray,
+        val mouthOpenBaseMat: FloatArray,
+        val mouthOpenTargetMat: FloatArray
     )
 
     fun buildHeadRigCache(
@@ -2199,6 +2203,11 @@ internal object BlossomUpperBodyBuilder {
         val lipSoftIdxBuf = IntArray(headMesh.vertexCount)
         val lipSoftDeltaBuf = FloatArray(headMesh.vertexCount * 6)
         var lipSoftCount = 0
+        val mouthOpenIdxBuf = IntArray(headMesh.vertexCount)
+        val mouthOpenDeltaBuf = FloatArray(headMesh.vertexCount * 6)
+        val mouthOpenBaseMatBuf = FloatArray(headMesh.vertexCount * 3)
+        val mouthOpenTargetMatBuf = FloatArray(headMesh.vertexCount * 3)
+        var mouthOpenCount = 0
 
         val swallowJawIdxBuf = IntArray(headMesh.vertexCount)
         val swallowJawDeltaBuf = FloatArray(headMesh.vertexCount * 6)
@@ -2218,7 +2227,7 @@ internal object BlossomUpperBodyBuilder {
         for (i in 0 until headMesh.vertexCount) {
             val s = i * 6
             val wy = headRest[s + 1]
-            if (wy <= 5.81f) continue
+            if (wy <= 5.58f) continue
             val local = headWorldToLocal(headRest[s], wy, headRest[s + 2])
             val lx = local[0]
             val ly = local[1]
@@ -2227,97 +2236,153 @@ internal object BlossomUpperBodyBuilder {
             val ax = abs(lx)
             val side = if (lx >= 0f) 1f else -1f
 
-            // 1. Subtle serene micro-smile warmth (gentle mouth-corner lift, soft cheek apple rise, delicate eye-corner warmth)
-            if (ly in -0.58f..0.06f && ax < 0.48f) {
-                val cornerW = exp(-(((ax - 0.222f) / 0.088f).let { it * it } + ((ly + 0.432f) / 0.065f).let { it * it }))
-                val midLipEase = exp(-((ax / 0.14f).let { it * it } + ((ly + 0.440f) / 0.048f).let { it * it })) * 0.22f
-                val cheekW = exp(-(((ax - 0.315f) / 0.130f).let { it * it } + ((ly + 0.155f) / 0.115f).let { it * it }))
-                val lowerEyeWarm = exp(-(((ax - 0.275f) / 0.095f).let { it * it } + ((ly + 0.014f) / 0.024f).let { it * it })) *
-                    smoothStep(0.015f, -0.008f, ly)
-                val dlx = side * (0.0085f * cornerW + 0.0040f * cheekW)
-                val dly = 0.0175f * cornerW + 0.0035f * midLipEase + 0.0090f * cheekW + 0.0048f * lowerEyeWarm
-                val dlz = -0.0065f * cornerW + 0.0055f * cheekW + 0.0020f * lowerEyeWarm
-                if (abs(dlx) + abs(dly) + abs(dlz) > 1e-4f) {
-                    val dw = localDeltaToWorld(dlx, dly, dlz)
-                    val dnw = localDeltaToWorld(0f, 0.06f * cheekW - 0.05f * cornerW, 0.04f * cheekW)
-                    smileIdxBuf[smileCount] = i
-                    val d = smileCount * 6
-                    smileDeltaBuf[d] = dw[0]; smileDeltaBuf[d + 1] = dw[1]; smileDeltaBuf[d + 2] = dw[2]
-                    smileDeltaBuf[d + 3] = dnw[0]; smileDeltaBuf[d + 4] = dnw[1]; smileDeltaBuf[d + 5] = dnw[2]
-                    smileCount++
+            if (wy > 5.81f) {
+                // 1. Subtle serene micro-smile warmth (gentle mouth-corner lift, soft cheek apple rise, delicate eye-corner warmth)
+                if (ly in -0.58f..0.06f && ax < 0.48f) {
+                    val cornerW = exp(-(((ax - 0.222f) / 0.088f).let { it * it } + ((ly + 0.432f) / 0.065f).let { it * it }))
+                    val midLipEase = exp(-((ax / 0.14f).let { it * it } + ((ly + 0.440f) / 0.048f).let { it * it })) * 0.22f
+                    val cheekW = exp(-(((ax - 0.315f) / 0.130f).let { it * it } + ((ly + 0.155f) / 0.115f).let { it * it }))
+                    val lowerEyeWarm = exp(-(((ax - 0.275f) / 0.095f).let { it * it } + ((ly + 0.014f) / 0.024f).let { it * it })) *
+                        smoothStep(0.015f, -0.008f, ly)
+                    val dlx = side * (0.0085f * cornerW + 0.0040f * cheekW)
+                    val dly = 0.0175f * cornerW + 0.0035f * midLipEase + 0.0090f * cheekW + 0.0048f * lowerEyeWarm
+                    val dlz = -0.0065f * cornerW + 0.0055f * cheekW + 0.0020f * lowerEyeWarm
+                    if (abs(dlx) + abs(dly) + abs(dlz) > 1e-4f) {
+                        val dw = localDeltaToWorld(dlx, dly, dlz)
+                        val dnw = localDeltaToWorld(0f, 0.06f * cheekW - 0.05f * cornerW, 0.04f * cheekW)
+                        smileIdxBuf[smileCount] = i
+                        val d = smileCount * 6
+                        smileDeltaBuf[d] = dw[0]; smileDeltaBuf[d + 1] = dw[1]; smileDeltaBuf[d + 2] = dw[2]
+                        smileDeltaBuf[d + 3] = dnw[0]; smileDeltaBuf[d + 4] = dnw[1]; smileDeltaBuf[d + 5] = dnw[2]
+                        smileCount++
+                    }
+                }
+
+                // 2. Subtle expressive brow lift / gentle thoughtful soften (strictly above upper eyelid crease!)
+                if (ly in 0.115f..0.34f && ax < 0.48f) {
+                    val browArchY = 0.172f + 0.034f * exp(-((ax - 0.332f) / 0.105f).let { it * it }) - 0.040f * smoothStep(0.345f, 0.455f, ax)
+                    val browEnv = exp(-((ly - browArchY) / 0.058f).let { it * it }) *
+                        smoothStep(0.04f, 0.13f, ax) * (1f - smoothStep(0.39f, 0.48f, ax)) *
+                        smoothStep(0.115f, 0.145f, ly)
+                    val innerBrowAccent = exp(-(((ax - 0.165f) / 0.085f).let { it * it })) * browEnv
+                    val dlx = side * (-0.0025f * innerBrowAccent)
+                    val dly = 0.0155f * browEnv + 0.0045f * innerBrowAccent
+                    val dlz = 0.0032f * browEnv
+                    if (abs(dlx) + abs(dly) + abs(dlz) > 1e-4f) {
+                        val dw = localDeltaToWorld(dlx, dly, dlz)
+                        val dnw = localDeltaToWorld(0f, -0.05f * browEnv, 0.02f * browEnv)
+                        browIdxBuf[browCount] = i
+                        val d = browCount * 6
+                        browDeltaBuf[d] = dw[0]; browDeltaBuf[d + 1] = dw[1]; browDeltaBuf[d + 2] = dw[2]
+                        browDeltaBuf[d + 3] = dnw[0]; browDeltaBuf[d + 4] = dnw[1]; browDeltaBuf[d + 5] = dnw[2]
+                        browCount++
+                    }
+                }
+
+                // 3. Ultra-subtle relaxed breath-part / lip ease on lower lip & chin cushion
+                if (ly in -0.56f..-0.40f && ax < 0.22f) {
+                    val lowerLipEase = exp(-((ax / 0.145f).let { it * it } + ((ly + 0.472f) / 0.044f).let { it * it })) *
+                        smoothStep(-0.415f, -0.446f, ly)
+                    val dly = -0.0072f * lowerLipEase
+                    val dlz = 0.0038f * lowerLipEase
+                    if (abs(dly) + abs(dlz) > 1e-4f) {
+                        val dw = localDeltaToWorld(0f, dly, dlz)
+                        val dnw = localDeltaToWorld(0f, -0.04f * lowerLipEase, 0.02f * lowerLipEase)
+                        lipSoftIdxBuf[lipSoftCount] = i
+                        val d = lipSoftCount * 6
+                        lipSoftDeltaBuf[d] = dw[0]; lipSoftDeltaBuf[d + 1] = dw[1]; lipSoftDeltaBuf[d + 2] = dw[2]
+                        lipSoftDeltaBuf[d + 3] = dnw[0]; lipSoftDeltaBuf[d + 4] = dnw[1]; lipSoftDeltaBuf[d + 5] = dnw[2]
+                        lipSoftCount++
+                    }
+                }
+
+                // 4. Tab 3 Lifelike+: Ultra-subtle swallow jaw/chin ease & quiet lip seal (strictly wy > 5.81)
+                if (ly in -0.68f..-0.40f && ax < 0.28f) {
+                    val chinEaseW = exp(-((ax / 0.165f).let { it * it } + ((ly + 0.565f) / 0.080f).let { it * it }))
+                    val lipSealW = exp(-((ax / 0.140f).let { it * it } + ((ly + 0.468f) / 0.036f).let { it * it }))
+                    val dlyS = 0.0042f * lipSealW - 0.0052f * chinEaseW
+                    val dlzS = -0.0050f * chinEaseW - 0.0018f * lipSealW
+                    if (abs(dlyS) + abs(dlzS) > 1e-4f) {
+                        val dw = localDeltaToWorld(0f, dlyS, dlzS)
+                        val dnw = localDeltaToWorld(0f, -0.03f * chinEaseW, 0.02f * chinEaseW)
+                        swallowJawIdxBuf[swallowJawCount] = i
+                        val d = swallowJawCount * 6
+                        swallowJawDeltaBuf[d] = dw[0]; swallowJawDeltaBuf[d + 1] = dw[1]; swallowJawDeltaBuf[d + 2] = dw[2]
+                        swallowJawDeltaBuf[d + 3] = dnw[0]; swallowJawDeltaBuf[d + 4] = dnw[1]; swallowJawDeltaBuf[d + 5] = dnw[2]
+                        swallowJawCount++
+                    }
+                }
+
+                // 5. Tab 3 Lifelike+: Whisper-soft nasal alar wing flare synced with breathing (noseAla centered at ax=0.090, ly=-0.244)
+                if (ly in -0.31f..-0.17f && ax in 0.032f..0.165f && lz > 0.38f) {
+                    val alarW = exp(-(((ax - 0.092f) / 0.046f).let { it * it } + ((ly + 0.244f) / 0.042f).let { it * it })) *
+                        smoothStep(0.032f, 0.056f, ax)
+                    val dlxN = side * 0.0054f * alarW
+                    val dlyN = 0.0022f * alarW
+                    val dlzN = 0.0020f * alarW
+                    if (abs(dlxN) + abs(dlyN) + abs(dlzN) > 1e-4f) {
+                        val dw = localDeltaToWorld(dlxN, dlyN, dlzN)
+                        val dnw = localDeltaToWorld(side * 0.035f * alarW, 0.015f * alarW, 0f)
+                        nostrilIdxBuf[nostrilCount] = i
+                        val d = nostrilCount * 6
+                        nostrilDeltaBuf[d] = dw[0]; nostrilDeltaBuf[d + 1] = dw[1]; nostrilDeltaBuf[d + 2] = dw[2]
+                        nostrilDeltaBuf[d + 3] = dnw[0]; nostrilDeltaBuf[d + 4] = dnw[1]; nostrilDeltaBuf[d + 5] = dnw[2]
+                        nostrilCount++
+                    }
                 }
             }
 
-            // 2. Subtle expressive brow lift / gentle thoughtful soften (strictly above upper eyelid crease!)
-            if (ly in 0.115f..0.34f && ax < 0.48f) {
-                val browArchY = 0.172f + 0.034f * exp(-((ax - 0.332f) / 0.105f).let { it * it }) - 0.040f * smoothStep(0.345f, 0.455f, ax)
-                val browEnv = exp(-((ly - browArchY) / 0.058f).let { it * it }) *
-                    smoothStep(0.04f, 0.13f, ax) * (1f - smoothStep(0.39f, 0.48f, ax)) *
-                    smoothStep(0.115f, 0.145f, ly)
-                val innerBrowAccent = exp(-(((ax - 0.165f) / 0.085f).let { it * it })) * browEnv
-                val dlx = side * (-0.0025f * innerBrowAccent)
-                val dly = 0.0155f * browEnv + 0.0045f * innerBrowAccent
-                val dlz = 0.0032f * browEnv
-                if (abs(dlx) + abs(dly) + abs(dlz) > 1e-4f) {
-                    val dw = localDeltaToWorld(dlx, dly, dlz)
-                    val dnw = localDeltaToWorld(0f, -0.05f * browEnv, 0.02f * browEnv)
-                    browIdxBuf[browCount] = i
-                    val d = browCount * 6
-                    browDeltaBuf[d] = dw[0]; browDeltaBuf[d + 1] = dw[1]; browDeltaBuf[d + 2] = dw[2]
-                    browDeltaBuf[d + 3] = dnw[0]; browDeltaBuf[d + 4] = dnw[1]; browDeltaBuf[d + 5] = dnw[2]
-                    browCount++
-                }
-            }
+            // 6. Natural parted-lips / open-mouth morph (upper lip lift + lower lip/mandible drop + recessed dark oral aperture)
+            if (ly in -0.78f..-0.32f && ax < 0.30f && lz > 0.30f) {
+                val lipU = (ax / 0.215f).coerceIn(0f, 1.35f)
+                val lipSpan = smoothStep(1.06f, 0.38f, lipU)
+                val lipPartY = -0.440f + 0.015f * lipU * lipU
+                val dyFromSlit = ly - lipPartY
+                // Stay strictly on the anterior lower face/chin, fading cleanly to 0 before the submental neck seam
+                val neckFade = smoothStep(5.58f, 5.72f, wy) * smoothStep(0.30f, 0.46f, lz)
 
-            // 3. Ultra-subtle relaxed breath-part / lip ease on lower lip & chin cushion
-            if (ly in -0.56f..-0.40f && ax < 0.22f) {
-                val lowerLipEase = exp(-((ax / 0.145f).let { it * it } + ((ly + 0.472f) / 0.044f).let { it * it })) *
-                    smoothStep(-0.415f, -0.446f, ly)
-                val dly = -0.0072f * lowerLipEase
-                val dlz = 0.0038f * lowerLipEase
-                if (abs(dly) + abs(dlz) > 1e-4f) {
-                    val dw = localDeltaToWorld(0f, dly, dlz)
-                    val dnw = localDeltaToWorld(0f, -0.04f * lowerLipEase, 0.02f * lowerLipEase)
-                    lipSoftIdxBuf[lipSoftCount] = i
-                    val d = lipSoftCount * 6
-                    lipSoftDeltaBuf[d] = dw[0]; lipSoftDeltaBuf[d + 1] = dw[1]; lipSoftDeltaBuf[d + 2] = dw[2]
-                    lipSoftDeltaBuf[d + 3] = dnw[0]; lipSoftDeltaBuf[d + 4] = dnw[1]; lipSoftDeltaBuf[d + 5] = dnw[2]
-                    lipSoftCount++
-                }
-            }
+                // Soft central oral aperture recessed into dark shaded oral cavity
+                val slitApertureW = exp(-((dyFromSlit / 0.026f).let { it * it })) * smoothStep(0.92f, 0.24f, lipU) * neckFade
+                // Gentle upper-lip parting lift
+                val upperLiftW = smoothStep(0.002f, 0.024f, dyFromSlit) *
+                    exp(-(((dyFromSlit - 0.026f) / 0.036f).let { it * it })) * lipSpan * neckFade
+                // Natural mandible/lower-lip/chin downward drop
+                val lowerDropW = smoothStep(-0.002f, -0.024f, dyFromSlit) *
+                    exp(-((ax / 0.21f).let { it * it })) *
+                    smoothStep(-0.77f, -0.58f, ly) * neckFade
+                // Subtle inward rounding of mouth corners so opening looks like a natural soft gasp
+                val cornerInW = exp(-(((ax - 0.195f) / 0.065f).let { it * it } + ((ly + 0.435f) / 0.075f).let { it * it })) * neckFade
 
-            // 4. Tab 3 Lifelike+: Ultra-subtle swallow jaw/chin ease & quiet lip seal (strictly wy > 5.81)
-            if (ly in -0.68f..-0.40f && ax < 0.28f) {
-                val chinEaseW = exp(-((ax / 0.165f).let { it * it } + ((ly + 0.565f) / 0.080f).let { it * it }))
-                val lipSealW = exp(-((ax / 0.140f).let { it * it } + ((ly + 0.468f) / 0.036f).let { it * it }))
-                val dlyS = 0.0042f * lipSealW - 0.0052f * chinEaseW
-                val dlzS = -0.0050f * chinEaseW - 0.0018f * lipSealW
-                if (abs(dlyS) + abs(dlzS) > 1e-4f) {
-                    val dw = localDeltaToWorld(0f, dlyS, dlzS)
-                    val dnw = localDeltaToWorld(0f, -0.03f * chinEaseW, 0.02f * chinEaseW)
-                    swallowJawIdxBuf[swallowJawCount] = i
-                    val d = swallowJawCount * 6
-                    swallowJawDeltaBuf[d] = dw[0]; swallowJawDeltaBuf[d + 1] = dw[1]; swallowJawDeltaBuf[d + 2] = dw[2]
-                    swallowJawDeltaBuf[d + 3] = dnw[0]; swallowJawDeltaBuf[d + 4] = dnw[1]; swallowJawDeltaBuf[d + 5] = dnw[2]
-                    swallowJawCount++
-                }
-            }
+                val dlxM = -side * 0.016f * cornerInW
+                val dlyM = 0.022f * upperLiftW - 0.068f * lowerDropW
+                val dlzM = -0.088f * slitApertureW + 0.010f * upperLiftW - 0.012f * lowerDropW
 
-            // 5. Tab 3 Lifelike+: Whisper-soft nasal alar wing flare synced with breathing (noseAla centered at ax=0.090, ly=-0.244)
-            if (ly in -0.31f..-0.17f && ax in 0.032f..0.165f && lz > 0.38f) {
-                val alarW = exp(-(((ax - 0.092f) / 0.046f).let { it * it } + ((ly + 0.244f) / 0.042f).let { it * it })) *
-                    smoothStep(0.032f, 0.056f, ax)
-                val dlxN = side * 0.0054f * alarW
-                val dlyN = 0.0022f * alarW
-                val dlzN = 0.0020f * alarW
-                if (abs(dlxN) + abs(dlyN) + abs(dlzN) > 1e-4f) {
-                    val dw = localDeltaToWorld(dlxN, dlyN, dlzN)
-                    val dnw = localDeltaToWorld(side * 0.035f * alarW, 0.015f * alarW, 0f)
-                    nostrilIdxBuf[nostrilCount] = i
-                    val d = nostrilCount * 6
-                    nostrilDeltaBuf[d] = dw[0]; nostrilDeltaBuf[d + 1] = dw[1]; nostrilDeltaBuf[d + 2] = dw[2]
-                    nostrilDeltaBuf[d + 3] = dnw[0]; nostrilDeltaBuf[d + 4] = dnw[1]; nostrilDeltaBuf[d + 5] = dnw[2]
-                    nostrilCount++
+                if (abs(dlxM) + abs(dlyM) + abs(dlzM) > 1e-4f || slitApertureW > 0.04f) {
+                    val dw = localDeltaToWorld(dlxM, dlyM, dlzM)
+                    val dnw = localDeltaToWorld(
+                        -side * 0.04f * cornerInW,
+                        0.08f * upperLiftW - 0.14f * lowerDropW,
+                        -0.12f * slitApertureW
+                    )
+                    mouthOpenIdxBuf[mouthOpenCount] = i
+                    val d = mouthOpenCount * 6
+                    mouthOpenDeltaBuf[d] = dw[0]; mouthOpenDeltaBuf[d + 1] = dw[1]; mouthOpenDeltaBuf[d + 2] = dw[2]
+                    mouthOpenDeltaBuf[d + 3] = dnw[0]; mouthOpenDeltaBuf[d + 4] = dnw[1]; mouthOpenDeltaBuf[d + 5] = dnw[2]
+
+                    val mIdx = mouthOpenCount * 3
+                    val vOff = i * stride
+                    val baseMucosa = headMesh.vertexData[vOff + 6]
+                    val baseWetness = headMesh.vertexData[vOff + 7]
+                    val baseAo = headMesh.vertexData[vOff + 8]
+                    mouthOpenBaseMatBuf[mIdx] = baseMucosa
+                    mouthOpenBaseMatBuf[mIdx + 1] = baseWetness
+                    mouthOpenBaseMatBuf[mIdx + 2] = baseAo
+                    // Darken oral slit interior to genuine shadowed mouth cavity while warming wet inner lip rim
+                    val cavMask = smoothStep(0.18f, 0.78f, slitApertureW)
+                    mouthOpenTargetMatBuf[mIdx] = (baseMucosa + 0.24f * cavMask).coerceIn(0f, 0.72f)
+                    mouthOpenTargetMatBuf[mIdx + 1] = (baseWetness + 0.045f * cavMask).coerceIn(0f, 0.15f)
+                    mouthOpenTargetMatBuf[mIdx + 2] = (baseAo * (1f - 0.84f * cavMask)).coerceIn(0.08f, 1f)
+                    mouthOpenCount++
                 }
             }
         }
@@ -2347,7 +2412,11 @@ internal object BlossomUpperBodyBuilder {
             nostrilMorphDeltaPosNorm = nostrilDeltaBuf.copyOf(nostrilCount * 6),
             throatNeckLocalIndices = throatLocalIdxBuf.copyOf(throatCount),
             throatNeckY = throatYBuf.copyOf(throatCount),
-            throatNeckWeights = throatWBuf.copyOf(throatCount)
+            throatNeckWeights = throatWBuf.copyOf(throatCount),
+            mouthOpenIndices = mouthOpenIdxBuf.copyOf(mouthOpenCount),
+            mouthOpenDeltaPosNorm = mouthOpenDeltaBuf.copyOf(mouthOpenCount * 6),
+            mouthOpenBaseMat = mouthOpenBaseMatBuf.copyOf(mouthOpenCount * 3),
+            mouthOpenTargetMat = mouthOpenTargetMatBuf.copyOf(mouthOpenCount * 3)
         )
     }
 
@@ -2375,7 +2444,8 @@ internal object BlossomUpperBodyBuilder {
         eyeBlinkRightOffset: Float = 0f,
         eyelidGazeTrack: Float = 0f,
         swallowPhase: Float = 0f,
-        nostrilBreath: Float = 0f
+        nostrilBreath: Float = 0f,
+        mouthOpen: Float = 0f
     ) {
         val turn = headTurn.coerceIn(-1f, 1f)
         val pitch = headPitch.coerceIn(-1f, 1f)
@@ -2416,12 +2486,28 @@ internal object BlossomUpperBodyBuilder {
             0f
         }
         val nostrilW = nostrilBreath.coerceIn(0f, 1f)
+        val mouthOpenW = mouthOpen.coerceIn(0f, 1f)
         val stride = DynamicGlMesh.FLOATS_PER_VERTEX
         val pivotY = HEAD_CENTER_Y - 0.18f
         val pivotZ = HEAD_CENTER_Z - 0.22f
 
+        // Update oral-cavity shading materials cleanly (restored bit-identically when mouthOpenW == 0f)
+        if (cache.mouthOpenIndices.isNotEmpty()) {
+            val hData = headMesh.vertexData
+            val mIdx = cache.mouthOpenIndices
+            val mBase = cache.mouthOpenBaseMat
+            val mTgt = cache.mouthOpenTargetMat
+            for (k in mIdx.indices) {
+                val dst = mIdx[k] * stride
+                val m = k * 3
+                hData[dst + 6] = mBase[m] + (mTgt[m] - mBase[m]) * mouthOpenW
+                hData[dst + 7] = mBase[m + 1] + (mTgt[m + 1] - mBase[m + 1]) * mouthOpenW
+                hData[dst + 8] = mBase[m + 2] + (mTgt[m + 2] - mBase[m + 2]) * mouthOpenW
+            }
+        }
+
         val hasFacialMorph = warmth > 1e-4f || abs(brow) > 1e-4f || lipSoft > 1e-4f ||
-            swallowJawW > 1e-4f || nostrilW > 1e-4f
+            swallowJawW > 1e-4f || nostrilW > 1e-4f || mouthOpenW > 1e-4f
         val hasBlink = (effBlinkL > 1e-4f || effBlinkR > 1e-4f) && cache.blinkVertIndices.isNotEmpty()
         val hasLidLift = upTrackLift > 1e-4f && cache.upperLidLiftIndices.isNotEmpty()
         // Build rest-space head buffer with live eyelid blink, tracking & optional Lifelike micro-expressions before cervical rotation
@@ -2450,6 +2536,7 @@ internal object BlossomUpperBodyBuilder {
                 applySparseMorph(cache.lipSoftMorphIndices, cache.lipSoftMorphDeltaPosNorm, lipSoft)
                 applySparseMorph(cache.swallowJawIndices, cache.swallowJawDeltaPosNorm, swallowJawW)
                 applySparseMorph(cache.nostrilMorphIndices, cache.nostrilMorphDeltaPosNorm, nostrilW)
+                applySparseMorph(cache.mouthOpenIndices, cache.mouthOpenDeltaPosNorm, mouthOpenW)
             }
             if (hasLidLift) {
                 val lIdx = cache.upperLidLiftIndices
