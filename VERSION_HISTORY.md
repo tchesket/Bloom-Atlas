@@ -1,5 +1,15 @@
 # Bloom Atlas — Version History
 
+## Version 24.0 (`versionCode = 24`)
+**Date:** 2026-11-26
+
+- **Refined Post-Squeeze Peak Leg Pulses (`InteractiveVulva3DCanvas.kt`)**
+  - Preserved the dramatic initial thigh-squeeze slam (`-0.84f` spread / `-1.12f` knee squeeze, `260ms` clinch hold) and its timing against Blossom's head dip and side tilt while refining only the subsequent leg pulses during the 16-second peak episode.
+  - Replaced the uniform symmetric post-squeeze leg drift loops with a curated asymmetric pulse sequence (`buildLaterPeakLegPulses`) featuring smaller partial reopenings, unequal left/right travel distances, staggered return timing (`120–395ms` lead/lag between knees), and two distinct strong later surges (breaking any predictable even fade).
+  - Added a dedicated final easing phase (`PEAK_LEG_FINAL_EASE_MS = 2400ms`) that fades out leg tremor and smoothly eases both legs and knees directly into the resting pose (`0f`) with a subtle trailing-knee stagger right as the episode finishes, remaining 100% compatible with the active "Ask Blossom to Spread" (`selfSpreadPose = 1f`) arm/hand IK pose.
+
+---
+
 ## Version 23.0 (`versionCode = 23`)
 **Date:** 2026-11-26
 

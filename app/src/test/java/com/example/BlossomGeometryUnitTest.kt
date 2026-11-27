@@ -3967,6 +3967,47 @@ class BlossomGeometryUnitTest {
         assertEquals(0f, endKneeL, 1e-4f)
         assertEquals(0f, endKneeR, 1e-4f)
 
+        // 3b. Verify v24.0 refined post-squeeze leg pulses: smaller partial reopenings, staggered delayed
+        //     knee returns, unequal L/R travel, two strong later surges (non-monotonic), and full
+        //     mesh compatibility while "Ask Blossom to Spread" (selfSpreadPose = 1.0f) is active
+        for (seed in longArrayOf(101L, 2024L, 98765L)) {
+            val pulses = com.example.ui.components.buildLaterPeakLegPulses(kotlin.random.Random(seed))
+            assertTrue("Must generate at least 5 varied post-squeeze pulses", pulses.size >= 5)
+            val smallReopenCount = pulses.count { it.isSmallReopening }
+            val strongSurgeCount = pulses.count { it.isStrongSurge }
+            assertTrue("Must include smaller partial reopenings ($smallReopenCount)", smallReopenCount >= 2)
+            assertTrue("Must include 2 strong later surges ($strongSurgeCount)", strongSurgeCount >= 2)
+            // Verify strong later pulse is deeper than an earlier moderate pulse (not a predictable even fade)
+            val firstSmallClose = pulses.first { it.isSmallReopening }.let { kotlin.math.min(it.closeKneeL, it.closeKneeR) }
+            val lateStrongClose = pulses.last { it.isStrongSurge }.let { kotlin.math.min(it.closeKneeL, it.closeKneeR) }
+            assertTrue("Strong later surge ($lateStrongClose) must squeeze deeper than smaller earlier pulse ($firstSmallClose)", lateStrongClose < firstSmallClose - 0.05f)
+            // Verify staggered return timing & unequal left/right travel distances
+            val delayedReturns = pulses.count { kotlin.math.abs(it.closeLagLMs - it.closeLagRMs) >= 120L }
+            assertTrue("Must stagger knee return starts across later pulses ($delayedReturns)", delayedReturns >= 4)
+            val asymOpenings = pulses.count { kotlin.math.abs(it.openKneeL - it.openKneeR) >= 0.14f }
+            assertTrue("Left and right knees must cover unequal distances on reopenings ($asymOpenings)", asymOpenings >= 4)
+            // Verify combined with active "Ask Blossom to Spread" (selfSpreadPose = 1f, outer/inner = 0.50f)
+            val samplePulse = pulses[2] // Strong later surge
+            scene.update(
+                VulvaDeformationState(
+                    leftOuter = 0.50f,
+                    rightOuter = 0.50f,
+                    leftInner = 0.50f,
+                    rightInner = 0.50f,
+                    selfSpreadPose = 1.0f,
+                    leftLegSpread = samplePulse.closeSpreadL,
+                    rightLegSpread = samplePulse.closeSpreadR,
+                    leftKneeShift = samplePulse.closeKneeL,
+                    rightKneeShift = samplePulse.closeKneeR
+                ),
+                includeLithotomyBody = true
+            )
+            assertValidMesh(scene.blossomBodyMesh)
+            assertValidMesh(scene.blossomHandsMesh)
+            assertValidMesh(scene.blossomPalmsMesh)
+            assertOutwardWindingMatchesNormals("Body(spreadPose+strongLaterSurge_$seed)", scene.blossomBodyMesh)
+        }
+
         // 4. Verify 2x post-peak heart rate recovery drops ~2x faster than normal AND stops cleanly at 125 BPM floor
         var bpmNormal = 141f
         var bpmFast = 141f

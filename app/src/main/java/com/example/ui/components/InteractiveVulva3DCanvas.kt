@@ -142,6 +142,7 @@ internal const val PEAK_EYELID_CLOSE_DURATION_MS = 4_000L
 internal const val PEAK_LEG_SLAM_SHUT_TARGET = -0.84f
 internal const val PEAK_KNEE_SLAM_SQUEEZE = -1.12f
 internal const val PEAK_LEG_PART_OPEN_DURATION_MS = 1_250
+internal const val PEAK_LEG_FINAL_EASE_MS = 2_400L
 internal const val PEAK_PRE_EVENT_WIDE_STANCE = 0.94f
 internal const val PEAK_RECOVERY_FLOOR_BPM = 125f
 internal const val PEAK_FAST_RECOVERY_DURATION_MS = 6_000L
@@ -243,6 +244,254 @@ internal fun computePreEventKneeShiftTargets(
         (kL * env).coerceIn(-0.92f, 0.85f),
         (kR * env).coerceIn(-0.92f, 0.85f)
     )
+}
+
+/**
+ * Choreography specification for a single post-squeeze leg pulse during the 16-second peak event.
+ * Keeps left and right excursions unequal, mixes smaller partial reopenings with 1–2 strong later
+ * surges, and staggers when one knee begins its reopening or inward return relative to the other.
+ */
+internal data class PeakLegPulseSpec(
+    val isStrongSurge: Boolean,
+    val isSmallReopening: Boolean,
+    val plantedFeet: Boolean,
+    val openSpreadL: Float,
+    val openSpreadR: Float,
+    val openKneeL: Float,
+    val openKneeR: Float,
+    val openDurL: Int,
+    val openDurR: Int,
+    val openLagLMs: Long,
+    val openLagRMs: Long,
+    val closeSpreadL: Float,
+    val closeSpreadR: Float,
+    val closeKneeL: Float,
+    val closeKneeR: Float,
+    val closeDurL: Int,
+    val closeDurR: Int,
+    val closeLagLMs: Long,
+    val closeLagRMs: Long,
+    val clinchHoldMs: Long
+)
+
+/**
+ * Generates the post-squeeze leg pulse sequence for the 16-second peak episode.
+ *
+ * Preserves the dramatic first thigh-squeeze slam and its timing against the head tilt, then varies
+ * the subsequent pulses so they avoid uniform equal-distance back-and-forth symmetry:
+ *  - Includes smaller partial reopenings alongside wider asymmetric swings.
+ *  - Staggers lead/lag knee starts (`~160..390ms`) so one knee occasionally begins its return later.
+ *  - Intersperses two strong later surges (Pulses 3 & 5) instead of a predictable linear fade.
+ */
+internal fun buildLaterPeakLegPulses(rng: kotlin.random.Random): List<PeakLegPulseSpec> {
+    fun randRange(minVal: Float, maxVal: Float): Float = minVal + rng.nextFloat() * (maxVal - minVal)
+    fun assignAsym(leadLeft: Boolean, leadVal: Float, trailVal: Float): Pair<Float, Float> =
+        if (leadLeft) Pair(leadVal, trailVal) else Pair(trailVal, leadVal)
+
+    val pulses = ArrayList<PeakLegPulseSpec>(6)
+    var leadLeft = rng.nextBoolean()
+
+    // Pulse 1 (immediately after first squeeze): smaller partial reopening (feet lightly planted),
+    // uneven L/R opening distance, and a noticeable delayed return on one knee
+    run {
+        val plantedFootL = randRange(-0.22f, 0.08f)
+        val plantedFootR = randRange(-0.22f, 0.08f)
+        val (oKL, oKR) = assignAsym(leadLeft, randRange(0.02f, 0.22f), randRange(-0.34f, -0.10f))
+        val (cKL, cKR) = assignAsym(!leadLeft, randRange(-0.84f, -0.66f), randRange(-0.62f, -0.44f))
+        val openLag = (150 + rng.nextInt(130)).toLong()
+        val closeLag = (220 + rng.nextInt(150)).toLong()
+        pulses += PeakLegPulseSpec(
+            isStrongSurge = false,
+            isSmallReopening = true,
+            plantedFeet = true,
+            openSpreadL = plantedFootL,
+            openSpreadR = plantedFootR,
+            openKneeL = oKL,
+            openKneeR = oKR,
+            openDurL = 680 + rng.nextInt(220),
+            openDurR = 720 + rng.nextInt(240),
+            openLagLMs = if (leadLeft) 0L else openLag,
+            openLagRMs = if (leadLeft) openLag else 0L,
+            closeSpreadL = plantedFootL,
+            closeSpreadR = plantedFootR,
+            closeKneeL = cKL,
+            closeKneeR = cKR,
+            closeDurL = 560 + rng.nextInt(200),
+            closeDurR = 600 + rng.nextInt(220),
+            closeLagLMs = if (leadLeft) closeLag else 0L,
+            closeLagRMs = if (leadLeft) 0L else closeLag,
+            clinchHoldMs = (80 + rng.nextInt(70)).toLong()
+        )
+    }
+
+    // Pulse 2: asymmetric whole-leg + knee reopening (one leg swings noticeably wider than the other)
+    // followed by a staggered inward return
+    leadLeft = !leadLeft
+    run {
+        val (oSL, oSR) = assignAsym(leadLeft, randRange(0.36f, 0.62f), randRange(-0.08f, 0.18f))
+        val (oKL, oKR) = assignAsym(leadLeft, randRange(0.28f, 0.56f), randRange(-0.20f, 0.14f))
+        val (cSL, cSR) = assignAsym(leadLeft, randRange(-0.46f, -0.26f), randRange(-0.28f, -0.10f))
+        val (cKL, cKR) = assignAsym(leadLeft, randRange(-0.78f, -0.58f), randRange(-0.56f, -0.36f))
+        val openLag = (120 + rng.nextInt(140)).toLong()
+        val closeLag = (210 + rng.nextInt(165)).toLong()
+        pulses += PeakLegPulseSpec(
+            isStrongSurge = false,
+            isSmallReopening = false,
+            plantedFeet = false,
+            openSpreadL = oSL,
+            openSpreadR = oSR,
+            openKneeL = oKL,
+            openKneeR = oKR,
+            openDurL = 760 + rng.nextInt(260),
+            openDurR = 780 + rng.nextInt(260),
+            openLagLMs = if (leadLeft) 0L else openLag,
+            openLagRMs = if (leadLeft) openLag else 0L,
+            closeSpreadL = cSL,
+            closeSpreadR = cSR,
+            closeKneeL = cKL,
+            closeKneeR = cKR,
+            closeDurL = 620 + rng.nextInt(220),
+            closeDurR = 650 + rng.nextInt(220),
+            closeLagLMs = if (leadLeft) closeLag else 0L,
+            closeLagRMs = if (leadLeft) 0L else closeLag,
+            clinchHoldMs = (95 + rng.nextInt(80)).toLong()
+        )
+    }
+
+    // Pulse 3 — STRONG LATER SURGE #1: asymmetric opening into a deep, emphatic thigh/knee squeeze
+    leadLeft = !leadLeft
+    run {
+        val (oSL, oSR) = assignAsym(leadLeft, randRange(0.42f, 0.70f), randRange(0.14f, 0.36f))
+        val (oKL, oKR) = assignAsym(leadLeft, randRange(0.36f, 0.64f), randRange(0.06f, 0.30f))
+        val (cSL, cSR) = assignAsym(leadLeft, randRange(-0.78f, -0.62f), randRange(-0.70f, -0.54f))
+        val (cKL, cKR) = assignAsym(leadLeft, randRange(-1.08f, -0.94f), randRange(-1.02f, -0.88f))
+        val openLag = (170 + rng.nextInt(150)).toLong()
+        val closeLag = (120 + rng.nextInt(110)).toLong()
+        pulses += PeakLegPulseSpec(
+            isStrongSurge = true,
+            isSmallReopening = false,
+            plantedFeet = false,
+            openSpreadL = oSL,
+            openSpreadR = oSR,
+            openKneeL = oKL,
+            openKneeR = oKR,
+            openDurL = 740 + rng.nextInt(240),
+            openDurR = 760 + rng.nextInt(240),
+            openLagLMs = if (leadLeft) 0L else openLag,
+            openLagRMs = if (leadLeft) openLag else 0L,
+            closeSpreadL = cSL,
+            closeSpreadR = cSR,
+            closeKneeL = cKL,
+            closeKneeR = cKR,
+            closeDurL = 520 + rng.nextInt(180),
+            closeDurR = 540 + rng.nextInt(180),
+            closeLagLMs = if (leadLeft) 0L else closeLag,
+            closeLagRMs = if (leadLeft) closeLag else 0L,
+            clinchHoldMs = (175 + rng.nextInt(85)).toLong()
+        )
+    }
+
+    // Pulse 4: restrained planted-foot knee pulse with a clearly smaller partial reopening and
+    // pronounced lag on the trailing knee's return
+    run {
+        val plantedFootL = randRange(-0.18f, 0.16f)
+        val plantedFootR = randRange(-0.18f, 0.16f)
+        val (oKL, oKR) = assignAsym(!leadLeft, randRange(-0.04f, 0.18f), randRange(-0.38f, -0.14f))
+        val (cKL, cKR) = assignAsym(leadLeft, randRange(-0.76f, -0.58f), randRange(-0.56f, -0.38f))
+        val openLag = (190 + rng.nextInt(160)).toLong()
+        val closeLag = (240 + rng.nextInt(155)).toLong()
+        pulses += PeakLegPulseSpec(
+            isStrongSurge = false,
+            isSmallReopening = true,
+            plantedFeet = true,
+            openSpreadL = plantedFootL,
+            openSpreadR = plantedFootR,
+            openKneeL = oKL,
+            openKneeR = oKR,
+            openDurL = 620 + rng.nextInt(200),
+            openDurR = 660 + rng.nextInt(220),
+            openLagLMs = if (!leadLeft) 0L else openLag,
+            openLagRMs = if (!leadLeft) openLag else 0L,
+            closeSpreadL = plantedFootL,
+            closeSpreadR = plantedFootR,
+            closeKneeL = cKL,
+            closeKneeR = cKR,
+            closeDurL = 580 + rng.nextInt(200),
+            closeDurR = 620 + rng.nextInt(220),
+            closeLagLMs = if (leadLeft) closeLag else 0L,
+            closeLagRMs = if (leadLeft) 0L else closeLag,
+            clinchHoldMs = (85 + rng.nextInt(75)).toLong()
+        )
+    }
+
+    // Pulse 5 — STRONG LATER SURGE #2: prevents a predictable linear fade with a second unmistakable
+    // deep late squeeze and staggered release
+    leadLeft = !leadLeft
+    run {
+        val (oSL, oSR) = assignAsym(leadLeft, randRange(0.32f, 0.56f), randRange(0.04f, 0.24f))
+        val (oKL, oKR) = assignAsym(leadLeft, randRange(0.28f, 0.54f), randRange(-0.06f, 0.20f))
+        val (cSL, cSR) = assignAsym(leadLeft, randRange(-0.72f, -0.52f), randRange(-0.60f, -0.42f))
+        val (cKL, cKR) = assignAsym(leadLeft, randRange(-1.04f, -0.88f), randRange(-0.92f, -0.76f))
+        val openLag = (180 + rng.nextInt(150)).toLong()
+        val closeLag = (150 + rng.nextInt(140)).toLong()
+        pulses += PeakLegPulseSpec(
+            isStrongSurge = true,
+            isSmallReopening = false,
+            plantedFeet = false,
+            openSpreadL = oSL,
+            openSpreadR = oSR,
+            openKneeL = oKL,
+            openKneeR = oKR,
+            openDurL = 780 + rng.nextInt(240),
+            openDurR = 800 + rng.nextInt(240),
+            openLagLMs = if (leadLeft) 0L else openLag,
+            openLagRMs = if (leadLeft) openLag else 0L,
+            closeSpreadL = cSL,
+            closeSpreadR = cSR,
+            closeKneeL = cKL,
+            closeKneeR = cKR,
+            closeDurL = 560 + rng.nextInt(200),
+            closeDurR = 590 + rng.nextInt(200),
+            closeLagLMs = if (leadLeft) 0L else closeLag,
+            closeLagRMs = if (leadLeft) closeLag else 0L,
+            clinchHoldMs = (155 + rng.nextInt(80)).toLong()
+        )
+    }
+
+    // Pulse 6: softer small partial reopening & gentle staggered tuck leading naturally into the final settle
+    leadLeft = !leadLeft
+    run {
+        val plantedFootL = randRange(-0.14f, 0.14f)
+        val plantedFootR = randRange(-0.14f, 0.14f)
+        val (oKL, oKR) = assignAsym(leadLeft, randRange(-0.06f, 0.16f), randRange(-0.28f, -0.08f))
+        val (cKL, cKR) = assignAsym(!leadLeft, randRange(-0.54f, -0.36f), randRange(-0.36f, -0.20f))
+        val openLag = (170 + rng.nextInt(140)).toLong()
+        val closeLag = (220 + rng.nextInt(150)).toLong()
+        pulses += PeakLegPulseSpec(
+            isStrongSurge = false,
+            isSmallReopening = true,
+            plantedFeet = true,
+            openSpreadL = plantedFootL,
+            openSpreadR = plantedFootR,
+            openKneeL = oKL,
+            openKneeR = oKR,
+            openDurL = 680 + rng.nextInt(200),
+            openDurR = 720 + rng.nextInt(200),
+            openLagLMs = if (leadLeft) 0L else openLag,
+            openLagRMs = if (leadLeft) openLag else 0L,
+            closeSpreadL = plantedFootL,
+            closeSpreadR = plantedFootR,
+            closeKneeL = cKL,
+            closeKneeR = cKR,
+            closeDurL = 640 + rng.nextInt(200),
+            closeDurR = 680 + rng.nextInt(200),
+            closeLagLMs = if (leadLeft) closeLag else 0L,
+            closeLagRMs = if (leadLeft) 0L else closeLag,
+            clinchHoldMs = 70L
+        )
+    }
+
+    return pulses
 }
 
 internal fun vulvaElasticPullScale(resistance: Float): Float {
@@ -1154,9 +1403,11 @@ fun InteractiveVulva3DCanvas(
         }
 
         // 1. Legs (40% slower = 1.67x durations):
-        //    Slam thighs tightly squeezed together -> slowly part open to default (0f) ->
-        //    mix planted-foot knee/upper-leg shifting with independent whole-leg sweeps & shaking
+        //    Preserve first thigh-squeeze slam + clinch hold against the head tilt, then run varied
+        //    asymmetric later pulses (smaller partial reopenings, staggered delayed knee returns,
+        //    1-2 strong later surges) and ease the final movement smoothly into resting pose (0f).
         val legsJob = launch {
+            // Beat 0 — First Squeeze (preserved timing against head dip & tilt)
             val slamDurL = 290
             val slamDurR = 320
             val jCloseL = launch { leftLegSpread.animateTo(PEAK_LEG_SLAM_SHUT_TARGET, tween(slamDurL, easing = FastOutSlowInEasing)) }
@@ -1167,157 +1418,131 @@ fun InteractiveVulva3DCanvas(
             val jClearR = launch { settleLegR.animateTo(0f, tween(140)) }
             jCloseL.join(); jCloseR.join(); jSqueezeL.join(); jSqueezeR.join(); jClearL.join(); jClearR.join()
 
-            // Brief tense thigh-clinch hold (~260ms) before parting open
+            // Brief tense thigh-clinch hold (~260ms) before the later pulses begin
             delay(260L)
-
-            // Slowly part open to default position (0f) over ~1.25 seconds
-            if (System.currentTimeMillis() < endMs) {
-                val partDur = min(PEAK_LEG_PART_OPEN_DURATION_MS.toLong(), (endMs - System.currentTimeMillis()).coerceAtLeast(220L)).toInt()
-                val jOpenL = launch { leftLegSpread.animateTo(0f, tween(partDur, easing = FastOutSlowInEasing)) }
-                val jOpenR = launch { rightLegSpread.animateTo(0f, tween(partDur, easing = FastOutSlowInEasing)) }
-                val jKneeOpenL = launch { peakKneeShiftL.animateTo(0f, tween(partDur, easing = FastOutSlowInEasing)) }
-                val jKneeOpenR = launch { peakKneeShiftR.animateTo(0f, tween(partDur, easing = FastOutSlowInEasing)) }
-                jOpenL.join(); jOpenR.join(); jKneeOpenL.join(); jKneeOpenR.join()
-            }
 
             var leftFootPlanted = false
             var rightFootPlanted = false
+            var legSettlingToRest = false
 
-            // Independent Left Leg: alternates between Planted-Foot Knee Shifting and Whole-Leg Sweeps (40% slower)
-            val leftDriftJob = launch {
-                var sideSign = if (legDriftLRng.nextBoolean()) 1f else -1f
-                var firstPlantedPass = true
-                while (System.currentTimeMillis() < endMs) {
-                    val usePlantedKneeMode = firstPlantedPass || legDriftLRng.nextFloat() < 0.50f
-                    firstPlantedPass = false
-                    if (usePlantedKneeMode) {
-                        // Plant foot steadily while knee & upper leg shift back and forth (including inward thigh press)
-                        leftFootPlanted = true
-                        val plantedFootSpread = (-0.18f + legDriftLRng.nextFloat() * 0.56f)
-                        leftLegSpread.animateTo(plantedFootSpread, tween(420 + legDriftLRng.nextInt(260), easing = FastOutSlowInEasing))
-                        val kneeCycles = 2 + legDriftLRng.nextInt(3)
-                        for (c in 0 until kneeCycles) {
-                            if (System.currentTimeMillis() >= endMs) break
-                            sideSign = -sideSign
-                            val kneeTarget = if (sideSign < 0f) {
-                                -(0.45f + legDriftLRng.nextFloat() * 0.62f) // deep inward thigh-squeeze press (-0.45..-1.07)
-                            } else {
-                                0.32f + legDriftLRng.nextFloat() * 0.54f // outward knee roll (+0.32..+0.86)
-                            }
-                            val kneeDur = 420 + legDriftLRng.nextInt(460)
-                            peakKneeShiftL.animateTo(kneeTarget, tween(kneeDur, easing = FastOutSlowInEasing))
-                            if (legDriftLRng.nextFloat() < 0.34f && System.currentTimeMillis() < endMs) {
-                                delay((95 + legDriftLRng.nextInt(185)).toLong())
-                            }
-                        }
-                        leftFootPlanted = false
-                    } else {
-                        // Whole-leg spread sweep (40% slower: 400..1100ms) with organic knee follow-through
-                        sideSign = if (legDriftLRng.nextFloat() < 0.72f) -sideSign else sideSign
-                        val rawTarget = if (sideSign > 0f) {
-                            0.18f + legDriftLRng.nextFloat() * 0.64f
-                        } else {
-                            -(0.18f + legDriftLRng.nextFloat() * 0.58f)
-                        }
-                        val kneeFollow = if (sideSign < 0f) {
-                            -(0.32f + legDriftLRng.nextFloat() * 0.68f) // natural inward thigh clinch
-                        } else {
-                            -0.12f + legDriftLRng.nextFloat() * 0.48f
-                        }
-                        val moveDur = 400 + legDriftLRng.nextInt(700)
-                        val jSpread = launch { leftLegSpread.animateTo(rawTarget, tween(moveDur, easing = FastOutSlowInEasing)) }
-                        val jKnee = launch { peakKneeShiftL.animateTo(kneeFollow, tween(moveDur + 60, easing = FastOutSlowInEasing)) }
-                        jSpread.join(); jKnee.join()
-                        if (legDriftLRng.nextFloat() < 0.36f && System.currentTimeMillis() < endMs) {
-                            delay((95 + legDriftLRng.nextInt(230)).toLong())
-                        }
+            val laterPulses = buildLaterPeakLegPulses(legDriftLRng)
+
+            // Varied later pulses + smooth final ease into resting pose
+            val pulseSequenceJob = launch {
+                for (pulse in laterPulses) {
+                    val remainingBeforeOpen = endMs - System.currentTimeMillis()
+                    if (remainingBeforeOpen <= PEAK_LEG_FINAL_EASE_MS) break
+
+                    leftFootPlanted = pulse.plantedFeet
+                    rightFootPlanted = pulse.plantedFeet
+
+                    // Reopening phase (mix of smaller partial reopenings and asymmetric wider releases)
+                    val jOpenL = launch {
+                        if (pulse.openLagLMs > 0L) delay(pulse.openLagLMs)
+                        val durL = min(pulse.openDurL.toLong(), (endMs - System.currentTimeMillis()).coerceAtLeast(180L)).toInt()
+                        val jSL = launch { leftLegSpread.animateTo(pulse.openSpreadL, tween(durL, easing = FastOutSlowInEasing)) }
+                        val jKL = launch { peakKneeShiftL.animateTo(pulse.openKneeL, tween(durL + 45, easing = FastOutSlowInEasing)) }
+                        jSL.join(); jKL.join()
+                    }
+                    val jOpenR = launch {
+                        if (pulse.openLagRMs > 0L) delay(pulse.openLagRMs)
+                        val durR = min(pulse.openDurR.toLong(), (endMs - System.currentTimeMillis()).coerceAtLeast(180L)).toInt()
+                        val jSR = launch { rightLegSpread.animateTo(pulse.openSpreadR, tween(durR, easing = FastOutSlowInEasing)) }
+                        val jKR = launch { peakKneeShiftR.animateTo(pulse.openKneeR, tween(durR + 45, easing = FastOutSlowInEasing)) }
+                        jSR.join(); jKR.join()
+                    }
+                    jOpenL.join(); jOpenR.join()
+
+                    val remainingBeforeClose = endMs - System.currentTimeMillis()
+                    if (remainingBeforeClose <= PEAK_LEG_FINAL_EASE_MS) break
+
+                    // Return / squeeze phase (with one knee occasionally lingering before beginning its return)
+                    val jRetL = launch {
+                        if (pulse.closeLagLMs > 0L) delay(pulse.closeLagLMs)
+                        val durL = min(pulse.closeDurL.toLong(), (endMs - System.currentTimeMillis()).coerceAtLeast(180L)).toInt()
+                        val jSL = launch { leftLegSpread.animateTo(pulse.closeSpreadL, tween(durL, easing = FastOutSlowInEasing)) }
+                        val jKL = launch { peakKneeShiftL.animateTo(pulse.closeKneeL, tween(durL + 35, easing = FastOutSlowInEasing)) }
+                        jSL.join(); jKL.join()
+                    }
+                    val jRetR = launch {
+                        if (pulse.closeLagRMs > 0L) delay(pulse.closeLagRMs)
+                        val durR = min(pulse.closeDurR.toLong(), (endMs - System.currentTimeMillis()).coerceAtLeast(180L)).toInt()
+                        val jSR = launch { rightLegSpread.animateTo(pulse.closeSpreadR, tween(durR, easing = FastOutSlowInEasing)) }
+                        val jKR = launch { peakKneeShiftR.animateTo(pulse.closeKneeR, tween(durR + 35, easing = FastOutSlowInEasing)) }
+                        jSR.join(); jKR.join()
+                    }
+                    jRetL.join(); jRetR.join()
+
+                    val remainingHold = (endMs - System.currentTimeMillis() - PEAK_LEG_FINAL_EASE_MS).coerceAtLeast(0L)
+                    if (pulse.clinchHoldMs > 0L && remainingHold > 30L) {
+                        delay(min(pulse.clinchHoldMs, remainingHold))
                     }
                 }
-            }
 
-            // Independent Right Leg: staggered phase alternating Planted-Foot Knee Shifting and Whole-Leg Sweeps (40% slower)
-            val rightDriftJob = launch {
-                delay((185 + legDriftRRng.nextInt(240)).toLong())
-                var sideSign = if (legDriftRRng.nextBoolean()) 1f else -1f
-                while (System.currentTimeMillis() < endMs) {
-                    val usePlantedKneeMode = legDriftRRng.nextFloat() < 0.50f
-                    if (usePlantedKneeMode) {
-                        rightFootPlanted = true
-                        val plantedFootSpread = (-0.18f + legDriftRRng.nextFloat() * 0.56f)
-                        rightLegSpread.animateTo(plantedFootSpread, tween(410 + legDriftRRng.nextInt(270), easing = FastOutSlowInEasing))
-                        val kneeCycles = 2 + legDriftRRng.nextInt(3)
-                        for (c in 0 until kneeCycles) {
-                            if (System.currentTimeMillis() >= endMs) break
-                            sideSign = -sideSign
-                            val kneeTarget = if (sideSign < 0f) {
-                                -(0.45f + legDriftRRng.nextFloat() * 0.62f)
-                            } else {
-                                0.32f + legDriftRRng.nextFloat() * 0.54f
-                            }
-                            val kneeDur = 410 + legDriftRRng.nextInt(480)
-                            peakKneeShiftR.animateTo(kneeTarget, tween(kneeDur, easing = FastOutSlowInEasing))
-                            if (legDriftRRng.nextFloat() < 0.34f && System.currentTimeMillis() < endMs) {
-                                delay((95 + legDriftRRng.nextInt(190)).toLong())
-                            }
-                        }
-                        rightFootPlanted = false
-                    } else {
-                        sideSign = if (legDriftRRng.nextFloat() < 0.72f) -sideSign else sideSign
-                        val rawTarget = if (sideSign > 0f) {
-                            0.18f + legDriftRRng.nextFloat() * 0.64f
-                        } else {
-                            -(0.18f + legDriftRRng.nextFloat() * 0.58f)
-                        }
-                        val kneeFollow = if (sideSign < 0f) {
-                            -(0.32f + legDriftRRng.nextFloat() * 0.68f)
-                        } else {
-                            -0.12f + legDriftRRng.nextFloat() * 0.48f
-                        }
-                        val moveDur = 390 + legDriftRRng.nextInt(710)
-                        val jSpread = launch { rightLegSpread.animateTo(rawTarget, tween(moveDur, easing = FastOutSlowInEasing)) }
-                        val jKnee = launch { peakKneeShiftR.animateTo(kneeFollow, tween(moveDur + 60, easing = FastOutSlowInEasing)) }
-                        jSpread.join(); jKnee.join()
-                        if (legDriftRRng.nextFloat() < 0.36f && System.currentTimeMillis() < endMs) {
-                            delay((90 + legDriftRRng.nextInt(235)).toLong())
-                        }
-                    }
+                // Final movement: smoothly ease both legs & knees directly into the resting pose (0f)
+                // with a gentle trailing-knee stagger so the 16s peak finishes cleanly at rest
+                legSettlingToRest = true
+                leftFootPlanted = false
+                rightFootPlanted = false
+                val trailRight = legDriftRRng.nextBoolean()
+                val trailLagMs = (140 + legDriftRRng.nextInt(110)).toLong()
+                val remainingEase = (endMs - System.currentTimeMillis()).coerceIn(900L, PEAK_LEG_FINAL_EASE_MS)
+                val leadDur = remainingEase.toInt()
+                val trailDur = (remainingEase - trailLagMs).coerceAtLeast(650L).toInt()
+                val jEaseL = launch {
+                    if (!trailRight) delay(trailLagMs)
+                    val d = if (trailRight) leadDur else trailDur
+                    val jS = launch { leftLegSpread.animateTo(0f, tween(d, easing = FastOutSlowInEasing)) }
+                    val jK = launch { peakKneeShiftL.animateTo(0f, tween(d, easing = FastOutSlowInEasing)) }
+                    jS.join(); jK.join()
                 }
+                val jEaseR = launch {
+                    if (trailRight) delay(trailLagMs)
+                    val d = if (trailRight) trailDur else leadDur
+                    val jS = launch { rightLegSpread.animateTo(0f, tween(d, easing = FastOutSlowInEasing)) }
+                    val jK = launch { peakKneeShiftR.animateTo(0f, tween(d, easing = FastOutSlowInEasing)) }
+                    jS.join(); jK.join()
+                }
+                jEaseL.join(); jEaseR.join()
             }
 
-            // Independent leg tremor/shakes (40% slower: 75..205ms; attenuated while foot is planted!)
+            // Independent leg tremor/shakes (40% slower: 75..205ms; attenuated while feet planted & faded out during final settle)
             val leftShakeJob = launch {
-                while (System.currentTimeMillis() < endMs) {
+                while (System.currentTimeMillis() < endMs && !legSettlingToRest) {
                     val plantedScale = if (leftFootPlanted) 0.14f else 1.0f
                     val burstDir = if (legLRng.nextFloat() < 0.56f) 1f else -1f
                     val burstAmp = burstDir * (0.090f + legLRng.nextFloat() * 0.155f) * plantedScale
                     val upDur = 76 + legLRng.nextInt(120)
                     val downDur = 86 + legLRng.nextInt(135)
                     peakLegShakeL.animateTo(burstAmp, tween(upDur, easing = FastOutSlowInEasing))
+                    if (legSettlingToRest) break
                     val rebound = -burstDir * (0.042f + legLRng.nextFloat() * 0.105f) * plantedScale
                     peakLegShakeL.animateTo(rebound, tween(downDur, easing = FastOutSlowInEasing))
-                    if (legLRng.nextFloat() < 0.26f) {
+                    if (legLRng.nextFloat() < 0.26f && !legSettlingToRest) {
                         delay((58 + legLRng.nextInt(140)).toLong())
                     }
                 }
+                peakLegShakeL.animateTo(0f, tween(580, easing = FastOutSlowInEasing))
             }
             val rightShakeJob = launch {
                 delay((54 + legRRng.nextInt(108)).toLong())
-                while (System.currentTimeMillis() < endMs) {
+                while (System.currentTimeMillis() < endMs && !legSettlingToRest) {
                     val plantedScale = if (rightFootPlanted) 0.14f else 1.0f
                     val burstDir = if (legRRng.nextFloat() < 0.56f) 1f else -1f
                     val burstAmp = burstDir * (0.090f + legRRng.nextFloat() * 0.155f) * plantedScale
                     val upDur = 74 + legRRng.nextInt(124)
                     val downDur = 84 + legRRng.nextInt(140)
                     peakLegShakeR.animateTo(burstAmp, tween(upDur, easing = FastOutSlowInEasing))
+                    if (legSettlingToRest) break
                     val rebound = -burstDir * (0.042f + legRRng.nextFloat() * 0.105f) * plantedScale
                     peakLegShakeR.animateTo(rebound, tween(downDur, easing = FastOutSlowInEasing))
-                    if (legRRng.nextFloat() < 0.26f) {
+                    if (legRRng.nextFloat() < 0.26f && !legSettlingToRest) {
                         delay((54 + legRRng.nextInt(148)).toLong())
                     }
                 }
+                peakLegShakeR.animateTo(0f, tween(580, easing = FastOutSlowInEasing))
             }
-            leftDriftJob.join()
-            rightDriftJob.join()
+            pulseSequenceJob.join()
             leftShakeJob.join()
             rightShakeJob.join()
         }
