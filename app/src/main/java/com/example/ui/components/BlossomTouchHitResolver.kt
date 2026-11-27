@@ -63,7 +63,8 @@ internal data class ProjectedVulvaFrame(
 internal data class TouchHitResult(
     val zone: TouchTargetZone,
     val vulvaLocalNorm: Offset? = null,
-    val vulvaFrame: ProjectedVulvaFrame? = null
+    val vulvaFrame: ProjectedVulvaFrame? = null,
+    val isLowerMouthChin: Boolean = false
 )
 
 internal data class ProjectedScreenPoint(
@@ -238,10 +239,12 @@ internal object BlossomTouchHitResolver {
             return TouchHitResult(zone = zone)
         }
 
-        // 3. PRIORITY 3 — Snug 3D-Projected Head & Face Ellipse (allows persistent side-to-side face turning!)
+        // 3. PRIORITY 3 — Snug 3D-Projected Head & Face Ellipse (allows persistent side-to-side face turning,
+        //    plus press-and-hold lower mouth/chin drag to smoothly pull her mouth open or shut!)
         val headDist = evaluateHeadEllipseDist(rawScreenNorm, projector)
         if (headDist <= 1.0f) {
-            return TouchHitResult(zone = TouchTargetZone.HEAD)
+            val isMouthChin = evaluateLowerMouthChinHit(rawScreenNorm, projector, deform)
+            return TouchHitResult(zone = TouchTargetZone.HEAD, isLowerMouthChin = isMouthChin)
         }
 
         // 4 & 5. Snug 3D-Projected Thigh/Calf Capsules & Posterior Gluteal Cheeks (isolated from hands, arms, vulva & edges!)
@@ -352,6 +355,32 @@ internal object BlossomTouchHitResolver {
         val rx = (projector.projectRadiusX(0.76f, p.depth) + 0.010f).coerceIn(0.032f, 0.34f)
         val ry = (projector.projectRadiusY(0.94f, p.depth) + 0.010f).coerceIn(0.038f, 0.42f)
         return hypot((touch.x - p.x) / rx, (touch.y - p.y) / ry)
+    }
+
+    /**
+     * Evaluates whether a touch inside [TouchTargetZone.HEAD] specifically lands over Blossom's
+     * posed lower mouth / chin area (`ly ~ -0.44..-0.72` in head-local space), accounting for live
+     * head turn, pitch, roll, and current jaw opening.
+     */
+    internal fun evaluateLowerMouthChinHit(
+        touch: Offset,
+        projector: BlossomCameraProjector,
+        deform: VulvaDeformationState
+    ): Boolean {
+        val openFrac = deform.mouthOpen.coerceIn(0f, 1f)
+        val mouthChinWorld = BlossomUpperBodyBuilder.transformHeadPoint(
+            lx = 0f,
+            ly = -0.54f - 0.08f * openFrac,
+            lz = 0.60f,
+            headTurn = deform.headTurn,
+            headPitch = deform.headPitch,
+            headRollOffset = deform.headRollOffset
+        )
+        val p = projector.projectUnclamped(mouthChinWorld) ?: return false
+        if (p.x !in -0.15f..1.15f || p.y !in -0.15f..1.15f) return false
+        val rx = (projector.projectRadiusX(0.32f, p.depth) + 0.018f).coerceIn(0.030f, 0.24f)
+        val ry = (projector.projectRadiusY(0.28f + 0.05f * openFrac, p.depth) + 0.018f).coerceIn(0.030f, 0.22f)
+        return hypot((touch.x - p.x) / rx, (touch.y - p.y) / ry) <= 1.0f
     }
 
     private fun evaluateGluteEllipseDist(

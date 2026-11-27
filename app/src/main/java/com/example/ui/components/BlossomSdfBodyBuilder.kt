@@ -740,11 +740,22 @@ internal object BlossomSdfBodyBuilder {
      * vertices are left pinned to the exam table when lifting the arms, while keeping the torso,
      * breasts, neck, and legs 100% anchored.
      */
+    /**
+     * Identifies strictly vertices belonging to Blossom's resting distal forearm, wrist, or
+     * palm core below `y <= 0.44f` (anatomically located at `ax >= 2.10, z <= -0.77, y >= -0.34`),
+     * sitting cleanly across the ~0.35-unit air gap from the outer upper thigh/hip/glute
+     * (`ax <= 1.72` whenever `z < -0.66`). Shared identically by [buildLegSkinCache],
+     * [evaluateArmVsTorsoWeight], and [BlossomArmIkRig.buildArmSkinCache] so arm and leg
+     * ownership stay 100% disjoint with ZERO clipping of outer upper-thigh skin.
+     */
+    internal fun isRestingHandOrDistalForearm(ax: Float, y: Float, z: Float): Boolean =
+        y in -0.50f..0.44f && ax > 2.04f && z < -0.66f
+
     fun evaluateArmVsTorsoWeight(x: Float, y: Float, z: Float): Float {
         val ax = abs(x)
         if (ax < 0.96f || y < -0.85f || y > 5.04f) return 0f
-        // Strictly disjoint from LegSkinCache (legs sit inside y <= 0.44 and (ax <= 1.86 or z >= -0.35))
-        if (y <= 0.44f && (ax <= 1.86f || z >= -0.35f)) return 0f
+        // Strictly disjoint from LegSkinCache via the shared resting-hand corridor
+        if (y <= 0.44f && !isRestingHandOrDistalForearm(ax, y, z)) return 0f
 
         // Exact Torso + Anterior Axillary Fold + Trapezius SDF (matching evaluateBodySdf)
         val yc = y.coerceIn(-1.04f, 4.98f)
@@ -2701,8 +2712,8 @@ internal object BlossomSdfBodyBuilder {
             if (y > 0.44f) continue
 
             val ax = abs(x)
-            // Keep forearm, wrist & palm strictly stationary even beside hips!
-            if (y > -0.72f && ax > 1.82f && z < -0.35f) continue
+            // Keep resting forearm, wrist & palm strictly stationary without slicing outer upper-thigh skin!
+            if (isRestingHandOrDistalForearm(ax, y, z)) continue
 
             // 3D anterior pelvic collar guard (v29.0): keeps actual anterior pelvic-collar attachment
             // vertices 100% pinned (zero vulva-patch seam drift or Seam D bridge leakage) and feathers

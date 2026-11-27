@@ -1,5 +1,29 @@
 # Bloom Atlas — Version History
 
+## Version 32.0 (`versionCode = 32`)
+**Date:** 2026-11-27
+
+- **Sculpted Bilateral 3D Anatomical Ears (`BlossomUpperBodyBuilder.kt`)**
+  - Added bilateral 3D sculpted anatomical ears (`EAR_COLS = 28, EAR_ROWS = 24`, 672 vertices/ear, 100% verified outward CCW winding & exact mirror symmetry) directly inside `blossomHeadMesh` (`14,304` total vertices), modeling curled helix rim, scapha trench, antihelix ridge, recessed concha bowl, anterior tragus, rounded earlobe, and soft warm fold AO.
+  - Ears rigidly follow head turn, pitch, and roll (`applyHeadTurn`), reconstruct cleanly under `uInvHeadMatrix` for head-locked facial shading, and remain fully compatible with `applyNeckSeamBeta`.
+- **Eliminated Side-Profile Post-Auricular Hair Ridge & Scalp Sliver (`BlossomUpperBodyBuilder.kt`)**
+  - Eliminated stacked azimuthal derivatives in `buildBlossomHairMesh()` Part A behind the ear (`rearNapeMask = smoothStep(0.48, 1.00, -cosP)`, `trueNapeMask = smoothStep(0.62, 1.00, -cosP)`, gentle over-ear arch relief, confined rear-nape `pillowFan`, and subtle `sideHemTuck`), cutting side-profile radial step (`0.0315`) and vertical hem drop (`0.1177`) while preserving zero under-jaw shell intrusions.
+  - Tucked mid-ear bob side locks softly behind the sculpted ear helix and broadened post-auricular nape locks to seal the back-of-ear contour.
+- **Calmer Post-Hold Peak Blink Cadence with Expressive Long Blinks (`InteractiveVulva3DCanvas.kt`)**
+  - Preserved the initial 4-second sustained eye closure (`PEAK_EYELID_CLOSE_DURATION_MS = 4_000L`) and idle blinking unchanged.
+  - Added `buildPostHoldPeakBlinkEvents()` cutting post-hold peak blink frequency by ~60% (averaging `5.9` calm, unhurried blinks over the remaining ~11.6s instead of rapid double/triple flutter bursts) and scheduling 2–3 well-spaced **"long blinks"** holding eyes shut for **500–1500 ms** before reopening.
+- **Press-and-Hold Lower Mouth / Chin Jaw Drag (`BlossomTouchHitResolver.kt`, `BlossomViewportSessionState.kt`, `InteractiveVulva3DCanvas.kt`)**
+  - Added `evaluateLowerMouthChinHit()` projecting Blossom's posed lower mouth/chin via `transformHeadPoint()` and wired a 280 ms stationary press-and-hold gesture in Touch Tissue mode (`!isOrbitMode`).
+  - Holding on Blossom's lower mouth/chin triggers a tactile confirmation pulse and lets you pull down to open her mouth (staying open when released, persisted in `BlossomViewportSessionState.manualMouthOpen`, and resetting on *"Release Pose"*) or hold and pull up to shut it — while immediate touch-and-drag head turning/pitching remains completely unaffected.
+- **Rigging Fix #1 — Finger Roots Stay Locked to Moving Palms (`BlossomUpperBodyBuilder.kt`)**
+  - Fixed `updateArticulatedPalmsMesh()` skipping palm updates whenever `poseProgress <= 0.0001f` even though `isActivePose` was true during resting-arm micro-shifts and finger micro-curls (which moved fingers away from frozen palms at 152 BPM).
+  - Added gentle proximal root-cap tuck (`rootCapTuck`) in `fingerRadiusProfile()` so all 5 fingers' buried `r = 0` root rings stay cleanly inside the palm shell (`rootMinAx = 2.148` vs `palmMinAx = 2.081`) while keeping full knuckle-web emergence, nail tracking, and self-spread hand contact.
+- **Rigging Fix #2 — Eliminated Sharp Outer Upper-Thigh Corner During Hard Inward Squeeze (`BlossomSdfBodyBuilder.kt`, `BlossomArmIkRig.kt`)**
+  - Replaced the oversized `y > -0.72 && ax > 1.82 && z < -0.35` arm exclusion box in `buildLegSkinCache()` (which inadvertently excluded 72 outer upper-thigh vertices and caused a sharp frozen outward corner beside the resting hand whenever `betaRealismHipThighSwing` was ON during hard inward slams) with a shared, tighter resting forearm/wrist/palm envelope (`isRestingHandOrDistalForearm`: `y in -0.50..0.44 && ax > 2.04 && z < -0.66`) mirrored identically in `evaluateArmVsTorsoWeight()` and `BlossomArmIkRig.buildArmSkinCache()`.
+  - Verified 0 shared arm/leg vertices, 0 resting arm/wrist movement during leg slams, smooth outer upper-thigh contour (`maxSecondDiff = 0.0239` ON / `0.0368` OFF), 0 inverted outer- or inner-thigh triangles, rigid 3D pelvic collar / Seam D pinning, and grounded feet.
+
+---
+
 ## Version 30.0 (`versionCode = 30`)
 **Date:** 2026-11-26
 

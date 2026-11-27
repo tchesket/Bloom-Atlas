@@ -64,6 +64,52 @@ internal object BlossomUpperBodyBuilder {
         return floatArrayOf(nx / len, wy / len, wz / len)
     }
 
+    /**
+     * Transforms a head-local point `(lx, ly, lz)` into live posed world space matching
+     * [applyHeadTurn] exactly (used by 3D touch hit resolution for the lower mouth & chin).
+     */
+    internal fun transformHeadPoint(
+        lx: Float,
+        ly: Float,
+        lz: Float,
+        headTurn: Float,
+        headPitch: Float = 0f,
+        headRollOffset: Float = 0f
+    ): FloatArray {
+        val wPt = headLocalToWorld(lx, ly, lz)
+        val turn = headTurn.coerceIn(-1f, 1f)
+        val pitch = headPitch.coerceIn(-1f, 1f)
+        val rollExtra = headRollOffset.coerceIn(-0.12f, 0.12f)
+        if (abs(turn) < 1e-4f && abs(pitch) < 1e-4f && abs(rollExtra) < 1e-4f) {
+            return wPt
+        }
+        val pivotY = HEAD_CENTER_Y - 0.18f
+        val pivotZ = HEAD_CENTER_Z - 0.22f
+        val fullPitch = if (pitch >= 0f) pitch * 0.21f else pitch * 0.34f
+        val fullYaw = turn * 0.488f
+        val fullRoll = -turn * 0.068f + rollExtra
+
+        val cp = cos(fullPitch); val sp = sin(fullPitch)
+        val cy = cos(fullYaw); val sy = sin(fullYaw)
+        val cr = cos(fullRoll); val sr = sin(fullRoll)
+
+        val rx = wPt[0]
+        val ry = wPt[1] - pivotY
+        val rz = wPt[2] - pivotZ
+
+        val x0 = rx
+        val y0 = ry * cp - rz * sp
+        val z0 = ry * sp + rz * cp
+
+        val x1 = x0 * cy + z0 * sy
+        val y1 = y0
+        val z1 = -x0 * sy + z0 * cy
+
+        val x2 = x1 * cr - y1 * sr
+        val y2 = x1 * sr + y1 * cr
+        return floatArrayOf(x2, pivotY + y2, pivotZ + z1)
+    }
+
     internal data class BlossomFingerSpec(
         val rootAx: Float,
         val rootY: Float,
@@ -254,10 +300,14 @@ internal object BlossomUpperBodyBuilder {
             tipScale = sqrt((1f - uCap * uCap).coerceAtLeast(0f)).coerceAtLeast(0.012f)
         }
 
+        // Gently tuck the buried proximal open ring (s < 0.10) inward so the finger root stays
+        // 100% enclosed inside the palm shell from every front, side, and oblique angle while
+        // keeping full natural knuckle-web flare where each digit emerges (s ~ 0.12..0.24).
+        val rootCapTuck = 0.72f + 0.28f * smoothStep(0.0f, 0.10f, s)
         val rootFlare = if (isThumb) {
-            1f + 0.24f * (1f - smoothStep(0f, 0.30f, s))
+            (1f + 0.24f * (1f - smoothStep(0f, 0.30f, s))) * rootCapTuck
         } else {
-            1f + 0.16f * (1f - smoothStep(0f, 0.22f, s))
+            (1f + 0.16f * (1f - smoothStep(0f, 0.22f, s))) * rootCapTuck
         }
         val distalTaper = 1f - (if (isThumb) 0.10f else 0.12f) * smoothStep(0.14f, 0.88f, s)
         val jointProfile = if (isThumb) {
@@ -525,7 +575,7 @@ internal object BlossomUpperBodyBuilder {
         val stride = DynamicGlMesh.FLOATS_PER_VERTEX
         val totalVerts = palmsMesh.vertexCount
 
-        if (leftSol.poseProgress <= 0.0001f && rightSol.poseProgress <= 0.0001f) {
+        if (!leftSol.isActivePose && !rightSol.isActivePose) {
             System.arraycopy(src, 0, dst, 0, src.size)
             palmsMesh.commitVertices()
             return
@@ -1348,8 +1398,10 @@ internal object BlossomUpperBodyBuilder {
     // 3. SCULPTURAL REALISTIC FEMININE HEAD & FACE (120x108, OUTWARD CCW!)
     //    theta runs BOTTOM-TO-TOP (PI -> 0) so d/dc=+X, d/dr=+Y => +Z OUTWARD!
     // -------------------------------------------------------------------------
-    private const val HEAD_COLS = 120
-    private const val HEAD_ROWS = 108
+    internal const val HEAD_COLS = 120
+    internal const val HEAD_ROWS = 108
+    internal const val EAR_COLS = 28
+    internal const val EAR_ROWS = 24
 
     fun buildBlossomHeadMesh(
         buildIndices: (Int, Int) -> ShortArray,
@@ -1357,8 +1409,16 @@ internal object BlossomUpperBodyBuilder {
     ): DynamicGlMesh {
         val cols = HEAD_COLS
         val rows = HEAD_ROWS
-        val mesh = DynamicGlMesh(cols * rows, (cols - 1) * (rows - 1) * 6)
-        mesh.setIndices(buildIndices(cols, rows))
+        val headVerts = cols * rows
+        val headTriIndices = (cols - 1) * (rows - 1) * 6
+        val vertsPerEar = EAR_COLS * EAR_ROWS
+        val trisPerEar = (EAR_COLS - 1) * (EAR_ROWS - 1) * 6
+        val totalVerts = headVerts + vertsPerEar * 2
+        val totalIndices = headTriIndices + trisPerEar * 2
+        val mesh = DynamicGlMesh(totalVerts, totalIndices)
+        val combinedIndices = ShortArray(totalIndices)
+        val headIndices = buildIndices(cols, rows)
+        System.arraycopy(headIndices, 0, combinedIndices, 0, headIndices.size)
 
         val data = mesh.vertexData
         val stride = DynamicGlMesh.FLOATS_PER_VERTEX
@@ -1555,13 +1615,12 @@ internal object BlossomUpperBodyBuilder {
                     facePigment = (0.008f + max(browPigment, lashPigment) + lipColorMask * 0.05f).coerceIn(0f, 0.96f)
                 }
 
-                // 5. Delicate Sculpted Ears on lateral temples
-                val earRegion = smoothStep(0.72f, 0.96f, abs(sinP)) * smoothBell(ly, -0.24f, 0.12f, 0.08f) * (1f - submentalT)
+                // 5. Subtle preauricular temple seat (sculpted 3D bilateral ears attach cleanly right here!)
+                val earRegion = smoothStep(0.76f, 0.96f, abs(sinP)) * smoothBell(ly, -0.26f, 0.14f, 0.08f) * (1f - submentalT)
                 if (earRegion > 0.001f) {
-                    val earLat = 0.056f * earRegion * exp(-((cosP + 0.16f) / 0.28f).let { it * it })
-                    lx += (if (sinP >= 0f) 1f else -1f) * earLat
-                    lz -= 0.018f * earRegion
-                    faceAo *= (1f - 0.16f * earRegion * exp(-((cosP + 0.10f) / 0.18f).let { it * it }))
+                    val earSeat = 0.010f * earRegion * exp(-((cosP + 0.10f) / 0.24f).let { it * it })
+                    lx += (if (sinP >= 0f) 1f else -1f) * earSeat
+                    faceAo *= (1f - 0.12f * earRegion * exp(-((cosP + 0.10f) / 0.18f).let { it * it }))
                 }
 
                 // Soft natural ambient occlusion gently transitioning under the jaw onto the neck
@@ -1624,6 +1683,183 @@ internal object BlossomUpperBodyBuilder {
             }
         }
 
+        // ---------------------------------------------------------------------
+        // 6. SCULPTED REALISTIC BILATERAL 3D EARS (HELIX, SCAPHA, ANTIHELIX, CONCHA, TRAGUS & EARLOBE)
+        //    Appended cleanly after HEAD_COLS * HEAD_ROWS so they share Pass A skin lighting,
+        //    rotate 100% rigidly with applyHeadTurn, and reconstruct cleanly via uInvHeadMatrix.
+        // ---------------------------------------------------------------------
+        val earSides = floatArrayOf(-1f, +1f)
+        val tiltRad = 0.21f // ~12 deg natural posterior anatomical inclination
+        val cosTilt = cos(tiltRad)
+        val sinTilt = sin(tiltRad)
+        val earCenterY = -0.055f
+        val earCenterZ = -0.085f
+        val earBaseAx = 0.592f // tucked ~0.025 inside lateral skull temple surface -> zero root gap
+        var idxOut = headTriIndices
+
+        for ((earIdx, side) in earSides.withIndex()) {
+            val baseVert = headVerts + earIdx * vertsPerEar
+            for (r in 0 until EAR_ROWS - 1) {
+                for (c in 0 until EAR_COLS - 1) {
+                    val i0 = (baseVert + r * EAR_COLS + c).toShort()
+                    val i1 = (baseVert + r * EAR_COLS + c + 1).toShort()
+                    val i2 = (baseVert + (r + 1) * EAR_COLS + c).toShort()
+                    val i3 = (baseVert + (r + 1) * EAR_COLS + c + 1).toShort()
+                    if (side > 0f) {
+                        // Right ear (+X): outward normal = dP/dr x dP/dc -> (i0, i2, i1), (i1, i2, i3)
+                        combinedIndices[idxOut++] = i0; combinedIndices[idxOut++] = i2; combinedIndices[idxOut++] = i1
+                        combinedIndices[idxOut++] = i1; combinedIndices[idxOut++] = i2; combinedIndices[idxOut++] = i3
+                    } else {
+                        // Left ear (-X): outward normal = dP/dc x dP/dr -> (i0, i1, i2), (i1, i3, i2)
+                        combinedIndices[idxOut++] = i0; combinedIndices[idxOut++] = i1; combinedIndices[idxOut++] = i2
+                        combinedIndices[idxOut++] = i1; combinedIndices[idxOut++] = i3; combinedIndices[idxOut++] = i2
+                    }
+                }
+            }
+
+            // Store ear-local positions to compute smooth wrapped outward normals before converting to world
+            val earLocal = FloatArray(vertsPerEar * 3)
+            for (r in 0 until EAR_ROWS) {
+                val v = r.toFloat() / (EAR_ROWS - 1)
+                // Radial profile from tucked posterior root collar (v=0) -> outer helix rim (v=0.48) ->
+                // recessed concha bowl (v=0.88) -> closed acoustic meatus pole (v=1.0)
+                val radBack = 0.56f + 0.44f * sin(smoothStep(0.0f, 0.48f, v) * (PI.toFloat() * 0.5f))
+                val radFront = 1.0f - 0.975f * smoothStep(0.48f, 1.0f, v)
+                val radProfile = if (v <= 0.48f) radBack else radFront
+
+                // Lateral outward projection (head-local |lx| offset from earBaseAx)
+                val backSweep = smoothStep(0.0f, 0.48f, v)
+                val helixRoll = exp(-((v - 0.50f) / 0.085f).let { it * it })
+                val scaphaDip = exp(-((v - 0.63f) / 0.068f).let { it * it })
+                val antihelixRidge = exp(-((v - 0.74f) / 0.062f).let { it * it })
+                val conchaBowl = smoothStep(0.76f, 0.96f, v)
+
+                for (c in 0 until EAR_COLS) {
+                    val u = c.toFloat() / (EAR_COLS - 1)
+                    val ang = u * (2f * PI.toFloat())
+                    val cosA = cos(ang) // +1 anterior (cheek), -1 posterior (back)
+                    val sinA = sin(ang) // +1 superior (top helix), -1 inferior (earlobe)
+
+                    // Organic adult female auricle outline: fuller rounded upper pinna, graceful C-curve rear,
+                    // narrower plump rounded earlobe (lobule) below, smooth cheek-side preauricular border
+                    val upperW = smoothStep(-0.20f, 0.70f, sinA)
+                    val lowerLobeW = smoothStep(0.10f, -0.85f, sinA)
+                    val postW = smoothStep(0.25f, -0.78f, cosA)
+                    val antW = smoothStep(-0.10f, 0.85f, cosA)
+
+                    val aAxis = if (cosA >= 0f) {
+                        0.088f * (1f - 0.22f * lowerLobeW) // anterior reach toward cheek
+                    } else {
+                        0.132f * (0.76f + 0.30f * upperW - 0.24f * lowerLobeW) // posterior helix sweep
+                    }
+                    val bAxis = if (sinA >= 0f) {
+                        0.194f // superior helix height (aligns near brow/upper lid)
+                    } else {
+                        0.174f // inferior earlobe height (aligns near nose base)
+                    }
+                    // Subtle mid-ear waist tuck just above the earlobe (intertragic contour)
+                    val lobeWaist = 1f - 0.09f * exp(-((sinA + 0.52f) / 0.24f).let { it * it }) * postW
+
+                    val uAnt = cosA * aAxis * radProfile * lobeWaist
+                    val uUp = sinA * bAxis * radProfile
+
+                    // Anatomical lateral flare: flares gently backward/outward (~18 deg) posteriorly,
+                    // stays snug anteriorly against cheek/temple, soft plump lobe at bottom
+                    val pinnaFlare = 0.052f + 0.066f * postW * (0.55f + 0.45f * (1f - lowerLobeW * 0.55f)) +
+                        0.022f * lowerLobeW * (1f - antW * 0.6f)
+                    val helixMask = 1f - lowerLobeW * 0.72f - antW * 0.45f * smoothStep(0.25f, -0.65f, sinA)
+                    val antihelixMask = smoothStep(-0.62f, 0.45f, sinA) * (1f - antW * 0.75f)
+                    val scaphaMask = smoothStep(-0.45f, 0.65f, sinA) * (1f - antW * 0.80f)
+                    // Delicate anterior tragus flap projecting softly over front of concha
+                    val tragusMask = exp(-((sinA + 0.20f) / 0.24f).let { it * it }) *
+                        smoothStep(0.35f, 0.90f, cosA) *
+                        exp(-((v - 0.74f) / 0.11f).let { it * it })
+                    // Plump soft rounded earlobe pillow
+                    val lobePlump = lowerLobeW * exp(-((v - 0.56f) / 0.18f).let { it * it }) * 0.022f
+
+                    val baseLat = if (v <= 0.48f) {
+                        pinnaFlare * (0.04f + 0.96f * backSweep)
+                    } else {
+                        pinnaFlare * (1f - 0.68f * conchaBowl)
+                    }
+                    val reliefLat = 0.021f * helixRoll * helixMask.coerceIn(0.15f, 1f) -
+                        0.024f * scaphaDip * scaphaMask.coerceIn(0f, 1f) +
+                        0.020f * antihelixRidge * antihelixMask.coerceIn(0f, 1f) +
+                        0.024f * tragusMask +
+                        lobePlump
+
+                    // Curve base skull contour slightly so anterior/posterior root hugs curved cranium
+                    val skullCurveAx = -0.020f * (uAnt * uAnt + uUp * uUp) / (0.19f * 0.19f)
+                    val lxLocal = side * (earBaseAx + skullCurveAx + baseLat + reliefLat)
+                    val lyLocal = earCenterY + uUp * cosTilt - uAnt * sinTilt
+                    val lzLocal = earCenterZ + uUp * sinTilt + uAnt * cosTilt
+
+                    val pBase = (r * EAR_COLS + c) * 3
+                    earLocal[pBase] = lxLocal
+                    earLocal[pBase + 1] = lyLocal
+                    earLocal[pBase + 2] = lzLocal
+
+                    // Natural anatomical ear material shading (soft translucent warmth + deep concha/scapha AO)
+                    val earMucosa = (0.032f + 0.042f * helixRoll + 0.038f * lobePlump / 0.022f + 0.028f * conchaBowl).coerceIn(0f, 0.14f)
+                    val earWetness = 0.030f
+                    val backCreaseAo = 1f - 0.18f * (1f - smoothStep(0.0f, 0.28f, v))
+                    val scaphaAo = 1f - 0.18f * scaphaDip * scaphaMask.coerceIn(0f, 1f)
+                    val conchaAo = 1f - 0.42f * conchaBowl - 0.18f * smoothStep(0.90f, 1.0f, v)
+                    val earAo = (backCreaseAo * scaphaAo * conchaAo).coerceIn(0.32f, 1f)
+                    val earPigment = (0.010f + 0.014f * conchaBowl).coerceIn(0f, 0.08f)
+
+                    val wPt = headLocalToWorld(lxLocal, lyLocal, lzLocal)
+                    val dst = (baseVert + r * EAR_COLS + c) * stride
+                    data[dst] = wPt[0]
+                    data[dst + 1] = wPt[1]
+                    data[dst + 2] = wPt[2]
+                    data[dst + 6] = earMucosa
+                    data[dst + 7] = earWetness
+                    data[dst + 8] = earAo
+                    data[dst + 9] = earPigment
+                }
+            }
+
+            // Compute smooth wrapped normals matching exact per-side outward CCW triangle winding
+            val signFlip = if (side > 0f) 1f else -1f
+            for (r in 0 until EAR_ROWS) {
+                val rPrev = max(0, r - 1)
+                val rNext = min(EAR_ROWS - 1, r + 1)
+                for (c in 0 until EAR_COLS) {
+                    val cPrev = if (c == 0) EAR_COLS - 2 else c - 1
+                    val cNext = if (c == EAR_COLS - 1) 1 else c + 1
+                    val iL = (r * EAR_COLS + cPrev) * 3
+                    val iR = (r * EAR_COLS + cNext) * 3
+                    val iD = (rPrev * EAR_COLS + c) * 3
+                    val iU = (rNext * EAR_COLS + c) * 3
+
+                    val dcx = earLocal[iR] - earLocal[iL]
+                    val dcy = earLocal[iR + 1] - earLocal[iL + 1]
+                    val dcz = earLocal[iR + 2] - earLocal[iL + 2]
+                    val drx = earLocal[iU] - earLocal[iD]
+                    val dry = earLocal[iU + 1] - earLocal[iD + 1]
+                    val drz = earLocal[iU + 2] - earLocal[iD + 2]
+
+                    // dP/dr x dP/dc for right ear (+1), dP/dc x dP/dr for left ear (-1)
+                    var nx = (dry * dcz - drz * dcy) * signFlip
+                    var ny = (drz * dcx - drx * dcz) * signFlip
+                    var nz = (drx * dcy - dry * dcx) * signFlip
+                    val nLen = sqrt(nx * nx + ny * ny + nz * nz)
+                    if (nLen > 1e-5f) {
+                        nx /= nLen; ny /= nLen; nz /= nLen
+                    } else {
+                        nx = side; ny = 0f; nz = 0f
+                    }
+                    val wN = headNormalToWorld(nx, ny, nz)
+                    val dst = (baseVert + r * EAR_COLS + c) * stride
+                    data[dst + 3] = wN[0]
+                    data[dst + 4] = wN[1]
+                    data[dst + 5] = wN[2]
+                }
+            }
+        }
+
+        mesh.setIndices(combinedIndices)
         mesh.commitVertices()
         return mesh
     }
@@ -1735,32 +1971,32 @@ internal object BlossomUpperBodyBuilder {
             LockSpec(floatArrayOf(0.24f, 0.87f, 0.34f), floatArrayOf(0.50f, 0.60f, 0.44f), floatArrayOf(0.67f, -0.02f, 0.26f), 0.162f, 0.018f, 0.15f),
             LockSpec(floatArrayOf(0.08f, 0.93f, 0.28f), floatArrayOf(-0.38f, 0.74f, 0.45f), floatArrayOf(-0.69f, 0.10f, 0.24f), 0.158f, 0.019f, 0.19f),
 
-            // 10 Cohesive overlapping chin-length bob side curtain locks draping smoothly around temples, cheeks & jaw
-            // (wider, overlapping & gently curved inward along a unified bob silhouette — zero splayed pointy claws!)
+            // 10 Cohesive overlapping chin-length bob side curtain locks framing cheeks in front of
+            // the ears while tucking gracefully behind the sculpted ear helix in 3/4 and side views
             LockSpec(floatArrayOf(-0.32f, 0.78f, 0.28f), floatArrayOf(-0.69f, 0.14f, 0.27f), floatArrayOf(-0.65f, -0.84f, 0.15f), 0.168f, 0.024f, 0.15f),
-            LockSpec(floatArrayOf(-0.40f, 0.72f, 0.16f), floatArrayOf(-0.74f, 0.02f, 0.14f), floatArrayOf(-0.69f, -0.94f, 0.02f), 0.178f, 0.026f, 0.12f),
-            LockSpec(floatArrayOf(-0.36f, 0.76f, 0.22f), floatArrayOf(-0.71f, 0.08f, 0.20f), floatArrayOf(-0.66f, -0.88f, 0.09f), 0.162f, 0.024f, 0.19f),
-            LockSpec(floatArrayOf(-0.26f, 0.86f, 0.10f), floatArrayOf(-0.73f, 0.20f, 0.13f), floatArrayOf(-0.72f, -0.98f, -0.06f), 0.176f, 0.026f, 0.16f),
-            LockSpec(floatArrayOf(-0.44f, 0.62f, 0.02f), floatArrayOf(-0.76f, -0.10f, -0.02f), floatArrayOf(-0.75f, -1.06f, -0.16f), 0.184f, 0.027f, 0.10f),
+            LockSpec(floatArrayOf(-0.40f, 0.72f, 0.10f), floatArrayOf(-0.76f, 0.02f, -0.18f), floatArrayOf(-0.72f, -0.94f, -0.10f), 0.182f, 0.026f, 0.12f),
+            LockSpec(floatArrayOf(-0.36f, 0.76f, 0.24f), floatArrayOf(-0.70f, 0.08f, 0.22f), floatArrayOf(-0.66f, -0.88f, 0.11f), 0.162f, 0.024f, 0.19f),
+            LockSpec(floatArrayOf(-0.26f, 0.86f, 0.08f), floatArrayOf(-0.73f, 0.24f, 0.04f), floatArrayOf(-0.74f, -0.98f, -0.14f), 0.178f, 0.026f, 0.16f),
+            LockSpec(floatArrayOf(-0.44f, 0.62f, -0.04f), floatArrayOf(-0.78f, -0.10f, -0.22f), floatArrayOf(-0.77f, -1.06f, -0.24f), 0.188f, 0.027f, 0.10f),
 
             LockSpec(floatArrayOf(0.30f, 0.78f, 0.28f), floatArrayOf(0.69f, 0.14f, 0.27f), floatArrayOf(0.65f, -0.84f, 0.15f), 0.168f, 0.024f, 0.15f),
-            LockSpec(floatArrayOf(0.38f, 0.72f, 0.16f), floatArrayOf(0.74f, 0.02f, 0.14f), floatArrayOf(0.69f, -0.94f, 0.02f), 0.178f, 0.026f, 0.12f),
-            LockSpec(floatArrayOf(0.30f, 0.76f, 0.30f), floatArrayOf(0.67f, 0.16f, 0.30f), floatArrayOf(0.65f, -0.86f, 0.16f), 0.162f, 0.024f, 0.19f),
-            LockSpec(floatArrayOf(0.26f, 0.86f, 0.12f), floatArrayOf(0.73f, 0.20f, 0.14f), floatArrayOf(0.72f, -0.98f, -0.05f), 0.176f, 0.026f, 0.16f),
-            LockSpec(floatArrayOf(0.44f, 0.62f, 0.02f), floatArrayOf(0.76f, -0.10f, -0.02f), floatArrayOf(0.75f, -1.06f, -0.16f), 0.184f, 0.027f, 0.10f),
+            LockSpec(floatArrayOf(0.38f, 0.72f, 0.10f), floatArrayOf(0.76f, 0.02f, -0.18f), floatArrayOf(0.72f, -0.94f, -0.10f), 0.182f, 0.026f, 0.12f),
+            LockSpec(floatArrayOf(0.30f, 0.76f, 0.30f), floatArrayOf(0.68f, 0.16f, 0.28f), floatArrayOf(0.65f, -0.86f, 0.16f), 0.162f, 0.024f, 0.19f),
+            LockSpec(floatArrayOf(0.26f, 0.86f, 0.08f), floatArrayOf(0.73f, 0.24f, 0.04f), floatArrayOf(0.74f, -0.98f, -0.14f), 0.178f, 0.026f, 0.16f),
+            LockSpec(floatArrayOf(0.44f, 0.62f, -0.04f), floatArrayOf(0.78f, -0.10f, -0.22f), floatArrayOf(0.77f, -1.06f, -0.24f), 0.188f, 0.027f, 0.10f),
 
-            // 10 Unified nape & pillow-draping lower bob curtain locks blending smoothly behind the jawline
-            LockSpec(floatArrayOf(-0.54f, 0.28f, -0.16f), floatArrayOf(-0.80f, -0.38f, -0.22f), floatArrayOf(-0.82f, -1.16f, -0.30f), 0.192f, 0.028f, 0.13f),
-            LockSpec(floatArrayOf(-0.46f, 0.16f, -0.32f), floatArrayOf(-0.76f, -0.52f, -0.38f), floatArrayOf(-0.84f, -1.24f, -0.44f), 0.198f, 0.028f, 0.09f),
-            LockSpec(floatArrayOf(-0.34f, 0.04f, -0.46f), floatArrayOf(-0.64f, -0.62f, -0.52f), floatArrayOf(-0.76f, -1.30f, -0.52f), 0.194f, 0.026f, 0.12f),
-            LockSpec(floatArrayOf(-0.52f, 0.42f, -0.08f), floatArrayOf(-0.79f, -0.22f, -0.14f), floatArrayOf(-0.80f, -1.12f, -0.24f), 0.184f, 0.026f, 0.18f),
-            LockSpec(floatArrayOf(-0.58f, 0.08f, 0.02f), floatArrayOf(-0.74f, -0.48f, -0.02f), floatArrayOf(-0.74f, -1.10f, -0.12f), 0.174f, 0.025f, 0.16f),
+            // 10 Unified nape & pillow-draping lower bob curtain locks blending seamlessly behind the ear & jawline
+            LockSpec(floatArrayOf(-0.54f, 0.32f, -0.18f), floatArrayOf(-0.80f, -0.34f, -0.24f), floatArrayOf(-0.82f, -1.16f, -0.30f), 0.198f, 0.028f, 0.13f),
+            LockSpec(floatArrayOf(-0.46f, 0.20f, -0.32f), floatArrayOf(-0.76f, -0.48f, -0.38f), floatArrayOf(-0.84f, -1.24f, -0.44f), 0.202f, 0.028f, 0.09f),
+            LockSpec(floatArrayOf(-0.34f, 0.06f, -0.46f), floatArrayOf(-0.64f, -0.60f, -0.52f), floatArrayOf(-0.76f, -1.30f, -0.52f), 0.196f, 0.026f, 0.12f),
+            LockSpec(floatArrayOf(-0.52f, 0.46f, -0.12f), floatArrayOf(-0.79f, -0.18f, -0.18f), floatArrayOf(-0.80f, -1.12f, -0.26f), 0.192f, 0.026f, 0.18f),
+            LockSpec(floatArrayOf(-0.58f, 0.12f, -0.08f), floatArrayOf(-0.75f, -0.46f, -0.12f), floatArrayOf(-0.75f, -1.10f, -0.18f), 0.182f, 0.025f, 0.16f),
 
-            LockSpec(floatArrayOf(0.54f, 0.28f, -0.16f), floatArrayOf(0.80f, -0.38f, -0.22f), floatArrayOf(0.82f, -1.16f, -0.30f), 0.192f, 0.028f, 0.13f),
-            LockSpec(floatArrayOf(0.46f, 0.16f, -0.32f), floatArrayOf(0.76f, -0.52f, -0.38f), floatArrayOf(0.84f, -1.24f, -0.44f), 0.198f, 0.028f, 0.09f),
-            LockSpec(floatArrayOf(0.34f, 0.04f, -0.46f), floatArrayOf(0.64f, -0.62f, -0.52f), floatArrayOf(0.76f, -1.30f, -0.52f), 0.194f, 0.026f, 0.12f),
-            LockSpec(floatArrayOf(0.52f, 0.42f, -0.08f), floatArrayOf(0.79f, -0.22f, -0.14f), floatArrayOf(0.80f, -1.12f, -0.24f), 0.184f, 0.026f, 0.18f),
-            LockSpec(floatArrayOf(0.58f, 0.08f, 0.02f), floatArrayOf(0.74f, -0.48f, -0.02f), floatArrayOf(0.74f, -1.10f, -0.12f), 0.174f, 0.025f, 0.16f),
+            LockSpec(floatArrayOf(0.54f, 0.32f, -0.18f), floatArrayOf(0.80f, -0.34f, -0.24f), floatArrayOf(0.82f, -1.16f, -0.30f), 0.198f, 0.028f, 0.13f),
+            LockSpec(floatArrayOf(0.46f, 0.20f, -0.32f), floatArrayOf(0.76f, -0.48f, -0.38f), floatArrayOf(0.84f, -1.24f, -0.44f), 0.202f, 0.028f, 0.09f),
+            LockSpec(floatArrayOf(0.34f, 0.06f, -0.46f), floatArrayOf(0.64f, -0.60f, -0.52f), floatArrayOf(0.76f, -1.30f, -0.52f), 0.196f, 0.026f, 0.12f),
+            LockSpec(floatArrayOf(0.52f, 0.46f, -0.12f), floatArrayOf(0.79f, -0.18f, -0.18f), floatArrayOf(0.80f, -1.12f, -0.26f), 0.192f, 0.026f, 0.18f),
+            LockSpec(floatArrayOf(0.58f, 0.12f, -0.08f), floatArrayOf(0.75f, -0.46f, -0.12f), floatArrayOf(0.75f, -1.10f, -0.18f), 0.182f, 0.025f, 0.16f),
 
             // 6 Layered dimensional crown volume locks (gives natural cohesive crown silhouette from every angle)
             LockSpec(floatArrayOf(0.14f, 1.01f, 0.08f), floatArrayOf(-0.22f, 0.92f, 0.38f), floatArrayOf(-0.58f, 0.54f, 0.42f), 0.164f, 0.032f, 0.22f),
@@ -1806,39 +2042,43 @@ internal object BlossomUpperBodyBuilder {
 
                 val frontMask = smoothStep(-0.18f, 0.78f, cosP)
                 val backMask = smoothStep(0.05f, 0.85f, -cosP)
-                // v30.0: Restrict deep downward cap coverage strictly to the rear occiput/nape behind the neck,
-                // and trim the lateral sides behind the ears so the spherical hair cap never curls inward
-                // underneath Blossom's jawline (where the cohesive side curtain locks drape naturally outside).
-                val rearNapeMask = smoothStep(0.50f, 0.90f, -cosP)
-                val lateralJawTrim = smoothStep(0.32f, 0.88f, abs(sinP)) * (1f - frontMask * 0.80f) * (1f - rearNapeMask)
+                // v30.0->v32.0: Smooth C1 lateral-to-nape transition with gentle over-ear arch relief and
+                // strict rear-nape pillowFan confinement so the side cap edge never flares outward into a
+                // diagonal ridge or exposes a scalp sliver behind the ear, while keeping zero under-jaw intrusion.
+                val rearNapeMask = smoothStep(0.48f, 1.00f, -cosP)
+                val trueNapeMask = smoothStep(0.62f, 1.00f, -cosP)
+                val lateralJawTrim = smoothStep(0.42f, 0.92f, abs(sinP)) * (1f - frontMask * 0.80f) * (1f - smoothStep(0.25f, 0.85f, -cosP))
+                val earArchRelief = smoothStep(0.72f, 0.96f, abs(sinP)) * exp(-((cosP + 0.06f) / 0.24f).let { it * it }) * (1f - trueNapeMask)
                 // Natural right-of-center parted forehead arch: highest near the part (sinP ~ +0.24),
                 // sweeping gracefully lower across the left & right temples with subtle organic feathering
                 val partPeak = exp(-((sinP - 0.24f) / 0.36f).let { it * it }) * frontMask
                 val templeSweep = smoothStep(0.18f, 0.76f, abs(sinP - 0.16f)) * frontMask
                 val organicEdge = (0.0085f * sin(phi * 9f + 0.7f) + 0.0045f * cos(phi * 17f - 0.4f)) * frontMask
                 val frontRecess = (0.238f + 0.068f * partPeak - 0.048f * templeSweep + organicEdge)
-                val maxTheta = 0.63f * PI.toFloat() -
+                val maxTheta = 0.595f * PI.toFloat() -
                     frontRecess * PI.toFloat() * frontMask -
-                    0.125f * PI.toFloat() * lateralJawTrim +
-                    0.19f * PI.toFloat() * rearNapeMask
+                    0.055f * PI.toFloat() * lateralJawTrim -
+                    0.022f * PI.toFloat() * earArchRelief +
+                    0.155f * PI.toFloat() * rearNapeMask
 
                 val theta = (0.008f + v * (maxTheta / PI.toFloat())).coerceAtMost(0.83f) * PI.toFloat()
                 val sinT = sin(theta)
                 val cosT = cos(theta)
 
                 val crownVolume = 0.106f * (1f - smoothStep(0.26f, 0.90f, v)) + 0.040f * smoothStep(0.18f, 0.82f, v)
-                // Taper forehead hairline cleanly down to the scalp at v -> 1 so there is zero thick shelf/cut lip
+                // Taper hairline & lateral skirt cleanly down into the scalp/locks at v -> 1 (zero shelf/ridge!)
                 val edgeTaper = 1f - (0.94f + 0.045f * frontMask) * smoothStep(0.70f, 1.0f, v)
                 val strandRib = 0.0038f * sin(phi * 20f + v * 4.0f) + 0.0022f * cos(phi * 36f - v * 5.6f)
                 val loft = (crownVolume * edgeTaper + strandRib * (1f - smoothStep(0.76f, 1.0f, v))).coerceAtLeast(0.0018f)
 
                 val craniumBack = 1f + 0.09f * backMask * sinT
-                val napeBlend = smoothStep(0.18f, 0.76f, -cosP)
-                val pillowFan = 0.135f * smoothStep(0.58f, 0.96f, v) * napeBlend * (1f - 0.20f * smoothStep(0.88f, 1.0f, v))
-                val lowerDrapeT = smoothStep(0.50f * PI.toFloat(), 0.82f * PI.toFloat(), theta)
-                val drapeSinX = sinT + (1f - sinT) * 0.38f * lowerDrapeT * abs(sinP) * rearNapeMask
-                val lx = drapeSinX * sinP * (0.682f + loft + pillowFan)
-                val ly = cosT * (0.975f + loft * 0.90f) - 0.16f * smoothStep(0.66f, 1.0f, v) * napeBlend
+                // Confine pillow fan strictly to true posterior nape and tuck lateral hem subtly beneath overlapping locks
+                val pillowFan = 0.085f * smoothStep(0.62f, 0.94f, v) * trueNapeMask * (1f - 0.45f * smoothStep(0.86f, 1.0f, v))
+                val sideHemTuck = -0.015f * smoothStep(0.72f, 1.0f, v) * (1f - frontMask) * (1f - trueNapeMask * 0.70f)
+                val lowerDrapeT = smoothStep(0.52f * PI.toFloat(), 0.82f * PI.toFloat(), theta)
+                val drapeSinX = sinT + (1f - sinT) * 0.34f * lowerDrapeT * abs(sinP) * trueNapeMask
+                val lx = drapeSinX * sinP * (0.682f + loft + pillowFan + sideHemTuck)
+                val ly = cosT * (0.975f + loft * 0.90f) - 0.095f * smoothStep(0.66f, 1.0f, v) * trueNapeMask
                 val lz = sinT * cosP * (0.778f * craniumBack + loft)
 
                 val wPt = headLocalToWorld(lx, ly, lz)
@@ -3561,7 +3801,7 @@ internal object BlossomUpperBodyBuilder {
             val headCopy = betaCache.baseHeadVertexData.copyOf()
             val cols = HEAD_COLS
             val rows = HEAD_ROWS
-            if (headMesh.vertexCount == cols * rows) {
+            if (headMesh.vertexCount >= cols * rows) {
                 // Step 1: Feather submental AO, wetness, pigment & normals smoothly from jaw rim right into SDF neck
                 for (r in 0 until rows) {
                     val vRaw = 1f - (r.toFloat() / (rows - 1))

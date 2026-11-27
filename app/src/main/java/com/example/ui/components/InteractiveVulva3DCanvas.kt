@@ -104,6 +104,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.data.model.AnatomyPart
 import com.example.data.model.SensitivityTier
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -605,11 +606,97 @@ private enum class CameraAnglePreset(
     }
 }
 
+internal const val MOUTH_HOLD_ACTIVATION_MS = 280L
+
+internal data class PeakBlinkEvent(
+    val delayBeforeMs: Long,
+    val isLongBlink: Boolean,
+    val closeMs: Int,
+    val holdMs: Long,
+    val openMs: Int,
+    val amp: Float
+)
+
+/**
+ * Generates the post-hold eyelid blink schedule for the remaining duration of the 16-second peak
+ * episode after the initial 4-second sustained eye closure ([PEAK_EYELID_CLOSE_DURATION_MS]).
+ *
+ * Compared to the earlier rapid flutter-burst cadence (~15–20+ blinks over 12s), this cuts blink
+ * frequency by ~60% (roughly 5–7 calm, unhurried blinks over ~11.6s, eliminating rapid double/triple
+ * flutter spam) and mixes in 2–3 expressive "long blinks" where Blossom closes her eyes for
+ * 500–1500 ms before reopening.
+ */
+internal fun buildPostHoldPeakBlinkEvents(
+    rng: kotlin.random.Random,
+    remainingMs: Long
+): List<PeakBlinkEvent> {
+    if (remainingMs < 500L) return emptyList()
+    val events = ArrayList<PeakBlinkEvent>(8)
+    val desiredLongBlinks = 2 + rng.nextInt(2) // 2 or 3 long blinks across the ~12s window
+    // Choose well-spaced slots (0-based) for long blinks so they never clump back-to-back
+    val longSlots = when (desiredLongBlinks) {
+        2 -> if (rng.nextBoolean()) setOf(1, 4) else setOf(2, 4)
+        else -> setOf(1, 3, 5)
+    }
+
+    var elapsed = 0L
+    var idx = 0
+    while (elapsed < remainingMs - 450L && idx < 8) {
+        val delayBefore = if (idx == 0) {
+            (620 + rng.nextInt(460)).toLong() // 620..1079ms open eyes right after 4s shut period
+        } else {
+            (920 + rng.nextInt(760)).toLong() // 920..1679ms calm inter-blink pause (~60% fewer blinks)
+        }
+        val isLong = idx in longSlots
+        val closeMs = if (isLong) 78 + rng.nextInt(28) else 56 + rng.nextInt(24)
+        val rawHoldMs = if (isLong) {
+            (500 + rng.nextInt(1001)).toLong() // 500..1500ms inclusive long blink
+        } else {
+            (24 + rng.nextInt(34)).toLong()
+        }
+        val openMs = if (isLong) 175 + rng.nextInt(80) else 115 + rng.nextInt(48)
+
+        val budgetAfterDelay = remainingMs - (elapsed + delayBefore)
+        if (budgetAfterDelay < closeMs + openMs + 60L) break
+
+        val holdMs = if (isLong) {
+            val maxHold = budgetAfterDelay - closeMs - openMs
+            if (maxHold < 500L) {
+                // Too little time left for a true 500..1500ms long blink -> emit a clean short blink instead
+                (24 + rng.nextInt(30)).toLong().coerceAtMost(maxHold.coerceAtLeast(20L))
+            } else {
+                rawHoldMs.coerceAtMost(maxHold)
+            }
+        } else {
+            rawHoldMs.coerceAtMost((budgetAfterDelay - closeMs - openMs).coerceAtLeast(18L))
+        }
+        val actualIsLong = holdMs in 500L..1500L
+        events.add(
+            PeakBlinkEvent(
+                delayBeforeMs = delayBefore,
+                isLongBlink = actualIsLong,
+                closeMs = closeMs,
+                holdMs = holdMs,
+                openMs = openMs,
+                amp = if (actualIsLong) 1f else (0.94f + rng.nextFloat() * 0.06f)
+            )
+        )
+        elapsed += delayBefore + closeMs + holdMs + openMs
+        idx++
+    }
+    return events
+}
+
 private data class Pointer3DTrack(
     var lastPos: Offset,
+    val startPos: Offset,
     val startNorm: Offset,
     val zone: TouchTargetZone = TouchTargetZone.NONE,
-    val vulvaFrame: ProjectedVulvaFrame? = null
+    val vulvaFrame: ProjectedVulvaFrame? = null,
+    val isLowerMouthChin: Boolean = false,
+    var headModeLocked: Boolean = false,
+    var mouthHoldActive: Boolean = false,
+    var mouthHoldJob: Job? = null
 )
 
 @Composable
@@ -670,6 +757,7 @@ fun InteractiveVulva3DCanvas(
     val rightLegSpread = remember(sessionState) { Animatable(sessionState.rightLegSpread) }
     val headTurn = remember(sessionState) { Animatable(sessionState.headTurn) }
     val headPitch = remember(sessionState) { Animatable(sessionState.headPitch) }
+    val manualMouthOpen = remember(sessionState) { Animatable(sessionState.manualMouthOpen) }
     // Subtle elastic buttock soft-tissue channels + natural interval eyelid blink
     val leftGluteX = remember(sessionState) { Animatable(sessionState.leftGluteX) }
     val leftGluteY = remember(sessionState) { Animatable(sessionState.leftGluteY) }
@@ -831,6 +919,7 @@ fun InteractiveVulva3DCanvas(
         sessionState.rightLegSpread = rightLegSpread.value
         sessionState.headTurn = headTurn.value
         sessionState.headPitch = headPitch.value
+        sessionState.manualMouthOpen = manualMouthOpen.value
         sessionState.leftGluteX = leftGluteX.value
         sessionState.leftGluteY = leftGluteY.value
         sessionState.rightGluteX = rightGluteX.value
@@ -991,6 +1080,7 @@ fun InteractiveVulva3DCanvas(
             coroutineScope.launch { rightLegSpread.animateTo(0f, positionalSpring) }
             coroutineScope.launch { headTurn.animateTo(0f, positionalSpring) }
             coroutineScope.launch { headPitch.animateTo(0f, positionalSpring) }
+            coroutineScope.launch { manualMouthOpen.animateTo(0f, positionalSpring) }
             coroutineScope.launch { idleHeadTurn.animateTo(0f, positionalSpring) }
             coroutineScope.launch { idleHeadPitch.animateTo(0f, positionalSpring) }
             coroutineScope.launch { idleHeadRoll.animateTo(0f, positionalSpring) }
@@ -1667,28 +1757,22 @@ fun InteractiveVulva3DCanvas(
             val openR = launch { eyeBlinkR.animateTo(0f, tween(245, easing = FastOutSlowInEasing)) }
             openL.join(); openR.join()
 
-            var extraHoldCount = 0
-            while (System.currentTimeMillis() < endMs) {
-                if (extraHoldCount < 2 && blinkRng.nextFloat() < 0.18f) {
-                    extraHoldCount++
-                    val shutMs = (680 + blinkRng.nextInt(580)).toLong()
-                    val clampedShutMs = shutMs.coerceAtMost((endMs - System.currentTimeMillis()).coerceAtLeast(180L))
-                    runPeakBlink(amp = 1f, closeMs = 70, holdMs = clampedShutMs, openMs = 155)
-                } else {
-                    val closeMs = 46 + blinkRng.nextInt(22)
-                    val holdMs = (14 + blinkRng.nextInt(18)).toLong()
-                    val openMs = 82 + blinkRng.nextInt(36)
-                    runPeakBlink(1f, closeMs, holdMs, openMs)
-                    if (blinkRng.nextFloat() < 0.80f && System.currentTimeMillis() < endMs) {
-                        delay((60 + blinkRng.nextInt(55)).toLong())
-                        runPeakBlink(0.94f + blinkRng.nextFloat() * 0.06f, 44 + blinkRng.nextInt(18), 14L + blinkRng.nextInt(16), 82 + blinkRng.nextInt(32))
-                        if (blinkRng.nextFloat() < 0.35f && System.currentTimeMillis() < endMs) {
-                            delay((55 + blinkRng.nextInt(45)).toLong())
-                            runPeakBlink(0.88f + blinkRng.nextFloat() * 0.12f, 44 + blinkRng.nextInt(16), 14L + blinkRng.nextInt(14), 84 + blinkRng.nextInt(30))
-                        }
-                    }
-                }
-                delay((135 + blinkRng.nextInt(225)).toLong())
+            val postHoldRemainingMs = (endMs - System.currentTimeMillis()).coerceAtLeast(0L)
+            val postHoldEvents = buildPostHoldPeakBlinkEvents(blinkRng, postHoldRemainingMs)
+            for (blinkEv in postHoldEvents) {
+                val now = System.currentTimeMillis()
+                if (now >= endMs) break
+                val waitMs = blinkEv.delayBeforeMs.coerceAtMost((endMs - now).coerceAtLeast(0L))
+                if (waitMs > 0L) delay(waitMs)
+                val nowAfterWait = System.currentTimeMillis()
+                if (nowAfterWait >= endMs) break
+                val clampedHoldMs = blinkEv.holdMs.coerceAtMost((endMs - nowAfterWait - blinkEv.closeMs).coerceAtLeast(18L))
+                runPeakBlink(
+                    amp = blinkEv.amp,
+                    closeMs = blinkEv.closeMs,
+                    holdMs = clampedHoldMs,
+                    openMs = blinkEv.openMs
+                )
             }
         }
 
@@ -2497,7 +2581,7 @@ fun InteractiveVulva3DCanvas(
         rightArmShift = peakArmShiftR.value,
         leftFingerCurl = peakFingerCurlL.value,
         rightFingerCurl = peakFingerCurlR.value,
-        mouthOpen = peakMouthOpen.value,
+        mouthOpen = max(peakMouthOpen.value, manualMouthOpen.value).coerceIn(0f, 1f),
         betaRealismLayeredHair = betaRealismLayeredHair,
         betaRealismEyesAndLashes = betaRealismEyesAndLashes,
         betaRealismContactShadows = betaRealismContactShadows,
@@ -2625,7 +2709,10 @@ fun InteractiveVulva3DCanvas(
                                     activePointerCount = pressed.size
 
                                     val activeIds = pressed.map { it.id }.toSet()
-                                    tracks.keys.retainAll(activeIds)
+                                    val removedIds = tracks.keys.filter { it !in activeIds }
+                                    for (rid in removedIds) {
+                                        tracks.remove(rid)?.mouthHoldJob?.cancel()
+                                    }
 
                                     if (pressed.isEmpty()) {
                                         lastPinchDist = -1f
@@ -2675,7 +2762,11 @@ fun InteractiveVulva3DCanvas(
                                             ch.consume()
                                             val prev = tracks[ch.id]
                                             if (prev == null) {
-                                                tracks[ch.id] = Pointer3DTrack(ch.position, Offset(ch.position.x / w, ch.position.y / h))
+                                                tracks[ch.id] = Pointer3DTrack(
+                                                    lastPos = ch.position,
+                                                    startPos = ch.position,
+                                                    startNorm = Offset(ch.position.x / w, ch.position.y / h)
+                                                )
                                             } else {
                                                 val dx = (ch.position.x - prev.lastPos.x) / w
                                                 val dy = (ch.position.y - prev.lastPos.y) / h
@@ -2702,11 +2793,13 @@ fun InteractiveVulva3DCanvas(
                                         var dRightLeg = 0f
                                         var dHeadTurn = 0f
                                         var dHeadPitch = 0f
+                                        var dManualMouth = 0f
                                         var dLeftGluteX = 0f
                                         var dLeftGluteY = 0f
                                         var dRightGluteX = 0f
                                         var dRightGluteY = 0f
 
+                                        val holdSlopPx = 14.dp.toPx()
                                         val zoomScale = camZoom.value.coerceIn(0.10f, 1.90f)
                                         val liveCam = VulvaCamera3D(
                                             yawDeg = camYaw.value,
@@ -2731,8 +2824,10 @@ fun InteractiveVulva3DCanvas(
                                             leftLegSpread = leftLegSpread.value,
                                             rightLegSpread = rightLegSpread.value,
                                             selfSpreadPose = selfSpreadPose.value,
-                                            headTurn = headTurn.value,
-                                            headPitch = headPitch.value,
+                                            headTurn = (headTurn.value + idleHeadTurn.value + settleHeadTurn.value + peakHeadTurn.value).coerceIn(-1f, 1f),
+                                            headPitch = (headPitch.value + idleHeadPitch.value + settleHeadPitch.value + peakHeadPitch.value).coerceIn(-1f, 1f),
+                                            headRollOffset = idleHeadRoll.value + settleHeadRoll.value + peakHeadRoll.value,
+                                            mouthOpen = max(peakMouthOpen.value, manualMouthOpen.value).coerceIn(0f, 1f),
                                             eyeBlink = eyeBlink.value,
                                             leftGluteX = leftGluteX.value,
                                             leftGluteY = leftGluteY.value,
@@ -2758,12 +2853,27 @@ fun InteractiveVulva3DCanvas(
                                                 )
                                                 val zone = hitResult.zone
                                                 val startLocal = hitResult.vulvaLocalNorm ?: rawScreen
-                                                tracks[change.id] = Pointer3DTrack(
+                                                val track = Pointer3DTrack(
                                                     lastPos = pos,
+                                                    startPos = pos,
                                                     startNorm = startLocal,
                                                     zone = zone,
-                                                    vulvaFrame = hitResult.vulvaFrame
+                                                    vulvaFrame = hitResult.vulvaFrame,
+                                                    isLowerMouthChin = hitResult.isLowerMouthChin,
+                                                    headModeLocked = !hitResult.isLowerMouthChin
                                                 )
+                                                if (zone == TouchTargetZone.HEAD && hitResult.isLowerMouthChin) {
+                                                    track.mouthHoldJob = coroutineScope.launch {
+                                                        delay(MOUTH_HOLD_ACTIVATION_MS)
+                                                        if (!track.headModeLocked) {
+                                                            track.mouthHoldActive = true
+                                                            if (latestHapticsEnabled) {
+                                                                hapticsEngine.triggerTap(SensitivityTier.HIGH)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                tracks[change.id] = track
 
                                                 if (zone == TouchTargetZone.VULVA ||
                                                     zone == TouchTargetZone.LEFT_BREAST ||
@@ -2925,15 +3035,39 @@ fun InteractiveVulva3DCanvas(
                                                         }
                                                     }
                                                     TouchTargetZone.HEAD -> {
-                                                        val headGain = (1.95f / zoomScale.coerceAtLeast(0.24f)).coerceIn(2.6f, 7.2f)
-                                                        val headPitchGain = (1.65f / zoomScale.coerceAtLeast(0.24f)).coerceIn(2.2f, 6.2f)
-                                                        dHeadTurn += rawDx * headGain
-                                                        dHeadPitch += rawDy * headPitchGain
-                                                        val nowMs = System.currentTimeMillis()
-                                                        if (hypot(rawDx, rawDy) > 0.005f && nowMs - lastDragFeedbackMs >= 120L) {
-                                                            lastDragFeedbackMs = nowMs
-                                                            if (latestHapticsEnabled) {
-                                                                hapticsEngine.triggerDragPulse(SensitivityTier.MODERATE)
+                                                        if (existing.mouthHoldActive) {
+                                                            // Press-and-hold on lower mouth/chin active: drag down to open (0->1), up to close (1->0)
+                                                            val mouthGain = (3.4f / zoomScale.coerceAtLeast(0.35f)).coerceIn(3.6f, 8.5f)
+                                                            dManualMouth += rawDy * mouthGain
+                                                            val nowMs = System.currentTimeMillis()
+                                                            if (abs(rawDy) > 0.005f && nowMs - lastDragFeedbackMs >= 120L) {
+                                                                lastDragFeedbackMs = nowMs
+                                                                if (latestHapticsEnabled) {
+                                                                    hapticsEngine.triggerDragPulse(SensitivityTier.MODERATE)
+                                                                }
+                                                            }
+                                                        } else {
+                                                            // If touching lower mouth/chin and finger moves before hold threshold,
+                                                            // immediately cancel hold and fall through to normal head turn/pitch drag.
+                                                            if (existing.isLowerMouthChin && !existing.headModeLocked) {
+                                                                val movedPx = hypot(pos.x - existing.startPos.x, pos.y - existing.startPos.y)
+                                                                if (movedPx > holdSlopPx) {
+                                                                    existing.mouthHoldJob?.cancel()
+                                                                    existing.headModeLocked = true
+                                                                }
+                                                            }
+                                                            if (existing.headModeLocked) {
+                                                                val headGain = (1.95f / zoomScale.coerceAtLeast(0.24f)).coerceIn(2.6f, 7.2f)
+                                                                val headPitchGain = (1.65f / zoomScale.coerceAtLeast(0.24f)).coerceIn(2.2f, 6.2f)
+                                                                dHeadTurn += rawDx * headGain
+                                                                dHeadPitch += rawDy * headPitchGain
+                                                                val nowMs = System.currentTimeMillis()
+                                                                if (hypot(rawDx, rawDy) > 0.005f && nowMs - lastDragFeedbackMs >= 120L) {
+                                                                    lastDragFeedbackMs = nowMs
+                                                                    if (latestHapticsEnabled) {
+                                                                        hapticsEngine.triggerDragPulse(SensitivityTier.MODERATE)
+                                                                    }
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -3062,6 +3196,13 @@ fun InteractiveVulva3DCanvas(
                                             coroutineScope.launch {
                                                 headTurn.snapTo(nextHead)
                                                 headPitch.snapTo(nextPitch)
+                                            }
+                                        }
+
+                                        if (dManualMouth != 0f) {
+                                            val nextManualMouth = (manualMouthOpen.value + dManualMouth).coerceIn(0f, 1f)
+                                            coroutineScope.launch {
+                                                manualMouthOpen.snapTo(nextManualMouth)
                                             }
                                         }
                                     }

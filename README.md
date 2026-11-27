@@ -1,4 +1,4 @@
-# Bloom Atlas (Version 30.0)
+# Bloom Atlas (Version 32.0)
 
 **Bloom Atlas** is an educational Android application built with Kotlin, Jetpack Compose, Material 3, and a custom real-time OpenGL ES 2.0 procedural 3D anatomy engine.
 
@@ -6,13 +6,13 @@
 
 ## Features
 
-- **Interactive 3D Anatomy Explorer (`Blossom v30.0`)**
-  - Procedural full-body reclining anatomical model rendered in real time via a custom `TextureView` + EGL14 / OpenGL ES 2.0 pipeline (no external 3D asset files required).
-  - **Touch Tissue mode**: multi-touch elastic deformation of outer/inner labia (default 50% elastic resistance, adjustable up to 60%), clitoral hood retraction, breasts, glutes, positional leg spread, head turn/nod/lean-back, and an elasticity-aligned animated IK self-spread pose (*"Ask Blossom to Spread"*).
+- **Interactive 3D Anatomy Explorer (`Blossom v32.0`)**
+  - Procedural full-body reclining anatomical model rendered in real time via a custom `TextureView` + EGL14 / OpenGL ES 2.0 pipeline (no external 3D asset files required), including sculpted bilateral 3D anatomical ears, cohesive bob hair + wisps, and articulated hands/palms/nails.
+  - **Touch Tissue mode**: multi-touch elastic deformation of outer/inner labia (default 50% elastic resistance, adjustable up to 60%), clitoral hood retraction, breasts, glutes, positional leg spread, head turn/nod/lean-back, press-and-hold lower mouth/chin drag to open & close her mouth, and an elasticity-aligned animated IK self-spread pose (*"Ask Blossom to Spread"*).
   - **Orbit 3D mode**: drag to orbit, pinch to zoom from full-body to macro close-up, and two-finger pan head-to-toe, plus quick camera angle presets.
   - **Real-time appearance, Visual Realism & Beta Lab controls**: compact, translucent, scroll-locked always-on-top 3-tab **Beta Lab** (`Vulva`, `Life`, `Life+`) with toggle value memory, Vulva Options #8 (*Hood–mons skin blend*) and #9 (*Upper hood–mons color blend*) with independent strength sliders, 7 head- & leg-locked photorealistic visual realism toggles (*Layered hair & Kajiya-Kay*, *3D lashes & iris depth*, *Cushion contact shadows*, *Dynamic creases & landmarks*, *Lip, brow & freckle detail*, *Areola, nail & dermal detail*, *Hip-anchored thigh swing*), skin tone presets, hair color swatches, breast size & boost sliders, pubic hair density slider, studio Exam Light vs. raking Side Light, and sensory haptics.
   - **Dedicated Settings screen**: DataStore-persisted *"Show Extra Beta Options"* toggle (cleanly hiding advanced v18–v25 tuning controls while keeping all realism defaults active), tactile haptics, reading lens, and app version info.
-  - **Scroll-persistent physiological animations**: chest/abdomen ribcage breathing, micro-saccades, asymmetric (8–19ms) and double blinking, gaze anticipation, subtle swallowing, postural settling, living warmth, 3× slower sympathetic cardio-respiratory heart-rate dynamics, and a coordinated 136 BPM 3-phase peak sequence (8s restless pre-event -> 16s asymmetric peak choreography with deeper 1/3-frequency max-amplitude haptics -> 125 BPM cooldown floor) — all preserved across scrolling and tab switches via `BlossomViewportSessionState`.
+  - **Scroll-persistent physiological animations**: chest/abdomen ribcage breathing, micro-saccades, asymmetric (8–19ms) and double blinking, gaze anticipation, subtle swallowing, postural settling, living warmth, 3× slower sympathetic cardio-respiratory heart-rate dynamics, and a coordinated 136 BPM 3-phase peak sequence (8s restless pre-event -> 16s asymmetric peak choreography with 4s initial eye closure followed by 60%-calmer blinking with 500–1500 ms long blinks and deeper 1/3-frequency max-amplitude haptics -> 125 BPM cooldown floor) — all preserved across scrolling and tab switches via `BlossomViewportSessionState`.
   - **Legacy compatibility option**: the pre-Beta v1 look (original vulva, seam, neck, and hair rendering) is preserved behind a collapsed-by-default **Advanced rendering → Legacy vulva** switch at the bottom of the 3D explorer panel.
 - **Guided Learning & Tools**
   - Illustrated anatomy guides, sensitivity & structure breakdowns, cycle wheel explorer, diversity studies, Settings, and curated educational resources.
@@ -77,6 +77,12 @@ If you are modifying the 3D anatomy, tweaking colors/shading, or trying to figur
 ---
 
 ## Version Checkpoints
+
+- **Version 32.0 (2026-11-27)**
+  - **Sculpted Bilateral 3D Ears & Post-Auricular Hair Polish**: Added bilateral 3D sculpted anatomical ears (helix, scapha, antihelix, concha, tragus, earlobe; 100% outward CCW winding & rigid head-rig tracking) to `blossomHeadMesh`, smoothed the behind-the-ear hair cap transition, and tucked side/nape locks cleanly around the ears with zero under-jaw flaps.
+  - **Calmer Post-Hold Peak Blinks & Long Blinks**: Cut post-hold peak blink frequency by ~60% (preserving the 4s initial eye closure) and added 2–3 spaced long blinks (500–1500 ms hold).
+  - **Press-and-Hold Lower Mouth / Chin Control**: Holding on Blossom's lower mouth/chin in Touch Tissue mode lets you pull down to open her mouth (staying open on release) and hold/pull up to close it, without affecting immediate head turn/pitch drag.
+  - **Palm–Finger & Outer Upper-Thigh Rigging Fixes**: Synced `updateArticulatedPalmsMesh` to `isActivePose` (keeping moving palms locked to fingers during 152 BPM rest-arm micro-shifts) with tucked proximal finger roots, and tightened the resting forearm/hand envelope shared by `LegSkinCache` and `ArmSkinCache` to eliminate the sharp outer upper-thigh corner under `betaRealismHipThighSwing` while preserving 0 shared arm/leg vertices and 0 inner-thigh foldover.
 
 - **Version 30.0 (2026-11-26)**
   - **Under-Jaw Hair Cap Fix**: Trimmed lateral spherical hair-cap wrap behind the ears and confined deep nape wrap strictly behind the neck with an outward pillow drape, eliminating the inward-curling concave hair shell flaps beside her jaw/neck.

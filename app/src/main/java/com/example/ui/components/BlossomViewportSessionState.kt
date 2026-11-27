@@ -36,6 +36,7 @@ class BlossomViewportSessionState {
     var rightLegSpread: Float = 0f
     var headTurn: Float = 0f
     var headPitch: Float = 0f
+    var manualMouthOpen: Float = 0f
     var leftGluteX: Float = 0f
     var leftGluteY: Float = 0f
     var rightGluteX: Float = 0f

@@ -189,8 +189,8 @@ internal object BlossomArmIkRig {
             val ax = abs(x)
             // Quick bounding box rejection (well inside the smooth SDF zero-weight zone)
             if (ax < 0.96f || y < -0.85f || y > 5.04f) continue
-            // Guarantee 100% disjoint membership from LegSkinCache (legs sit in y <= 0.44 and ax <= 1.86 or z >= -0.35)
-            if (y <= 0.44f && (ax <= 1.86f || z >= -0.35f)) continue
+            // Guarantee 100% disjoint membership from LegSkinCache via the shared resting-hand corridor
+            if (y <= 0.44f && !BlossomSdfBodyBuilder.isRestingHandOrDistalForearm(ax, y, z)) continue
 
             // Continuous SDF ownership weight (ZERO hard spatial cutoffs -> ZERO arm-to-table skin spikes!)
             val armEnable = BlossomSdfBodyBuilder.evaluateArmVsTorsoWeight(x, y, z)

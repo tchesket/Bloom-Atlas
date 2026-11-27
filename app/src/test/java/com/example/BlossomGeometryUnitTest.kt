@@ -5363,6 +5363,662 @@ class BlossomGeometryUnitTest {
         }
     }
 
+    @Test
+    fun v32SideProfileHairCapSmoothTransitionAndZeroGap() {
+        val hair = BlossomUpperBodyBuilder.buildBlossomHairMesh(betaSoftHair = false)
+        assertValidMesh(hair)
+        assertOutwardWindingMatchesNormals("blossomHairMesh(v32)", hair)
+
+        val data = hair.vertexData
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val capCols = 72
+        val capRows = 48
+        val headY = BlossomUpperBodyBuilder.HEAD_CENTER_Y
+        val headZ = BlossomBodyBuilder.mattressSurfaceZ(headY) + 0.96f
+
+        // 1. Verify ZERO under-jaw inward shell flaps remain (v30 invariant preserved)
+        var underJawIntrusions = 0
+        for (i in 0 until capCols * capRows) {
+            val b = i * stride
+            val ax = abs(data[b])
+            val y = data[b + 1]
+            val relZ = data[b + 2] - headZ
+            if (ax < 0.72f && y < 6.00f && relZ > 0.35f) underJawIntrusions++
+        }
+        assertEquals("v32 hair cap must keep ZERO under-jaw shell intrusions", 0, underJawIntrusions)
+
+        // 2. Verify side-profile behind-the-ear transition (phi between lateral side and rear nape)
+        //    has NO sharp diagonal flare / ridge step in the bottom hem row (row = capRows - 1)
+        val hemRow = capRows - 1
+        val hemX = FloatArray(capCols)
+        val hemY = FloatArray(capCols)
+        val hemZ = FloatArray(capCols)
+        for (c in 0 until capCols) {
+            val b = (hemRow * capCols + c) * stride
+            hemX[c] = data[b]
+            hemY[c] = data[b + 1]
+            hemZ[c] = data[b + 2]
+        }
+        var maxSideHemRadialStep = 0f
+        var maxSideHemYStep = 0f
+        for (c in 0 until capCols) {
+            val next = (c + 1) % capCols
+            // Focus on the lateral & post-auricular zone (ax > 0.35 and behind face plane)
+            if (abs(hemX[c]) > 0.35f && hemZ[c] < headZ + 0.30f) {
+                val dr = abs(
+                    sqrt(hemX[next] * hemX[next] + (hemZ[next] - headZ) * (hemZ[next] - headZ)) -
+                        sqrt(hemX[c] * hemX[c] + (hemZ[c] - headZ) * (hemZ[c] - headZ))
+                )
+                val dy = abs(hemY[next] - hemY[c])
+                if (dr > maxSideHemRadialStep) maxSideHemRadialStep = dr
+                if (dy > maxSideHemYStep) maxSideHemYStep = dy
+            }
+        }
+        println("V32_HAIR_SIDE_HEM: maxSideHemRadialStep=%.4f maxSideHemYStep=%.4f".format(maxSideHemRadialStep, maxSideHemYStep))
+        assertTrue("Side/post-auricular hair hem must have no abrupt radial ridge step (got $maxSideHemRadialStep)", maxSideHemRadialStep < 0.085f)
+        assertTrue("Side/post-auricular hair hem must descend smoothly without diagonal step cliff (got $maxSideHemYStep)", maxSideHemYStep < 0.14f)
+
+        // 3. Verify side & nape hair locks cover the post-auricular zone behind the ears without a scalp gap
+        var postAuricularLockVerts = 0
+        for (i in capCols * capRows until hair.vertexCount) {
+            val b = i * stride
+            val ax = abs(data[b])
+            val y = data[b + 1]
+            val relZ = data[b + 2] - headZ
+            if (ax in 0.50f..1.15f && y in 5.85f..6.75f && relZ in -0.58f..-0.05f) {
+                postAuricularLockVerts++
+            }
+        }
+        assertTrue("Post-auricular side/nape locks must generously seal behind the ear (> 80 verts, got $postAuricularLockVerts)", postAuricularLockVerts > 80)
+    }
+
+    @Test
+    fun v32SculptedBilateralEarsGeometryWindingAndHeadRigTracking() {
+        val scene = VulvaAnatomySceneMesh()
+        val head = scene.blossomHeadMesh
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val skullVertCount = BlossomUpperBodyBuilder.HEAD_COLS * BlossomUpperBodyBuilder.HEAD_ROWS
+        val earVertCount = BlossomUpperBodyBuilder.EAR_COLS * BlossomUpperBodyBuilder.EAR_ROWS
+        assertEquals(
+            "Head mesh must contain skull + left & right sculpted ears",
+            skullVertCount + 2 * earVertCount,
+            head.vertexCount
+        )
+
+        scene.update(VulvaDeformationState(), includeLithotomyBody = true)
+        assertValidMesh(head)
+        assertOutwardWindingMatchesNormals("blossomHeadMesh(withEars)", head)
+
+        // Explicitly check outward CCW winding on JUST the left and right ear index ranges!
+        val data = head.vertexData
+        val idxBuf = head.indexBuffer
+        idxBuf.position(0)
+        var leftEarAligned = 0; var leftEarTotal = 0
+        var rightEarAligned = 0; var rightEarTotal = 0
+        var t = 0
+        while (t + 2 < head.indexCount) {
+            val i0 = idxBuf.get(t).toInt() and 0xFFFF
+            val i1 = idxBuf.get(t + 1).toInt() and 0xFFFF
+            val i2 = idxBuf.get(t + 2).toInt() and 0xFFFF
+            t += 3
+            if (i0 < skullVertCount) continue
+            val isRight = i0 < skullVertCount + earVertCount
+            val b0 = i0 * stride; val b1 = i1 * stride; val b2 = i2 * stride
+            val e1x = data[b1] - data[b0]; val e1y = data[b1 + 1] - data[b0 + 1]; val e1z = data[b1 + 2] - data[b0 + 2]
+            val e2x = data[b2] - data[b0]; val e2y = data[b2 + 1] - data[b0 + 1]; val e2z = data[b2 + 2] - data[b0 + 2]
+            val fx = e1y * e2z - e1z * e2y
+            val fy = e1z * e2x - e1x * e2z
+            val fz = e1x * e2y - e1y * e2x
+            val fLen = sqrt(fx * fx + fy * fy + fz * fz)
+            if (fLen < 1e-7f) continue
+            val nx = (data[b0 + 3] + data[b1 + 3] + data[b2 + 3]) / 3f
+            val ny = (data[b0 + 4] + data[b1 + 4] + data[b2 + 4]) / 3f
+            val nz = (data[b0 + 5] + data[b1 + 5] + data[b2 + 5]) / 3f
+            val dot = (fx * nx + fy * ny + fz * nz) / fLen
+            if (isRight) {
+                rightEarTotal++; if (dot > 0f) rightEarAligned++
+            } else {
+                leftEarTotal++; if (dot > 0f) leftEarAligned++
+            }
+        }
+        val rightRatio = rightEarAligned.toFloat() / rightEarTotal.coerceAtLeast(1)
+        val leftRatio = leftEarAligned.toFloat() / leftEarTotal.coerceAtLeast(1)
+        println("V32_EARS_WINDING: right=%.1f%% (%d/%d) left=%.1f%% (%d/%d)".format(rightRatio * 100f, rightEarAligned, rightEarTotal, leftRatio * 100f, leftEarAligned, leftEarTotal))
+        assertTrue("Right ear triangles must have > 95% outward CCW winding (got $rightRatio)", rightRatio > 0.95f)
+        assertTrue("Left ear triangles must have > 95% outward CCW winding (got $leftRatio)", leftRatio > 0.95f)
+
+        // Check bilateral mirror symmetry & anatomical ear protrusion/relief (helix stands proud of concha)
+        var maxSymmetryErr = 0f
+        var rightMinX = Float.POSITIVE_INFINITY
+        var rightMaxX = Float.NEGATIVE_INFINITY
+        var rightMinY = Float.POSITIVE_INFINITY
+        var rightMaxY = Float.NEGATIVE_INFINITY
+        for (k in 0 until earVertCount) {
+            val br = (skullVertCount + k) * stride
+            val bl = (skullVertCount + earVertCount + k) * stride
+            val ex = abs(data[br] + data[bl])
+            val ey = abs(data[br + 1] - data[bl + 1])
+            val ez = abs(data[br + 2] - data[bl + 2])
+            maxSymmetryErr = max(maxSymmetryErr, max(ex, max(ey, ez)))
+            if (data[br] < rightMinX) rightMinX = data[br]
+            if (data[br] > rightMaxX) rightMaxX = data[br]
+            if (data[br + 1] < rightMinY) rightMinY = data[br + 1]
+            if (data[br + 1] > rightMaxY) rightMaxY = data[br + 1]
+        }
+        val earMaxAx = max(abs(rightMinX), abs(rightMaxX))
+        println("V32_EARS_BOUNDS: x=[%.3f..%.3f] maxAx=%.3f y=[%.3f..%.3f] maxSymErr=%.5f".format(rightMinX, rightMaxX, earMaxAx, rightMinY, rightMaxY, maxSymmetryErr))
+        assertTrue("Left & right ears must be bilaterally symmetric (err=$maxSymmetryErr)", maxSymmetryErr < 1e-4f)
+        assertTrue("Ear must protrude anatomically laterally beyond temporal skull (maxAx=$earMaxAx)", earMaxAx in 0.78f..1.05f)
+        assertTrue("Ear vertical span must match anatomical ear height (span=${rightMaxY - rightMinY})", (rightMaxY - rightMinY) in 0.28f..0.52f)
+
+        // Verify ears rigidly follow head turn/pitch/roll AND reconstruct back to exact rest via computeInverseHeadMatrix
+        val restHead = data.copyOf()
+        val posedState = VulvaDeformationState(headTurn = 0.65f, headPitch = -0.35f, headRollOffset = 0.10f, betaSmoothNeckSeam = true)
+        scene.update(posedState, includeLithotomyBody = true)
+        assertValidMesh(head)
+        assertOutwardWindingMatchesNormals("blossomHeadMesh(turned+neckSeam)", head)
+
+        val invMat = FloatArray(16)
+        BlossomUpperBodyBuilder.computeInverseHeadMatrix(
+            headTurn = posedState.headTurn,
+            headPitch = posedState.headPitch,
+            headRollOffset = posedState.headRollOffset,
+            outMat4 = invMat
+        )
+        var maxEarInvErr = 0f
+        var maxEarDisp = 0f
+        for (v in skullVertCount until head.vertexCount) {
+            val b = v * stride
+            val px = data[b]; val py = data[b + 1]; val pz = data[b + 2]
+            val rx = restHead[b]; val ry = restHead[b + 1]; val rz = restHead[b + 2]
+            val disp = sqrt((px - rx) * (px - rx) + (py - ry) * (py - ry) + (pz - rz) * (pz - rz))
+            if (disp > maxEarDisp) maxEarDisp = disp
+            val ux = invMat[0] * px + invMat[4] * py + invMat[8] * pz + invMat[12]
+            val uy = invMat[1] * px + invMat[5] * py + invMat[9] * pz + invMat[13]
+            val uz = invMat[2] * px + invMat[6] * py + invMat[10] * pz + invMat[14]
+            val err = sqrt((ux - rx) * (ux - rx) + (uy - ry) * (uy - ry) + (uz - rz) * (uz - rz))
+            if (err > maxEarInvErr) maxEarInvErr = err
+        }
+        assertTrue("Ears must move rigidly with head turn/pitch (maxDisp=$maxEarDisp)", maxEarDisp > 0.25f)
+        assertTrue("Inverse head matrix must reconstruct ear rest coordinates exactly (maxErr=$maxEarInvErr)", maxEarInvErr < 1e-4f)
+    }
+
+    @Test
+    fun v32PeakPostHoldBlinksReducedFrequencyAndLongBlinks() {
+        assertEquals(
+            "Initial sustained peak eye closure must remain 4,000 ms",
+            4_000L,
+            com.example.ui.components.PEAK_EYELID_CLOSE_DURATION_MS
+        )
+
+        val remainingMs = 11_600L // ~15.6s peak minus 4.0s initial sustained eye shut
+        var totalBlinksAcrossSeeds = 0
+        var minBlinks = Int.MAX_VALUE
+        var maxBlinks = 0
+        for (seed in 1..30) {
+            val rng = kotlin.random.Random(seed * 7919)
+            val events = com.example.ui.components.buildPostHoldPeakBlinkEvents(rng, remainingMs)
+            assertTrue("Seed $seed: must schedule 4..9 post-hold blinks (got ${events.size})", events.size in 4..9)
+            totalBlinksAcrossSeeds += events.size
+            if (events.size < minBlinks) minBlinks = events.size
+            if (events.size > maxBlinks) maxBlinks = events.size
+
+            val longBlinks = events.filter { it.isLongBlink }
+            assertTrue("Seed $seed: must include at least 2 long blinks (got ${longBlinks.size})", longBlinks.size >= 2)
+            for (lb in longBlinks) {
+                assertTrue(
+                    "Seed $seed: long blink hold must be 500..1500 ms (got ${lb.holdMs})",
+                    lb.holdMs in 500L..1_500L
+                )
+            }
+            for (ev in events) {
+                assertTrue("Seed $seed: blink gap must be positive", ev.delayBeforeMs >= 450L)
+                if (!ev.isLongBlink) {
+                    assertTrue("Seed $seed: normal blink hold must be brief (got ${ev.holdMs})", ev.holdMs in 15L..80L)
+                }
+            }
+            val totalScheduledMs = events.sumOf { it.delayBeforeMs + it.closeMs.toLong() + it.holdMs + it.openMs.toLong() }
+            assertTrue(
+                "Seed $seed: scheduled blinks ($totalScheduledMs ms) must fit cleanly inside remaining peak window ($remainingMs ms)",
+                totalScheduledMs <= remainingMs
+            )
+        }
+        val avgBlinks = totalBlinksAcrossSeeds / 30.0
+        println("V32_PEAK_BLINKS: avg=%.2f min=%d max=%d over %dms".format(avgBlinks, minBlinks, maxBlinks, remainingMs))
+        // Prior peak cadence averaged ~16–18 blinks/11.6s; 60% reduction targets ~5.5–7.0 blinks
+        assertTrue("Average post-hold blink count must reflect ~60% reduction (5.0..7.8), got $avgBlinks", avgBlinks in 5.0..7.8)
+    }
+
+    @Test
+    fun v32LowerMouthChinHitResolverAndManualMouthPersistence() {
+        val cam = com.example.ui.components.VulvaCamera3D(
+            yawDeg = 0f,
+            pitchDeg = 0f,
+            zoom = 0.72f,
+            targetY = BlossomUpperBodyBuilder.HEAD_CENTER_Y,
+            targetZ = BlossomBodyBuilder.mattressSurfaceZ(BlossomUpperBodyBuilder.HEAD_CENTER_Y) + 0.96f
+        )
+        val aspect = 0.56f
+        val projector = com.example.ui.components.BlossomCameraProjector(cam, aspect)
+
+        // 1. Centered neutral face: touching lower mouth/chin resolves HEAD + isLowerMouthChin = true
+        val neutralState = VulvaDeformationState()
+        val chinWorld = BlossomUpperBodyBuilder.transformHeadPoint(0f, -0.54f, 0.60f, 0f, 0f, 0f)
+        val chinScreen = projector.projectUnclamped(chinWorld)!!
+        val chinHit = com.example.ui.components.BlossomTouchHitResolver.resolveTouchZone(
+            rawScreenNorm = androidx.compose.ui.geometry.Offset(chinScreen.x, chinScreen.y),
+            cam = cam,
+            aspect = aspect,
+            deform = neutralState,
+            showFullBody = true
+        )
+        assertEquals("Lower mouth/chin touch must resolve to HEAD zone", com.example.ui.components.TouchTargetZone.HEAD, chinHit.zone)
+        assertTrue("Lower mouth/chin touch must flag isLowerMouthChin = true", chinHit.isLowerMouthChin)
+
+        // 2. Forehead / eye touch must resolve HEAD with isLowerMouthChin = false (normal head drag preserved)
+        val foreheadWorld = BlossomUpperBodyBuilder.transformHeadPoint(0f, 0.34f, 0.68f, 0f, 0f, 0f)
+        val foreheadScreen = projector.projectUnclamped(foreheadWorld)!!
+        val foreheadHit = com.example.ui.components.BlossomTouchHitResolver.resolveTouchZone(
+            rawScreenNorm = androidx.compose.ui.geometry.Offset(foreheadScreen.x, foreheadScreen.y),
+            cam = cam,
+            aspect = aspect,
+            deform = neutralState,
+            showFullBody = true
+        )
+        assertEquals("Forehead touch must resolve to HEAD zone", com.example.ui.components.TouchTargetZone.HEAD, foreheadHit.zone)
+        assertFalse("Forehead touch must NOT flag isLowerMouthChin", foreheadHit.isLowerMouthChin)
+
+        // 3. Turned & open-mouth head: lower mouth/chin hit tracks transformed jaw position
+        val openTurnedState = VulvaDeformationState(headTurn = 0.45f, headPitch = -0.25f, mouthOpen = 0.85f)
+        val openChinWorld = BlossomUpperBodyBuilder.transformHeadPoint(
+            lx = 0f,
+            ly = -0.54f - 0.08f * 0.85f,
+            lz = 0.60f,
+            headTurn = openTurnedState.headTurn,
+            headPitch = openTurnedState.headPitch,
+            headRollOffset = 0f
+        )
+        val openChinScreen = projector.projectUnclamped(openChinWorld)!!
+        val openChinHit = com.example.ui.components.BlossomTouchHitResolver.resolveTouchZone(
+            rawScreenNorm = androidx.compose.ui.geometry.Offset(openChinScreen.x, openChinScreen.y),
+            cam = cam,
+            aspect = aspect,
+            deform = openTurnedState,
+            showFullBody = true
+        )
+        assertEquals("Turned open-mouth chin touch must resolve HEAD", com.example.ui.components.TouchTargetZone.HEAD, openChinHit.zone)
+        assertTrue("Turned open-mouth chin touch must flag isLowerMouthChin = true", openChinHit.isLowerMouthChin)
+
+        // 4. Session persistence defaults to 0f and retains manual open value
+        val session = BlossomViewportSessionState()
+        assertEquals("manualMouthOpen must default to 0f", 0f, session.manualMouthOpen, 1e-6f)
+        session.manualMouthOpen = 0.72f
+        assertEquals(0.72f, session.manualMouthOpen, 1e-6f)
+    }
+
+    @Test
+    fun v32FingerRootsStayAttachedToMovingPalmsAcrossRestMicroShiftAndSpread() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val hands = scene.blossomHandsMesh
+        val palms = scene.blossomPalmsMesh
+        val nails = scene.blossomNailsMesh
+
+        // Finger layout: 2 sides (side 0 = left -X, side 1 = right +X), 5 fingers/side, FINGER_ROWS * FINGER_COLS
+        val fCols = BlossomUpperBodyBuilder.FINGER_COLS
+        val fRows = BlossomUpperBodyBuilder.FINGER_ROWS
+        val vertsPerFinger = fRows * fCols
+        val vertsPerSide = 5 * vertsPerFinger
+        val palmVertsPerSide = palms.vertexCount / 2
+
+        fun minDistToSidePalm(x: Float, y: Float, z: Float, sideIdx: Int): Float {
+            val start = sideIdx * palmVertsPerSide
+            val end = start + palmVertsPerSide
+            val pData = palms.vertexData
+            var bestD2 = Float.POSITIVE_INFINITY
+            for (i in start until end) {
+                val b = i * stride
+                val dx = pData[b] - x
+                val dy = pData[b + 1] - y
+                val dz = pData[b + 2] - z
+                val d2 = dx * dx + dy * dy + dz * dz
+                if (d2 < bestD2) bestD2 = d2
+            }
+            return sqrt(bestD2)
+        }
+
+        fun maxFingerRootToPalmDistance(sideIdx: Int): Float {
+            val hData = hands.vertexData
+            var maxDist = 0f
+            for (f in 0 until 5) {
+                val fingerBase = sideIdx * vertsPerSide + f * vertsPerFinger
+                // Ring r = 0 (buried root cap)
+                for (c in 0 until fCols) {
+                    val b0 = (fingerBase + c) * stride
+                    val d0 = minDistToSidePalm(hData[b0], hData[b0 + 1], hData[b0 + 2], sideIdx)
+                    if (d0 > maxDist) maxDist = d0
+                }
+            }
+            return maxDist
+        }
+
+        // 1. Capture exact rest pose
+        scene.update(VulvaDeformationState(), includeLithotomyBody = true)
+        assertValidMesh(palms); assertValidMesh(hands); assertValidMesh(nails)
+        assertOutwardWindingMatchesNormals("blossomPalmsMesh(rest)", palms)
+        assertOutwardWindingMatchesNormals("blossomHandsMesh(rest)", hands)
+        val restPalmsData = palms.vertexData.copyOf()
+        val restHandsData = hands.vertexData.copyOf()
+        val restNailsData = nails.vertexData.copyOf()
+
+        val restDistLeft = maxFingerRootToPalmDistance(0)
+        val restDistRight = maxFingerRootToPalmDistance(1)
+
+        // Verify at rest, ALL 5 fingers' proximal root rings (r = 0) stay tucked inside/flush with the palm lateral span
+        var palmMinAx = Float.POSITIVE_INFINITY
+        for (i in 0 until palmVertsPerSide) {
+            val ax = abs(restPalmsData[i * stride])
+            if (ax < palmMinAx) palmMinAx = ax
+        }
+        var fingerRootMinAx = Float.POSITIVE_INFINITY
+        for (f in 0 until 5) {
+            val fingerBase = f * vertsPerFinger
+            for (c in 0 until fCols) {
+                val ax = abs(restHandsData[(fingerBase + c) * stride])
+                if (ax < fingerRootMinAx) fingerRootMinAx = ax
+            }
+        }
+        println("V32_PALM_FINGER_REST: restDistL=%.4f restDistR=%.4f palmMinAx=%.4f rootMinAx=%.4f".format(restDistLeft, restDistRight, palmMinAx, fingerRootMinAx))
+        assertTrue(
+            "All rest finger root caps must stay inside/flush with palm medial edge (rootMinAx=$fingerRootMinAx vs palmMinAx=$palmMinAx)",
+            fingerRootMinAx >= palmMinAx - 0.015f
+        )
+        assertTrue(
+            "At rest, finger root rings must sit snugly within palm shell (< 0.14), got L=$restDistLeft R=$restDistRight",
+            restDistLeft < 0.14f && restDistRight < 0.14f
+        )
+
+        // 2. Test resting-arm micro-shift ALONE (poseProgress == 0, isActivePose == true — the exact v32 bug trigger!)
+        val microShiftState = VulvaDeformationState(
+            selfSpreadPose = 0f,
+            leftArmShift = 0.85f,
+            rightArmShift = -0.65f,
+            leftFingerCurl = 0f,
+            rightFingerCurl = 0f
+        )
+        scene.update(microShiftState, includeLithotomyBody = true)
+        assertValidMesh(palms); assertValidMesh(hands); assertValidMesh(nails)
+
+        var maxPalmMove = 0f
+        for (i in 0 until palms.vertexCount) {
+            val b = i * stride
+            val d = sqrt(
+                (palms.vertexData[b] - restPalmsData[b]).let { it * it } +
+                    (palms.vertexData[b + 1] - restPalmsData[b + 1]).let { it * it } +
+                    (palms.vertexData[b + 2] - restPalmsData[b + 2]).let { it * it }
+            )
+            if (d > maxPalmMove) maxPalmMove = d
+        }
+        val shiftDistRight = maxFingerRootToPalmDistance(0)
+        val shiftDistLeft = maxFingerRootToPalmDistance(1)
+        println("V32_PALM_MICROSHIFT: maxPalmMove=%.4f distR=%.4f distL=%.4f".format(maxPalmMove, shiftDistRight, shiftDistLeft))
+        assertTrue("Palms MUST move during resting-arm micro-shift (poseProgress=0), got maxPalmMove=$maxPalmMove", maxPalmMove > 0.04f)
+        assertEquals("Right finger roots must stay tightly attached to moving palm during micro-shift", restDistRight, shiftDistRight, 0.012f)
+        assertEquals("Left finger roots must stay tightly attached to moving palm during micro-shift", restDistLeft, shiftDistLeft, 0.012f)
+
+        // 3. Test resting-arm micro-shift + peak finger micro-curl combined (152 BPM resting-arm scenario)
+        val peakRestArmsState = VulvaDeformationState(
+            selfSpreadPose = 0f,
+            leftArmShift = 0.90f,
+            rightArmShift = 0.75f,
+            leftFingerCurl = 0.90f,
+            rightFingerCurl = 0.85f,
+            leftLegSpread = -0.84f,
+            rightLegSpread = -0.84f,
+            leftKneeShift = -1.12f,
+            rightKneeShift = -1.12f
+        )
+        scene.update(peakRestArmsState, includeLithotomyBody = true)
+        assertValidMesh(palms); assertValidMesh(hands); assertValidMesh(nails)
+        val peakDistRight = maxFingerRootToPalmDistance(0)
+        val peakDistLeft = maxFingerRootToPalmDistance(1)
+        println("V32_PALM_PEAK_REST_ARMS: distR=%.4f distL=%.4f".format(peakDistRight, peakDistLeft))
+        assertEquals("Right finger roots must stay attached during 152 BPM rest-arm curl+shift", restDistRight, peakDistRight, 0.015f)
+        assertEquals("Left finger roots must stay attached during 152 BPM rest-arm curl+shift", restDistLeft, peakDistLeft, 0.015f)
+
+        // 4. Test full self-spread pose ("Ask Blossom to Spread") contact and palm/finger attachment
+        scene.update(VulvaDeformationState(selfSpreadPose = 1.0f, leftOuter = 0.70f, rightOuter = 0.70f), includeLithotomyBody = true)
+        assertValidMesh(palms); assertValidMesh(hands); assertValidMesh(nails)
+        assertOutwardWindingMatchesNormals("blossomPalmsMesh(spread)", palms)
+        assertOutwardWindingMatchesNormals("blossomHandsMesh(spread)", hands)
+        val spreadDistRight = maxFingerRootToPalmDistance(0)
+        val spreadDistLeft = maxFingerRootToPalmDistance(1)
+        println("V32_PALM_SPREAD: distR=%.4f distL=%.4f".format(spreadDistRight, spreadDistLeft))
+        assertEquals("Right finger roots must stay attached in self-spread pose", restDistRight, spreadDistRight, 0.020f)
+        assertEquals("Left finger roots must stay attached in self-spread pose", restDistLeft, spreadDistLeft, 0.020f)
+
+        // 5. Return to rest must restore palms, hands, and nails bit-identically
+        scene.update(VulvaDeformationState(), includeLithotomyBody = true)
+        assertTrue("Palms must restore identically at rest", palms.vertexData.contentEquals(restPalmsData))
+        assertTrue("Hands must restore identically at rest", hands.vertexData.contentEquals(restHandsData))
+        assertTrue("Nails must restore identically at rest", nails.vertexData.contentEquals(restNailsData))
+    }
+
+    @Test
+    fun v32OuterUpperThighCornerFixedAndArmLegDisjointAcrossPoses() {
+        val scene = VulvaAnatomySceneMesh()
+        val body = scene.blossomBodyMesh
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        scene.update(VulvaDeformationState(), includeLithotomyBody = true)
+        val restVerts = body.vertexData.copyOf()
+
+        // 1. Verify ArmSkinCache and LegSkinCache are 100% DISJOINT (zero shared vertices!)
+        val armCache = BlossomArmIkRig.buildArmSkinCache(body)
+        val legCache = BlossomSdfBodyBuilder.buildLegSkinCache(
+            bodyMesh = body,
+            toesMesh = scene.blossomToesMesh,
+            nailsMesh = scene.blossomNailsMesh,
+            toeNailStartVert = 0
+        )
+        val armSet = armCache.bodyVertIndices.toHashSet()
+        val legSet = legCache.bodyVertIndices.toHashSet()
+        val sharedVerts = armSet.intersect(legSet)
+        assertEquals("ArmSkinCache and LegSkinCache must share ZERO vertices", 0, sharedVerts.size)
+
+        // Diagnostic: count how many actual non-arm outer-thigh vertices fell into the old
+        // `y > -0.72f && ax > 1.82f && z < -0.35f` exclusion box vs the new resting-hand envelope!
+        var oldBoxNonArmThighVerts = 0
+        var newBoxArmVerts = 0
+        var outerThighVertsInLegCache = 0
+        for (i in 0 until body.vertexCount) {
+            val b = i * stride
+            val ax = abs(restVerts[b])
+            val y = restVerts[b + 1]
+            val z = restVerts[b + 2]
+            val inArm = i in armSet
+            if (y > -0.72f && y <= 0.44f && ax > 1.82f && z < -0.35f && !inArm) {
+                oldBoxNonArmThighVerts++
+            }
+            if (BlossomSdfBodyBuilder.isRestingHandOrDistalForearm(ax, y, z) && inArm) {
+                newBoxArmVerts++
+            }
+            if (y in -0.72f..0.38f && ax > 1.65f && z > -0.64f && i in legSet) {
+                outerThighVertsInLegCache++
+            }
+        }
+        println(
+            "V32_ARM_LEG_DIAG: shared=0 oldBoxNonArmThighVerts=%d newBoxArmVerts=%d outerThighInLegCache=%d"
+                .format(oldBoxNonArmThighVerts, newBoxArmVerts, outerThighVertsInLegCache)
+        )
+        assertTrue("New resting-hand envelope must still capture distal forearm/wrist arm vertices", newBoxArmVerts > 100)
+        assertTrue("Outer upper-thigh vertices must belong to LegSkinCache", outerThighVertsInLegCache > 200)
+
+        // 2. Verify ZERO resting forearm/wrist/hand vertices move during a hard inward leg slam!
+        val hardSlamOff = VulvaDeformationState(
+            selfSpreadPose = 0f,
+            leftLegSpread = -0.84f, rightLegSpread = -0.84f,
+            leftKneeShift = -1.12f, rightKneeShift = -1.12f,
+            betaRealismHipThighSwing = false
+        )
+        val hardSlamOn = hardSlamOff.copy(betaRealismHipThighSwing = true)
+        val spreadOnlyOn = VulvaDeformationState(
+            selfSpreadPose = 0f,
+            leftLegSpread = -0.84f, rightLegSpread = -0.84f,
+            leftKneeShift = 0f, rightKneeShift = 0f,
+            betaRealismHipThighSwing = true
+        )
+        val kneeShiftOnlyOn = VulvaDeformationState(
+            selfSpreadPose = 0f,
+            leftLegSpread = 0f, rightLegSpread = 0f,
+            leftKneeShift = -1.12f, rightKneeShift = -1.12f,
+            betaRealismHipThighSwing = true
+        )
+
+        // Measure outer upper-thigh lateral silhouette smoothness (maxAx per Y-slice across y = +0.40..-1.60)
+        // excluding resting arm/hand vertices (`i !in armSet`), for OFF vs ON and spread-only vs kneeShift-only!
+        fun measureOuterThighProfileMaxKink(poseName: String, state: VulvaDeformationState): Float {
+            scene.update(state, includeLithotomyBody = true)
+            assertValidMesh(body)
+            assertOutwardWindingMatchesNormals("blossomBodyMesh($poseName)", body)
+            val posed = body.vertexData
+
+            // Also verify 0 arm/forearm/wrist vertex displacement when selfSpreadPose == 0
+            if (state.selfSpreadPose == 0f && state.leftArmShift == 0f && state.rightArmShift == 0f) {
+                var maxArmDrift = 0f
+                for (armIdx in armCache.bodyVertIndices) {
+                    val b = armIdx * stride
+                    val d = sqrt(
+                        (posed[b] - restVerts[b]).let { it * it } +
+                            (posed[b + 1] - restVerts[b + 1]).let { it * it } +
+                            (posed[b + 2] - restVerts[b + 2]).let { it * it }
+                    )
+                    if (d > maxArmDrift) maxArmDrift = d
+                }
+                assertEquals("$poseName: resting arm/wrist vertices must NOT move during leg motion", 0f, maxArmDrift, 1e-5f)
+            }
+
+            val numBins = 20 // y from +0.40 down to -1.60 in 0.10-unit slices
+            val maxAxBin = FloatArray(numBins) { 0f }
+            val minZBin = FloatArray(numBins) { Float.POSITIVE_INFINITY }
+            for (i in 0 until body.vertexCount) {
+                if (i in armSet) continue
+                val b = i * stride
+                val ry = restVerts[b + 1]
+                val rx = restVerts[b]
+                if (rx <= 0f || ry > 0.40f || ry < -1.60f) continue
+                val bin = (((0.40f - ry) / 2.00f) * numBins).toInt().coerceIn(0, numBins - 1)
+                val px = posed[b]
+                if (px > maxAxBin[bin]) maxAxBin[bin] = px
+                if (posed[b + 2] < minZBin[bin]) minZBin[bin] = posed[b + 2]
+            }
+            // Second-difference curvature metric: a sharp outward corner produces a huge local spike
+            // in `maxAxBin[k] - 0.5*(maxAxBin[k-1] + maxAxBin[k+1])`!
+            var maxSecondDiff = 0f
+            var worstY = 0f
+            var maxStepDiff = 0f
+            for (k in 1 until numBins - 1) {
+                val sd = abs(maxAxBin[k] - 0.5f * (maxAxBin[k - 1] + maxAxBin[k + 1]))
+                val step = abs(maxAxBin[k] - maxAxBin[k - 1])
+                if (sd > maxSecondDiff) {
+                    maxSecondDiff = sd
+                    worstY = 0.40f - (k + 0.5f) * 0.10f
+                }
+                if (step > maxStepDiff) maxStepDiff = step
+            }
+            println(
+                "V32_OUTER_THIGH[%s]: maxSecondDiff=%.4f at y=%.2f maxStep=%.4f | profile=%s".format(
+                    poseName,
+                    maxSecondDiff,
+                    worstY,
+                    maxStepDiff,
+                    maxAxBin.joinToString(",") { "%.2f".format(it) }
+                )
+            )
+            return maxSecondDiff
+        }
+
+        val kinkOff = measureOuterThighProfileMaxKink("hardSlam_hipSwingOFF", hardSlamOff)
+        val kinkOn = measureOuterThighProfileMaxKink("hardSlam_hipSwingON", hardSlamOn)
+        val kinkSpreadOnly = measureOuterThighProfileMaxKink("spreadOnly_hipSwingON", spreadOnlyOn)
+        val kinkKneeOnly = measureOuterThighProfileMaxKink("kneeShiftOnly_hipSwingON", kneeShiftOnlyOn)
+        val kinkAsymL = measureOuterThighProfileMaxKink(
+            "asymmetricPulseL_hipSwingON",
+            VulvaDeformationState(
+                leftLegSpread = -0.78f, rightLegSpread = -0.22f,
+                leftKneeShift = -0.95f, rightKneeShift = -0.28f,
+                betaRealismHipThighSwing = true
+            )
+        )
+        val kinkSpreadOpen = measureOuterThighProfileMaxKink(
+            "manualSpreadWide_hipSwingON",
+            VulvaDeformationState(
+                leftLegSpread = 0.94f, rightLegSpread = 0.94f,
+                betaRealismHipThighSwing = true
+            )
+        )
+
+        // All outer upper-thigh profiles must remain smooth with ZERO sharp outward corner spike!
+        assertTrue("hardSlam OFF outer thigh profile must be smooth (maxSecondDiff=$kinkOff)", kinkOff < 0.085f)
+        assertTrue("hardSlam ON outer thigh profile must be smooth (maxSecondDiff=$kinkOn)", kinkOn < 0.085f)
+        assertTrue("spreadOnly ON outer thigh profile must be smooth (maxSecondDiff=$kinkSpreadOnly)", kinkSpreadOnly < 0.085f)
+        assertTrue("kneeShiftOnly ON outer thigh profile must be smooth (maxSecondDiff=$kinkKneeOnly)", kinkKneeOnly < 0.085f)
+        assertTrue("asymmetricPulseL ON outer thigh profile must be smooth (maxSecondDiff=$kinkAsymL)", kinkAsymL < 0.085f)
+        assertTrue("manualSpreadWide ON outer thigh profile must be smooth (maxSecondDiff=$kinkSpreadOpen)", kinkSpreadOpen < 0.085f)
+
+        // 3. Also verify triangle-level smoothness across the outer upper-thigh zone during hard slam ON:
+        //    ZERO triangles spanning adjacent outer thigh vertices may stretch anomalously or invert!
+        scene.update(hardSlamOn, includeLithotomyBody = true)
+        val posedOn = body.vertexData
+        val idxBuf = body.indexBuffer
+        idxBuf.position(0)
+        var maxOuterThighEdgeStretch = 0f
+        var outerThighCheckedTris = 0
+        var outerThighInvertedTris = 0
+        var t = 0
+        while (t + 2 < body.indexCount) {
+            val i0 = idxBuf.get(t).toInt() and 0xFFFF
+            val i1 = idxBuf.get(t + 1).toInt() and 0xFFFF
+            val i2 = idxBuf.get(t + 2).toInt() and 0xFFFF
+            t += 3
+            if (i0 in armSet || i1 in armSet || i2 in armSet) continue
+            val b0 = i0 * stride; val b1 = i1 * stride; val b2 = i2 * stride
+            val cx = (restVerts[b0] + restVerts[b1] + restVerts[b2]) / 3f
+            val cy = (restVerts[b0 + 1] + restVerts[b1 + 1] + restVerts[b2 + 1]) / 3f
+            if (abs(cx) > 1.45f && cy in -1.20f..0.44f) {
+                outerThighCheckedTris++
+                fun edgeLen(arr: FloatArray, a: Int, b: Int): Float = sqrt(
+                    (arr[a] - arr[b]).let { it * it } +
+                        (arr[a + 1] - arr[b + 1]).let { it * it } +
+                        (arr[a + 2] - arr[b + 2]).let { it * it }
+                )
+                val pairs = arrayOf(intArrayOf(b0, b1), intArrayOf(b1, b2), intArrayOf(b2, b0))
+                for (pair in pairs) {
+                    val rl = edgeLen(restVerts, pair[0], pair[1])
+                    if (rl > 0.02f) {
+                        val pl = edgeLen(posedOn, pair[0], pair[1])
+                        val ratio = pl / rl
+                        if (ratio > maxOuterThighEdgeStretch) maxOuterThighEdgeStretch = ratio
+                    }
+                }
+                val re1x = restVerts[b1] - restVerts[b0]; val re1y = restVerts[b1 + 1] - restVerts[b0 + 1]; val re1z = restVerts[b1 + 2] - restVerts[b0 + 2]
+                val re2x = restVerts[b2] - restVerts[b0]; val re2y = restVerts[b2 + 1] - restVerts[b0 + 1]; val re2z = restVerts[b2 + 2] - restVerts[b0 + 2]
+                val rnx = re1y * re2z - re1z * re2y; val rny = re1z * re2x - re1x * re2z; val rnz = re1x * re2y - re1y * re2x
+                val rLen = sqrt(rnx * rnx + rny * rny + rnz * rnz)
+                val pe1x = posedOn[b1] - posedOn[b0]; val pe1y = posedOn[b1 + 1] - posedOn[b0 + 1]; val pe1z = posedOn[b1 + 2] - posedOn[b0 + 2]
+                val pe2x = posedOn[b2] - posedOn[b0]; val pe2y = posedOn[b2 + 1] - posedOn[b0 + 1]; val pe2z = posedOn[b2 + 2] - posedOn[b0 + 2]
+                val pnx = pe1y * pe2z - pe1z * pe2y; val pny = pe1z * pe2x - pe1x * pe2z; val pnz = pe1x * pe2y - pe1y * pe2x
+                val pLen = sqrt(pnx * pnx + pny * pny + pnz * pnz)
+                if (rLen > 1e-7f && (pLen < 1e-7f || (rnx * pnx + rny * pny + rnz * pnz) / (rLen * pLen) <= 0.0f)) {
+                    outerThighInvertedTris++
+                }
+            }
+        }
+        println("V32_OUTER_THIGH_TRIS: checked=%d inverted=%d maxEdgeStretch=%.3f".format(outerThighCheckedTris, outerThighInvertedTris, maxOuterThighEdgeStretch))
+        assertTrue("Must inspect > 200 outer upper-thigh triangles, got $outerThighCheckedTris", outerThighCheckedTris > 200)
+        assertEquals("Outer upper-thigh must have ZERO inverted triangles during hard inward slam", 0, outerThighInvertedTris)
+        assertTrue("Outer upper-thigh edges must NOT tear/stretch abnormally (maxEdgeStretch=$maxOuterThighEdgeStretch)", maxOuterThighEdgeStretch < 2.15f)
+    }
+
     /**
      * Guards against reversed OpenGL triangle winding (which triggers `!gl_FrontFacing` normal flip
      * in the fragment shader and turns meshes dark/inverted). Verifies that > 95% of non-degenerate
