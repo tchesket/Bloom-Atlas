@@ -800,13 +800,14 @@ fun InteractiveVulva3DCanvas(
     var betaLife2BreathFaceCoupling by sessionState.betaLife2BreathFaceCouplingState
     var betaLife2LivingWarmth by sessionState.betaLife2LivingWarmthState
     var betaLife2ShowHeartRate by sessionState.betaLife2ShowHeartRateState
-    // v27.0–v29.0 Photorealistic Visual Realism Beta toggles (visible in Life+ tab even when Extra Beta Options is OFF)
+    // v27.0–v30.0 Photorealistic Visual Realism Beta toggles (visible in Life+ tab even when Extra Beta Options is OFF)
     var betaRealismLayeredHair by sessionState.betaRealismLayeredHairState
     var betaRealismEyesAndLashes by sessionState.betaRealismEyesAndLashesState
     var betaRealismContactShadows by sessionState.betaRealismContactShadowsState
     var betaRealismDynamicCreases by sessionState.betaRealismDynamicCreasesState
     var betaRealismFacialMicro by sessionState.betaRealismFacialMicroState
     var betaRealismSurfaceMicro by sessionState.betaRealismSurfaceMicroState
+    var betaRealismHipThighSwing by sessionState.betaRealismHipThighSwingState
 
     var activePresetOrdinal by sessionState.activePresetOrdinalState
     val activePreset: CameraAnglePreset? = activePresetOrdinal?.let { CameraAnglePreset.entries.getOrNull(it) }
@@ -2502,7 +2503,8 @@ fun InteractiveVulva3DCanvas(
         betaRealismContactShadows = betaRealismContactShadows,
         betaRealismDynamicCreases = betaRealismDynamicCreases,
         betaRealismFacialMicro = betaRealismFacialMicro,
-        betaRealismSurfaceMicro = betaRealismSurfaceMicro
+        betaRealismSurfaceMicro = betaRealismSurfaceMicro,
+        betaRealismHipThighSwing = betaRealismHipThighSwing
     )
     val currentCam = VulvaCamera3D(
         yawDeg = camYaw.value,
@@ -3322,7 +3324,8 @@ fun InteractiveVulva3DCanvas(
                     betaRealismContactShadows,
                     betaRealismDynamicCreases,
                     betaRealismFacialMicro,
-                    betaRealismSurfaceMicro
+                    betaRealismSurfaceMicro,
+                    betaRealismHipThighSwing
                 ).count { it }
                 val activeLifelike2BetaCount = listOf(
                     betaLife2EyelidTracking,
@@ -4089,7 +4092,7 @@ fun InteractiveVulva3DCanvas(
                                     )
                                     }
                                     Text(
-                                        text = "Visual realism (v27–v29 Beta)",
+                                        text = "Visual realism (v27–v30 Beta)",
                                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, lineHeight = 11.sp),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -4177,6 +4180,21 @@ fun InteractiveVulva3DCanvas(
                                         compact = true,
                                         onToggle = {
                                             betaRealismSurfaceMicro = !betaRealismSurfaceMicro
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "Hip-anchored thigh swing",
+                                        subtitle = "Swings upper thighs smoothly from the hip pivot during peak & spread motion with zero low hinge",
+                                        checked = betaRealismHipThighSwing,
+                                        tag = "toggle_beta_realism_hip_thigh_swing",
+                                        compact = true,
+                                        onToggle = {
+                                            betaRealismHipThighSwing = !betaRealismHipThighSwing
                                             if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
                                         }
                                     )

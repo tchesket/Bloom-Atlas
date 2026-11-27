@@ -2739,23 +2739,23 @@ class VulvaGlTextureView(
                 }
                 float bodyRealismMask = (1.0 - mucosa) * (1.0 - pelvicRegionMask * 0.92);
 
-                // v29.0 Refined Facial Lip Micro-Detail: subtle organic non-periodic texture & soft lower-lip moisture
-                // (head-locked in vRestPos via uInvHeadMatrix; zero harsh barcode stripes!)
+                // v30.0 Refined Facial Lip Micro-Detail: balanced organic non-periodic texture & hydrated lower-lip satin sheen
+                // (head-locked in vRestPos via uInvHeadMatrix; clearly legible up close with zero harsh barcode stripes!)
                 float facialLipCreaseAo = 1.0;
                 if (uBetaRealismFlags3.y > 0.5 && isHeadRegion > 0.5 && mucosa > 0.08) {
                     float lipM = smoothstep(0.10, 0.34, mucosa);
-                    float closeLip = 1.0 - smoothstep(2.0, 3.8, camDist);
+                    float closeLip = 1.0 - smoothstep(2.0, 4.0, camDist);
                     float lEps = 0.0022;
                     vec3 lP = vRestPos * vec3(155.0, 42.0, 110.0);
                     float lC = vnoise3(lP) * 0.62 + vnoise3(lP * 2.15 + vec3(3.1, -1.7, 0.8)) * 0.38;
                     float lX = vnoise3(lP + vec3(lEps * 155.0, 0.0, 0.0)) * 0.62 + vnoise3((lP + vec3(lEps * 155.0, 0.0, 0.0)) * 2.15 + vec3(3.1, -1.7, 0.8)) * 0.38;
                     vec3 lipDir = vec3(1.0, 0.0, 0.0) - N * N.x;
-                    microGrad += lipDir * ((lC - lX) * 0.036 * lipM * closeLip);
-                    facialLipCreaseAo = 1.0 - (1.0 - lC) * 0.028 * lipM;
+                    microGrad += lipDir * ((lC - lX) * 0.074 * lipM * closeLip);
+                    facialLipCreaseAo = 1.0 - (1.0 - lC) * 0.062 * lipM;
                     // Soft hydrated catchlight pillow on the center lower lip (natural satin, never plastic)
                     float lowerLipPillow = smoothstep(6.02, 6.10, vRestPos.y) * (1.0 - smoothstep(6.14, 6.20, vRestPos.y)) *
                                            (1.0 - smoothstep(0.08, 0.20, abs(vRestPos.x))) * smoothstep(0.25, 0.72, N.z);
-                    wetness = clamp(wetness + lipM * (0.045 + lowerLipPillow * 0.11), 0.02, 0.90);
+                    wetness = clamp(wetness + lipM * (0.075 + lowerLipPillow * 0.18), 0.02, 0.90);
                 }
 
                 // v28.0 Bright Idea C (Areola Montgomery Tubercles & Radial Crinkle Micro-Relief)
@@ -3077,27 +3077,27 @@ class VulvaGlTextureView(
                     albedo *= mix(vec3(1.0), vec3(0.84, 0.76, 0.73), hairOcc);
                 }
 
-                // v29.0 Refined Facial Micro-Detail: delicate head-locked nose/cheek freckles & subtle natural lip-center bloom
+                // v30.0 Refined Facial Micro-Detail: clearly visible natural head-locked freckles (~68% of v28) & soft lip warmth
                 if (uBetaRealismFlags3.y > 0.5 && isHeadRegion > 0.5) {
                     float axF = abs(vRestPos.x);
                     float yF = vRestPos.y;
-                    float freckleCluster = smoothstep(0.28, 0.78, vnoise3(vRestPos * 22.0 + vec3(0.7, -1.2, 1.5)));
-                    float freckleZone = (exp(-sq(axF / 0.30) - sq((yF - 6.28) / 0.13)) +
-                                         exp(-sq((axF - 0.24) / 0.14) - sq((yF - 6.26) / 0.11)) * 0.65) *
-                                        smoothstep(0.26, 0.72, N.z) * (1.0 - mucosa) * (0.45 + 0.55 * freckleCluster);
-                    float fDot1 = smoothstep(0.81, 0.95, vnoise3(vRestPos * 96.0 + vec3(2.3, -1.7, 0.9)));
-                    float fDot2 = smoothstep(0.84, 0.96, vnoise3(vRestPos * 148.0 + vec3(-4.1, 3.2, -1.4)));
-                    float freckleMask = clamp((fDot1 * 0.60 + fDot2 * 0.45) * freckleZone, 0.0, 1.0);
-                    vec3 freckleColor = mix(uSkinShadow * vec3(0.84, 0.70, 0.60), vec3(0.52, 0.36, 0.26), 0.20);
-                    albedo = mix(albedo, freckleColor, freckleMask * 0.13);
+                    float freckleCluster = smoothstep(0.24, 0.76, vnoise3(vRestPos * 20.0 + vec3(0.7, -1.2, 1.5)));
+                    float freckleZone = (exp(-sq(axF / 0.31) - sq((yF - 6.28) / 0.135)) +
+                                         exp(-sq((axF - 0.24) / 0.145) - sq((yF - 6.26) / 0.115)) * 0.72) *
+                                        smoothstep(0.22, 0.68, N.z) * (1.0 - mucosa) * (0.55 + 0.45 * freckleCluster);
+                    float fDot1 = smoothstep(0.73, 0.87, vnoise3(vRestPos * 88.0 + vec3(2.3, -1.7, 0.9)));
+                    float fDot2 = smoothstep(0.76, 0.89, vnoise3(vRestPos * 138.0 + vec3(-4.1, 3.2, -1.4)));
+                    float freckleMask = clamp((fDot1 * 0.76 + fDot2 * 0.58) * freckleZone, 0.0, 1.0);
+                    vec3 freckleColor = mix(uSkinShadow * vec3(0.76, 0.58, 0.46), vec3(0.44, 0.26, 0.17), 0.34);
+                    albedo = mix(albedo, freckleColor, freckleMask * 0.28);
 
                     // Soft natural rose warmth on cheek apples & center lips
                     float cheekBloom = exp(-sq((axF - 0.28) / 0.15) - sq((yF - 6.29) / 0.14)) *
                                        smoothstep(0.18, 0.68, N.z) * (1.0 - mucosa);
-                    albedo = mix(albedo, albedo * vec3(1.035, 0.945, 0.940), cheekBloom * 0.13);
+                    albedo = mix(albedo, albedo * vec3(1.038, 0.942, 0.938), cheekBloom * 0.14);
                     if (mucosa > 0.08) {
                         float lipCenter = smoothstep(0.18, 0.56, mucosa) * (1.0 - smoothstep(0.12, 0.26, axF));
-                        albedo = mix(albedo, albedo * vec3(1.045, 0.915, 0.925), lipCenter * 0.16);
+                        albedo = mix(albedo, albedo * vec3(1.052, 0.905, 0.918), lipCenter * 0.22);
                     }
                 }
 

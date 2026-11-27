@@ -1806,7 +1806,11 @@ internal object BlossomUpperBodyBuilder {
 
                 val frontMask = smoothStep(-0.18f, 0.78f, cosP)
                 val backMask = smoothStep(0.05f, 0.85f, -cosP)
-                val sideMask = smoothStep(0.28f, 0.88f, abs(sinP))
+                // v30.0: Restrict deep downward cap coverage strictly to the rear occiput/nape behind the neck,
+                // and trim the lateral sides behind the ears so the spherical hair cap never curls inward
+                // underneath Blossom's jawline (where the cohesive side curtain locks drape naturally outside).
+                val rearNapeMask = smoothStep(0.50f, 0.90f, -cosP)
+                val lateralJawTrim = smoothStep(0.32f, 0.88f, abs(sinP)) * (1f - frontMask * 0.80f) * (1f - rearNapeMask)
                 // Natural right-of-center parted forehead arch: highest near the part (sinP ~ +0.24),
                 // sweeping gracefully lower across the left & right temples with subtle organic feathering
                 val partPeak = exp(-((sinP - 0.24f) / 0.36f).let { it * it }) * frontMask
@@ -1814,11 +1818,11 @@ internal object BlossomUpperBodyBuilder {
                 val organicEdge = (0.0085f * sin(phi * 9f + 0.7f) + 0.0045f * cos(phi * 17f - 0.4f)) * frontMask
                 val frontRecess = (0.238f + 0.068f * partPeak - 0.048f * templeSweep + organicEdge)
                 val maxTheta = 0.63f * PI.toFloat() -
-                    frontRecess * PI.toFloat() * frontMask +
-                    0.22f * PI.toFloat() * backMask +
-                    0.12f * PI.toFloat() * sideMask * (1f - frontMask)
+                    frontRecess * PI.toFloat() * frontMask -
+                    0.125f * PI.toFloat() * lateralJawTrim +
+                    0.19f * PI.toFloat() * rearNapeMask
 
-                val theta = (0.008f + v * (maxTheta / PI.toFloat())).coerceAtMost(0.85f) * PI.toFloat()
+                val theta = (0.008f + v * (maxTheta / PI.toFloat())).coerceAtMost(0.83f) * PI.toFloat()
                 val sinT = sin(theta)
                 val cosT = cos(theta)
 
@@ -1829,13 +1833,17 @@ internal object BlossomUpperBodyBuilder {
                 val loft = (crownVolume * edgeTaper + strandRib * (1f - smoothStep(0.76f, 1.0f, v))).coerceAtLeast(0.0018f)
 
                 val craniumBack = 1f + 0.09f * backMask * sinT
-                val napeBlend = smoothStep(-0.12f, 0.65f, -cosP)
-                val pillowFan = 0.120f * smoothStep(0.60f, 0.96f, v) * napeBlend * (1f - 0.25f * smoothStep(0.88f, 1.0f, v))
-                val lx = sinT * sinP * (0.682f + loft + pillowFan)
-                val ly = cosT * (0.975f + loft * 0.90f) - 0.17f * smoothStep(0.66f, 1.0f, v) * napeBlend
+                val napeBlend = smoothStep(0.18f, 0.76f, -cosP)
+                val pillowFan = 0.135f * smoothStep(0.58f, 0.96f, v) * napeBlend * (1f - 0.20f * smoothStep(0.88f, 1.0f, v))
+                val lowerDrapeT = smoothStep(0.50f * PI.toFloat(), 0.82f * PI.toFloat(), theta)
+                val drapeSinX = sinT + (1f - sinT) * 0.38f * lowerDrapeT * abs(sinP) * rearNapeMask
+                val lx = drapeSinX * sinP * (0.682f + loft + pillowFan)
+                val ly = cosT * (0.975f + loft * 0.90f) - 0.16f * smoothStep(0.66f, 1.0f, v) * napeBlend
                 val lz = sinT * cosP * (0.778f * craniumBack + loft)
 
                 val wPt = headLocalToWorld(lx, ly, lz)
+                val minCapHairZ = BlossomBodyBuilder.mattressSurfaceZ(wPt[1]) + 0.03f
+                if (wPt[2] < minCapHairZ) wPt[2] = minCapHairZ
                 // Beta 6 adds finer strand-direction normal detail along the cap without altering silhouette
                 val strandNormRib = if (betaSoftHair) {
                     0.056f * cos(phi * 28f + v * 3.8f) + 0.036f * sin(phi * 54f - v * 4.6f)

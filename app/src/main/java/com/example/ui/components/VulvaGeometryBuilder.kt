@@ -160,13 +160,14 @@ data class VulvaDeformationState(
      */
     val betaV3HoodMonsUpperBlend: Boolean = false,
     val betaV3HoodMonsUpperStrength: Float = 0.75f,
-    // v27.0–v29.0 Photorealistic Visual Realism Beta toggles (all default false so baseline stays bit-identical)
+    // v27.0–v30.0 Photorealistic Visual Realism Beta toggles (all default false so baseline stays bit-identical)
     val betaRealismLayeredHair: Boolean = false,
     val betaRealismEyesAndLashes: Boolean = false,
     val betaRealismContactShadows: Boolean = false,
     val betaRealismDynamicCreases: Boolean = false,
     val betaRealismFacialMicro: Boolean = false,
-    val betaRealismSurfaceMicro: Boolean = false
+    val betaRealismSurfaceMicro: Boolean = false,
+    val betaRealismHipThighSwing: Boolean = false
 )
 
 class DynamicGlMesh(
@@ -288,6 +289,7 @@ class VulvaAnatomySceneMesh {
     private var lastAppliedRightKneeShift = Float.NaN
     private var lastAppliedLeftToeWiggle = Float.NaN
     private var lastAppliedRightToeWiggle = Float.NaN
+    private var lastAppliedBetaRealismHipThighSwing: Boolean? = null
     private var lastAppliedLeftGluteX = Float.NaN
     private var lastAppliedLeftGluteY = Float.NaN
     private var lastAppliedRightGluteX = Float.NaN
@@ -760,7 +762,8 @@ class VulvaAnatomySceneMesh {
                 state.rightKneeShift != lastAppliedRightKneeShift
             val toesChanged = state.leftToeWiggle != lastAppliedLeftToeWiggle ||
                 state.rightToeWiggle != lastAppliedRightToeWiggle
-            val legsChanged = legsSpreadChanged || kneeShiftChanged || toesChanged
+            val hipThighSwingChanged = state.betaRealismHipThighSwing != lastAppliedBetaRealismHipThighSwing
+            val legsChanged = legsSpreadChanged || kneeShiftChanged || toesChanged || hipThighSwingChanged
             val glutesChanged = state.leftGluteX != lastAppliedLeftGluteX ||
                 state.leftGluteY != lastAppliedLeftGluteY ||
                 state.rightGluteX != lastAppliedRightGluteX ||
@@ -778,7 +781,8 @@ class VulvaAnatomySceneMesh {
                     leftKneeShift = state.leftKneeShift,
                     rightKneeShift = state.rightKneeShift,
                     leftToeWiggle = state.leftToeWiggle,
-                    rightToeWiggle = state.rightToeWiggle
+                    rightToeWiggle = state.rightToeWiggle,
+                    useHipAnchoredThighSwing = state.betaRealismHipThighSwing
                 )
                 BlossomSdfBodyBuilder.applyGluteElasticity(
                     bodyMesh = blossomBodyMesh,
@@ -794,6 +798,7 @@ class VulvaAnatomySceneMesh {
                 lastAppliedRightKneeShift = state.rightKneeShift
                 lastAppliedLeftToeWiggle = state.leftToeWiggle
                 lastAppliedRightToeWiggle = state.rightToeWiggle
+                lastAppliedBetaRealismHipThighSwing = state.betaRealismHipThighSwing
                 lastAppliedLeftGluteX = state.leftGluteX
                 lastAppliedLeftGluteY = state.leftGluteY
                 lastAppliedRightGluteX = state.rightGluteX

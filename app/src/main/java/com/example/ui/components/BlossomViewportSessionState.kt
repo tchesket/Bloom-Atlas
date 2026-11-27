@@ -317,6 +317,9 @@ class BlossomViewportSessionState {
     internal val betaRealismSurfaceMicroState = mutableStateOf(false)
     var betaRealismSurfaceMicro: Boolean by betaRealismSurfaceMicroState
 
+    internal val betaRealismHipThighSwingState = mutableStateOf(false)
+    var betaRealismHipThighSwing: Boolean by betaRealismHipThighSwingState
+
     /** Effective vulva elastic resistance (0f when toggled OFF while preserving last slider value). */
     val effectiveVulvaElasticity: Float
         get() = if (betaVulvaElasticityEnabled) {
@@ -369,5 +372,6 @@ class BlossomViewportSessionState {
         betaRealismDynamicCreases = false
         betaRealismFacialMicro = false
         betaRealismSurfaceMicro = false
+        betaRealismHipThighSwing = false
     }
 }

@@ -5113,6 +5113,256 @@ class BlossomGeometryUnitTest {
         }
     }
 
+    @Test
+    fun v30UnderJawHairCapEliminatesInwardNeckFlapsAndPreservesWinding() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        scene.update(VulvaDeformationState(), includeLithotomyBody = true)
+
+        val hair = scene.blossomHairMesh
+        assertValidMesh(hair)
+        assertOutwardWindingMatchesNormals("blossomHairMesh(v30Base)", hair)
+
+        // Part A cap is 72 x 48 = 3,456 vertices. Check head-local coordinates by inverting headLocalToWorld
+        // (head center at (0, 6.46, headCenterZ), pitch 0.24 rad around X) via BlossomUpperBodyBuilder conventions:
+        // In world space, the under-jaw / lateral-neck cavity where the old spherical cap curled inward sits at
+        // |x| in 0.25..0.58, y in 5.45..6.15, z > mattressSurfaceZ(y) + 0.55 (forward of the pillow/nape!).
+        val data = hair.vertexData
+        val capVerts = 72 * 48
+        var underJawCapIntrusionCount = 0
+        var foreheadCapVerts = 0
+        var rearNapeCapVerts = 0
+        for (i in 0 until capVerts) {
+            val b = i * stride
+            val x = data[b]
+            val y = data[b + 1]
+            val z = data[b + 2]
+            val minMatZ = BlossomBodyBuilder.mattressSurfaceZ(y) + 0.025f
+            assertTrue("Hair cap vertex $i must stay above mattress ($z >= $minMatZ)", z >= minMatZ)
+
+            val ax = abs(x)
+            val relZ = z - BlossomBodyBuilder.mattressSurfaceZ(y)
+            // Previously, Part A wrapped to theta=148 deg beside the jaw -> |x| ~ 0.35..0.53, y ~ 5.55..6.05, relZ ~ 0.68..0.95
+            if (ax in 0.25f..0.58f && y in 5.45f..6.10f && relZ > 0.62f) {
+                underJawCapIntrusionCount++
+            }
+            if (ax < 0.30f && y > 6.75f && relZ > 1.10f) foreheadCapVerts++
+            if (ax < 0.35f && y < 5.90f && relZ < 0.45f) rearNapeCapVerts++
+        }
+        assertEquals(
+            "v30 hair cap must have ZERO inward-curling under-jaw/neck shell flaps",
+            0,
+            underJawCapIntrusionCount
+        )
+        assertTrue("Arched forehead hairline coverage must remain intact (> 20 verts), got $foreheadCapVerts", foreheadCapVerts > 20)
+        assertTrue("Rear pillow-draping nape coverage must remain intact (> 20 verts), got $rearNapeCapVerts", rearNapeCapVerts > 20)
+    }
+
+    @Test
+    fun v30HipAnchoredThighSwingDistributesUpperThighMotionAndEliminatesFoldover() {
+        val defaults = VulvaDeformationState()
+        assertFalse("betaRealismHipThighSwing must default OFF", defaults.betaRealismHipThighSwing)
+
+        val session = com.example.ui.components.BlossomViewportSessionState()
+        assertFalse("Session betaRealismHipThighSwing must default OFF", session.betaRealismHipThighSwing)
+        session.betaRealismHipThighSwing = true
+        session.disableAllBetaToggles()
+        assertFalse("disableAllBetaToggles must turn OFF betaRealismHipThighSwing", session.betaRealismHipThighSwing)
+
+        val scene = VulvaAnatomySceneMesh()
+        val body = scene.blossomBodyMesh
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        scene.update(VulvaDeformationState(), includeLithotomyBody = true)
+        val restVerts = body.vertexData.copyOf()
+        val restToes = scene.blossomToesMesh.vertexData.copyOf()
+        val bindHole = scene.blossomBodyBindHoleData
+
+        // Helper finding the closest body vertex to a 3D probe point in rest pose
+        fun closestVertex(tx: Float, ty: Float, tz: Float): Int {
+            var bestIdx = -1
+            var bestD2 = Float.POSITIVE_INFINITY
+            for (i in 0 until body.vertexCount) {
+                val b = i * stride
+                val dx = restVerts[b] - tx
+                val dy = restVerts[b + 1] - ty
+                val dz = restVerts[b + 2] - tz
+                val d2 = dx * dx + dy * dy + dz * dz
+                if (d2 < bestD2) {
+                    bestD2 = d2
+                    bestIdx = i
+                }
+            }
+            return bestIdx
+        }
+
+        // Evaluate exact femur centerline travel ratios (u = 0.00, 0.25, 0.50, 0.75, 1.00) by projecting
+        // through the same weighting logic on outer/anterior thigh stations & exact femur centerline samples.
+        // Wide stance (+0.94 spread, 0 kneeShift) -> First hard squeeze (-0.84 spread, -1.12 kneeShift).
+        val wideOff = VulvaDeformationState(leftLegSpread = 0.94f, rightLegSpread = 0.94f, betaRealismHipThighSwing = false)
+        val squeezeOff = VulvaDeformationState(
+            selfSpreadPose = 1.0f, leftLegSpread = -0.84f, rightLegSpread = -0.84f,
+            leftKneeShift = -1.12f, rightKneeShift = -1.12f, betaRealismHipThighSwing = false
+        )
+        val wideOn = wideOff.copy(betaRealismHipThighSwing = true)
+        val squeezeOn = squeezeOff.copy(betaRealismHipThighSwing = true)
+
+        // Probe actual surface vertices on the right thigh at hip, quarter-thigh (outer & anterior), mid-thigh, and knee
+        val hipOuterIdx = closestVertex(1.60f, 0.22f, -0.10f)
+        val qThighOuterIdx = closestVertex(1.66f, -0.27f, 0.30f)
+        val qThighAntIdx = closestVertex(1.29f, -0.27f, 0.85f)
+        val midThighOuterIdx = closestVertex(1.80f, -0.80f, 0.80f)
+        val kneeAntIdx = closestVertex(1.80f, -1.86f, 2.02f)
+
+        scene.update(wideOff, includeLithotomyBody = true)
+        val wideOffVerts = body.vertexData.copyOf()
+        scene.update(squeezeOff, includeLithotomyBody = true)
+        val squeezeOffVerts = body.vertexData.copyOf()
+
+        scene.update(wideOn, includeLithotomyBody = true)
+        val wideOnVerts = body.vertexData.copyOf()
+        scene.update(squeezeOn, includeLithotomyBody = true)
+        val squeezeOnVerts = body.vertexData.copyOf()
+
+        fun travelX(a: FloatArray, b: FloatArray, idx: Int): Float = a[idx * stride] - b[idx * stride]
+
+        val kneeTravelOff = travelX(wideOffVerts, squeezeOffVerts, kneeAntIdx)
+        val kneeTravelOn = travelX(wideOnVerts, squeezeOnVerts, kneeAntIdx)
+        assertEquals(
+            "Knee lateral travel must match identically between OFF and ON (no double-counting)",
+            kneeTravelOff,
+            kneeTravelOn,
+            0.015f
+        )
+
+        val qOuterRatioOff = travelX(wideOffVerts, squeezeOffVerts, qThighOuterIdx) / kneeTravelOff
+        val qOuterRatioOn = travelX(wideOnVerts, squeezeOnVerts, qThighOuterIdx) / kneeTravelOn
+        val qAntRatioOff = travelX(wideOffVerts, squeezeOffVerts, qThighAntIdx) / kneeTravelOff
+        val qAntRatioOn = travelX(wideOnVerts, squeezeOnVerts, qThighAntIdx) / kneeTravelOn
+        val midRatioOff = travelX(wideOffVerts, squeezeOffVerts, midThighOuterIdx) / kneeTravelOff
+        val midRatioOn = travelX(wideOnVerts, squeezeOnVerts, midThighOuterIdx) / kneeTravelOn
+        val hipRatioOn = travelX(wideOnVerts, squeezeOnVerts, hipOuterIdx) / kneeTravelOn
+
+        println(
+            "V30_THIGH_RATIOS: kneeOff=%.4f kneeOn=%.4f | hipOn=%.3f | qOuterOff=%.3f qOuterOn=%.3f | qAntOff=%.3f qAntOn=%.3f | midOff=%.3f midOn=%.3f"
+                .format(kneeTravelOff, kneeTravelOn, hipRatioOn, qOuterRatioOff, qOuterRatioOn, qAntRatioOff, qAntRatioOn, midRatioOff, midRatioOn)
+        )
+
+        assertTrue(
+            "Hip-anchored swing must dramatically boost quarter-thigh outer travel (off=$qOuterRatioOff -> on=$qOuterRatioOn)",
+            qOuterRatioOn > 0.19f && qOuterRatioOn < 0.34f && qOuterRatioOn > qOuterRatioOff + 0.12f
+        )
+        assertTrue(
+            "Hip-anchored swing must boost quarter-thigh anterior travel (off=$qAntRatioOff -> on=$qAntRatioOn)",
+            qAntRatioOn > 0.18f && qAntRatioOn < 0.34f && qAntRatioOn > qAntRatioOff + 0.10f
+        )
+        assertTrue(
+            "Mid-thigh travel ratio must sit near ~50% linear hip-to-knee swing ($midRatioOn)",
+            midRatioOn in 0.44f..0.60f
+        )
+        assertTrue(
+            "Hip outer attachment must remain softly anchored (< 12% of knee travel), got $hipRatioOn",
+            hipRatioOn in -0.02f..0.12f
+        )
+
+        // Verify bit-identical reversion when toggling betaRealismHipThighSwing back OFF
+        scene.update(squeezeOff, includeLithotomyBody = true)
+        assertTrue(
+            "Toggling betaRealismHipThighSwing OFF must restore exact v29 mesh",
+            body.vertexData.contentEquals(squeezeOffVerts)
+        )
+
+        // Verify planted-foot knee shift leaves feet/toes 100% grounded when betaRealismHipThighSwing is ON
+        scene.update(
+            VulvaDeformationState(
+                leftLegSpread = 0f, rightLegSpread = 0f,
+                leftKneeShift = -0.90f, rightKneeShift = 0.85f,
+                betaRealismHipThighSwing = true
+            ),
+            includeLithotomyBody = true
+        )
+        var maxPlantedToeDelta = 0f
+        for (i in 0 until scene.blossomToesMesh.vertexCount * stride) {
+            val d = abs(scene.blossomToesMesh.vertexData[i] - restToes[i])
+            if (d > maxPlantedToeDelta) maxPlantedToeDelta = d
+        }
+        assertEquals("Planted-foot knee shift with hip swing ON must keep toes 100% grounded", 0f, maxPlantedToeDelta, 1e-6f)
+
+        // Verify ZERO upper-inner-thigh foldover & rigid pelvic collar pinning across hard squeeze,
+        // asymmetric returns (both sides), and ordinary manual spread poses!
+        val posesToCheck = listOf(
+            "hardFirstSqueeze_hipSwing" to squeezeOn,
+            "asymmetricReturnL_hipSwing" to VulvaDeformationState(
+                selfSpreadPose = 1.0f, leftLegSpread = -0.78f, rightLegSpread = -0.25f,
+                leftKneeShift = -0.95f, rightKneeShift = -0.30f, betaRealismHipThighSwing = true
+            ),
+            "asymmetricReturnR_hipSwing" to VulvaDeformationState(
+                selfSpreadPose = 1.0f, leftLegSpread = -0.20f, rightLegSpread = -0.80f,
+                leftKneeShift = -0.25f, rightKneeShift = -1.05f, betaRealismHipThighSwing = true
+            ),
+            "manualSpreadWide_hipSwing" to VulvaDeformationState(
+                leftLegSpread = 0.80f, rightLegSpread = 0.80f, betaRealismHipThighSwing = true
+            ),
+            "manualSpreadClose_hipSwing" to VulvaDeformationState(
+                leftLegSpread = -0.30f, rightLegSpread = -0.30f, betaRealismHipThighSwing = true
+            )
+        )
+        val idxBuf = body.indexBuffer
+        for ((poseName, pose) in posesToCheck) {
+            scene.update(pose, includeLithotomyBody = true)
+            assertValidMesh(body)
+            assertOutwardWindingMatchesNormals("blossomBodyMesh($poseName)", body)
+            val posed = body.vertexData
+
+            var maxCollarDisp = 0f
+            for (i in 0 until body.vertexCount) {
+                val ox = bindHole[i * 4]; val oy = bindHole[i * 4 + 1]; val bz = bindHole[i * 4 + 2]
+                if (sqrt(ox * ox + oy * oy) <= 1.02f && bz <= 0.34f) {
+                    val b = i * stride
+                    val disp = sqrt(
+                        (posed[b] - restVerts[b]).let { it * it } +
+                            (posed[b + 1] - restVerts[b + 1]).let { it * it } +
+                            (posed[b + 2] - restVerts[b + 2]).let { it * it }
+                    )
+                    if (disp > maxCollarDisp) maxCollarDisp = disp
+                }
+            }
+            assertTrue("$poseName: pelvic collar must stay rigidly pinned (got $maxCollarDisp)", maxCollarDisp < 1e-4f)
+
+            idxBuf.position(0)
+            var checkedTris = 0
+            var invertedTris = 0
+            var t = 0
+            while (t + 2 < body.indexCount) {
+                val i0 = idxBuf.get(t).toInt() and 0xFFFF
+                val i1 = idxBuf.get(t + 1).toInt() and 0xFFFF
+                val i2 = idxBuf.get(t + 2).toInt() and 0xFFFF
+                t += 3
+                val b0 = i0 * stride; val b1 = i1 * stride; val b2 = i2 * stride
+                val cx = (restVerts[b0] + restVerts[b1] + restVerts[b2]) / 3f
+                val cy = (restVerts[b0 + 1] + restVerts[b1 + 1] + restVerts[b2 + 1]) / 3f
+                val cz = (restVerts[b0 + 2] + restVerts[b1 + 2] + restVerts[b2 + 2]) / 3f
+                if (abs(cx) in 0.45f..1.35f && cy in -1.25f..0.05f && cz > 0.35f) {
+                    val re1x = restVerts[b1] - restVerts[b0]; val re1y = restVerts[b1 + 1] - restVerts[b0 + 1]; val re1z = restVerts[b1 + 2] - restVerts[b0 + 2]
+                    val re2x = restVerts[b2] - restVerts[b0]; val re2y = restVerts[b2 + 1] - restVerts[b0 + 1]; val re2z = restVerts[b2 + 2] - restVerts[b0 + 2]
+                    val rnx = re1y * re2z - re1z * re2y; val rny = re1z * re2x - re1x * re2z; val rnz = re1x * re2y - re1y * re2x
+                    val rLen = sqrt(rnx * rnx + rny * rny + rnz * rnz)
+                    if (rLen < 1e-7f) continue
+
+                    val pe1x = posed[b1] - posed[b0]; val pe1y = posed[b1 + 1] - posed[b0 + 1]; val pe1z = posed[b1 + 2] - posed[b0 + 2]
+                    val pe2x = posed[b2] - posed[b0]; val pe2y = posed[b2 + 1] - posed[b0 + 1]; val pe2z = posed[b2 + 2] - posed[b0 + 2]
+                    val pnx = pe1y * pe2z - pe1z * pe2y; val pny = pe1z * pe2x - pe1x * pe2z; val pnz = pe1x * pe2y - pe1y * pe2x
+                    val pLen = sqrt(pnx * pnx + pny * pny + pnz * pnz)
+                    checkedTris++
+                    if (pLen < 1e-7f || (rnx * pnx + rny * pny + rnz * pnz) / (rLen * pLen) <= 0.05f) {
+                        invertedTris++
+                    }
+                }
+            }
+            assertTrue("$poseName: checked upper-inner-thigh tris must be > 50, got $checkedTris", checkedTris > 50)
+            assertEquals("$poseName: must have ZERO folded-over/inverted upper-inner-thigh triangles", 0, invertedTris)
+        }
+    }
+
     /**
      * Guards against reversed OpenGL triangle winding (which triggers `!gl_FrontFacing` normal flip
      * in the fragment shader and turns meshes dark/inverted). Verifies that > 95% of non-degenerate

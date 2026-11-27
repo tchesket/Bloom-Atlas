@@ -1,5 +1,19 @@
 # Bloom Atlas — Version History
 
+## Version 30.0 (`versionCode = 30`)
+**Date:** 2026-11-26
+
+- **Eliminated Under-Jaw Hair Cap Shell Flaps (`BlossomUpperBodyBuilder.kt`)**
+  - Fixed `buildBlossomHairMesh()` Part A (base hair cap) where lateral `maxTheta` wrapped past the head equator (`0.75–0.85 * PI`), causing `sin(theta)` to shrink inward underneath Blossom's jawline and create two concave shell flaps beside her neck.
+  - Restricted deep downward cap wrap strictly to the rear occiput/nape (`rearNapeMask = smoothStep(0.50, 0.90, -cosP)`), trimmed lateral sides cleanly behind the ears (`lateralJawTrim`), added an outward rear-nape pillow drape profile (`drapeSinX`) with mattress floor clamping, and preserved both the arched parted forehead hairline and outward CCW winding.
+- **Restored Visible Head-Locked Freckles & Balanced Lip Micro-Detail (`VulvaGlRenderer.kt`)**
+  - Tuned `betaRealismFacialMicro` (*Lip, brow & freckle detail*) in Pass A so head-locked freckles across the nose bridge and upper cheeks are clearly visible and natural (~68% of v28 strength) rather than washed out, and moderately boosted organic non-periodic lip texture, crease AO, center rose warmth, and hydrated lower-lip satin sheen without reintroducing barcode stripes.
+- **New Beta Toggle — Hip-Anchored Thigh Swing (`BlossomSdfBodyBuilder.kt`, `VulvaGeometryBuilder.kt`, `BlossomViewportSessionState.kt`, `InteractiveVulva3DCanvas.kt`)**
+  - Added an OFF-by-default *"Hip-anchored thigh swing"* (`betaRealismHipThighSwing`) toggle in Tab 2 (`Life+`) under *Visual realism (v27–v30 Beta)*, backed by dual zero-rebuild weight arrays in `LegSkinCache` so toggling ON/OFF switches live at 60 FPS and reverts bit-identically when OFF.
+  - Distributes both hip-socket spread rotation and planted-knee lateral displacement linearly along the femur about the authored hip pivot (`HIP_PIVOT_AX = 1.12, HIP_PIVOT_Y = 0.26, HIP_PIVOT_Z = -0.22`) with a soft pelvic attachment and bounded medial-to-femur transition (`lateralFemurFactor = smoothStep(0.76, 1.44, ax)`), raising quarter-thigh travel across wide-to-first-squeeze from `3.3%` → `20.9%` on the femur centerline (`5.6%` → `26.0%` outer thigh, `7.2%` → `22.1%` anterior thigh) and mid-thigh from `45.6%` → `49.9%` while preserving exact knee travel (`1.9849` → `1.9849`), planted feet, v29 3D pelvic collar pinning, Seam D, and zero upper-inner-thigh foldover across hard squeezes, asymmetric returns, and manual spreads.
+
+---
+
 ## Version 29.0 (`versionCode = 29`)
 **Date:** 2026-11-26
 
