@@ -1,5 +1,15 @@
 # Bloom Atlas — Version History
 
+## Version 25.0 (`versionCode = 25`)
+**Date:** 2026-11-26
+
+- **Fixed Inner-Thigh Seam D Cutout During Strong Inward Squeezes (`VulvaGeometryBuilder.kt`, `VulvaGlRenderer.kt`)**
+  - Isolated root cause in **Seam D** (`uBetaSmoothBodyHole`): `BlossomSdfBodyBuilder.applyLegSpread()` writes posed thigh coordinates into `blossomBodyMesh`, so `vRestPos = (uModel * vec4(aPos, 1.0)).xyz` evaluated the pelvic oval discard (`holeOvalR < 0.93 && z > -0.92 && nz > 0.04`) against already-posed inner-thigh vertices as they swung across the pelvis, punching a sharply bounded oval window through the thigh.
+  - Added a dedicated static per-vertex bind-pose attribute (`aBodyBindHole` / `vBodyBindHole` = `vec4(bindX / 0.64, (bindY + 0.06) / 1.02, bindZ, bindNz)`) backed by a dedicated GPU VBO on `VulvaGlTextureView`, initialized from unposed bind-pose body geometry and synced strictly for anterior pelvic collar vertices on pelvis beta toggles (never mutated by leg, arm, head, or glute posing).
+  - Preserved the exact smooth Seam D pelvic opening and vulvar patch edge at rest and in the active "Ask Blossom to Spread" pose (front and oblique angles), as well as the full v24.0 asymmetric leg choreography, squeeze amplitude, timing, and camera range.
+
+---
+
 ## Version 24.0 (`versionCode = 24`)
 **Date:** 2026-11-26
 

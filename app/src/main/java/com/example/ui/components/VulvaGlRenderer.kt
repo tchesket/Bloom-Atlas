@@ -170,6 +170,8 @@ class VulvaGlTextureView(
         var archSplitVersion: Int = -1
         var vulvaPatchInteriorIboId: Int = 0
         var vulvaPatchSeamIboId: Int = 0
+        var bodyBindHoleVboId: Int = 0
+        var bodyBindHoleVersion: Int = -1
     }
 
     private val sessionLock = Any()
@@ -179,6 +181,7 @@ class VulvaGlTextureView(
     private var aNormalLoc = -1
     private var aMatLoc = -1
     private var aArchAlphaLoc = -1
+    private var aBodyBindHoleLoc = -1
 
     private var uMvpLoc = -1
     private var uModelLoc = -1
@@ -531,6 +534,7 @@ class VulvaGlTextureView(
         aNormalLoc = GLES20.glGetAttribLocation(program, "aNormal")
         aMatLoc = GLES20.glGetAttribLocation(program, "aMat")
         aArchAlphaLoc = GLES20.glGetAttribLocation(program, "aArchAlpha")
+        aBodyBindHoleLoc = GLES20.glGetAttribLocation(program, "aBodyBindHole")
 
         uMvpLoc = GLES20.glGetUniformLocation(program, "uMvp")
         uModelLoc = GLES20.glGetUniformLocation(program, "uModel")
@@ -977,6 +981,26 @@ class VulvaGlTextureView(
             }
         }
 
+        fun ensureBodyBindHoleBuffer() {
+            if (session.bodyBindHoleVboId == 0) {
+                val ids = IntArray(1)
+                GLES20.glGenBuffers(1, ids, 0)
+                session.bodyBindHoleVboId = ids[0]
+            }
+            if (session.bodyBindHoleVersion != mesh.blossomBodyBindHoleVersion) {
+                val buf = mesh.blossomBodyBindHoleBuffer
+                buf.position(0)
+                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, session.bodyBindHoleVboId)
+                val bytes = mesh.blossomBodyBindHoleData.size * 4
+                if (session.bodyBindHoleVersion < 0) {
+                    GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, bytes, buf, GLES20.GL_STATIC_DRAW)
+                } else {
+                    GLES20.glBufferSubData(GLES20.GL_ARRAY_BUFFER, 0, bytes, buf)
+                }
+                session.bodyBindHoleVersion = mesh.blossomBodyBindHoleVersion
+            }
+        }
+
         fun drawMeshList(meshes: List<DynamicGlMesh>, materialType: Float) {
             GLES20.glUniform1f(uMaterialTypeLoc, materialType)
             meshes.forEach { glMesh ->
@@ -1028,6 +1052,17 @@ class VulvaGlTextureView(
                     } else {
                         GLES20.glDisableVertexAttribArray(aArchAlphaLoc)
                         GLES20.glVertexAttrib1f(aArchAlphaLoc, 1.0f)
+                    }
+                }
+                if (aBodyBindHoleLoc >= 0) {
+                    if (useSmoothBodyHole) {
+                        ensureBodyBindHoleBuffer()
+                        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, session.bodyBindHoleVboId)
+                        GLES20.glEnableVertexAttribArray(aBodyBindHoleLoc)
+                        GLES20.glVertexAttribPointer(aBodyBindHoleLoc, 4, GLES20.GL_FLOAT, false, 16, 0)
+                    } else {
+                        GLES20.glDisableVertexAttribArray(aBodyBindHoleLoc)
+                        GLES20.glVertexAttrib4f(aBodyBindHoleLoc, 2.0f, 2.0f, -2.0f, 0.0f)
                     }
                 }
 
@@ -1121,6 +1156,9 @@ class VulvaGlTextureView(
         if (aArchAlphaLoc >= 0) {
             GLES20.glDisableVertexAttribArray(aArchAlphaLoc)
         }
+        if (aBodyBindHoleLoc >= 0) {
+            GLES20.glDisableVertexAttribArray(aBodyBindHoleLoc)
+        }
 
         if (session.generation != renderGeneration || session.teardownPosted || !isGlReady) return
         // Complete GPU rasterization on this background GL thread before handing the buffer to SurfaceTexture
@@ -1184,6 +1222,12 @@ class VulvaGlTextureView(
                 GLES20.glDeleteBuffers(patchSplitIds.size, patchSplitIds, 0)
                 session.vulvaPatchInteriorIboId = 0
                 session.vulvaPatchSeamIboId = 0
+            }
+            if (session.bodyBindHoleVboId != 0) {
+                val bindHoleIds = intArrayOf(session.bodyBindHoleVboId)
+                GLES20.glDeleteBuffers(1, bindHoleIds, 0)
+                session.bodyBindHoleVboId = 0
+                session.bodyBindHoleVersion = -1
             }
             if (session.programId != 0) {
                 GLES20.glDeleteProgram(session.programId)
@@ -1251,6 +1295,42 @@ class VulvaGlTextureView(
         internal const val SEAM_A_PATCH_POLY_OFFSET_FACTOR = -0.75f
         internal const val SEAM_A_PATCH_POLY_OFFSET_UNITS = -1.0f
         internal const val SEAM_D_HOLE_OVAL_R = 0.93f
+
+        /**
+         * Pre-fix Seam D predicate mirror (evaluated on posed aPos/vRestPos and posed normalZ).
+         * Kept solely for isolated regression tests proving posed thigh cutouts before the fix.
+         */
+        internal fun evaluateLegacyPosedSeamDDiscard(
+            posedX: Float,
+            posedY: Float,
+            posedZ: Float,
+            normalZ: Float,
+            betaSmoothBodyHoleCutoff: Boolean,
+            holeOvalRThreshold: Float = SEAM_D_HOLE_OVAL_R
+        ): Boolean {
+            if (!betaSmoothBodyHoleCutoff) return false
+            val ox = posedX / BlossomSdfBodyBuilder.PATCH_RX
+            val oy = (posedY - BlossomSdfBodyBuilder.PATCH_CENTER_Y) / BlossomSdfBodyBuilder.PATCH_RY
+            val holeOvalR = kotlin.math.sqrt(ox * ox + oy * oy)
+            return posedZ > -0.92f && normalZ > 0.04f && holeOvalR < holeOvalRThreshold
+        }
+
+        /**
+         * Exact CPU mirror of the fixed Seam D fragment discard predicate in FRAGMENT_SHADER_PART_2,
+         * evaluated strictly from unposed bind-pose pelvic coordinates (aBodyBindHole / vBodyBindHole).
+         */
+        internal fun evaluateBindPoseSeamDDiscard(
+            bindOvalX: Float,
+            bindOvalY: Float,
+            bindZ: Float,
+            bindNz: Float,
+            betaSmoothBodyHoleCutoff: Boolean,
+            holeOvalRThreshold: Float = SEAM_D_HOLE_OVAL_R
+        ): Boolean {
+            if (!betaSmoothBodyHoleCutoff) return false
+            val holeOvalR = kotlin.math.sqrt(bindOvalX * bindOvalX + bindOvalY * bindOvalY)
+            return bindZ > -0.92f && bindNz > 0.04f && holeOvalR < holeOvalRThreshold
+        }
 
         fun computeMatrices(
             cam: VulvaCamera3D,
@@ -1677,6 +1757,7 @@ class VulvaGlTextureView(
             attribute vec3 aNormal;
             attribute vec4 aMat;
             attribute float aArchAlpha;
+            attribute vec4 aBodyBindHole;
 
             uniform mat4 uMvp;
             uniform mat4 uModel;
@@ -1691,6 +1772,7 @@ class VulvaGlTextureView(
             varying vec3 vNormal;
             varying vec4 vMat;
             varying float vArchAlpha;
+            varying vec4 vBodyBindHole;
 
             float mattressZ(float y) {
                 if (y <= 0.72) return -1.14;
@@ -1765,6 +1847,7 @@ class VulvaGlTextureView(
                 vNormal = nrm;
                 vMat = aMat;
                 vArchAlpha = aArchAlpha;
+                vBodyBindHole = aBodyBindHole;
                 gl_Position = uMvp * vec4(pos, 1.0);
             }
         """
@@ -1788,6 +1871,7 @@ class VulvaGlTextureView(
             varying vec3 vNormal;
             varying vec4 vMat;
             varying float vArchAlpha;
+            varying vec4 vBodyBindHole;
 
             uniform vec3 uCamPos;
             uniform vec3 uSkinBase;
@@ -2134,9 +2218,11 @@ class VulvaGlTextureView(
                 // -----------------------------------------------------------------
                 // Standard Beta v1 Seam D: clip anterior body mesh hole along a smooth per-fragment ovalR curve
                 // instead of coarse Marching Cubes voxel stair-steps (disabled in Legacy Vulva mode).
+                // Evaluated strictly in unposed bind-pose anterior pelvic coordinates (vBodyBindHole) so
+                // posed limbs (e.g., strongly squeezed inner thighs passing in front of the pelvis) stay 100% opaque.
                 if (uBetaSmoothBodyHole > 0.5) {
-                    float holeOvalR = length(vec2(vRestPos.x / 0.64, (vRestPos.y + 0.06) / 1.02));
-                    if (vRestPos.z > -0.92 && normalize(vNormal).z > 0.04 && holeOvalR < uSmoothBodyHoleOvalR) {
+                    float holeOvalR = length(vBodyBindHole.xy);
+                    if (vBodyBindHole.z > -0.92 && vBodyBindHole.w > 0.04 && holeOvalR < uSmoothBodyHoleOvalR) {
                         discard;
                     }
                 }

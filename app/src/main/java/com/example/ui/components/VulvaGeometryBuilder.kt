@@ -242,6 +242,13 @@ class VulvaAnatomySceneMesh {
 
     // 1B. Beta Mode: Blossom's Full Head-to-Toe Unified SDF Body + Toes + Sculpted Palms + Fingers + 20 Nails + Live Breasts + Head/Eyes/Hair + Ultra-HD Vulva Patch
     val blossomBodyMesh: DynamicGlMesh
+    // Unposed bind-pose Seam D pelvic opening coordinates per vertex of blossomBodyMesh:
+    // vec4(bindX / PATCH_RX, (bindY - PATCH_CENTER_Y) / PATCH_RY, bindZ, bindNz).
+    // Decoupled from leg/arm/head/glute posing so inward-squeezed thighs NEVER trigger Seam D discard.
+    internal val blossomBodyBindHoleData: FloatArray
+    val blossomBodyBindHoleBuffer: FloatBuffer
+    var blossomBodyBindHoleVersion: Int = 1
+        private set
     val blossomToesMesh: DynamicGlMesh
     val blossomPalmsMesh: DynamicGlMesh
     val blossomHandsMesh: DynamicGlMesh
@@ -501,6 +508,12 @@ class VulvaAnatomySceneMesh {
             legCache = blossomLegSkinCache
         )
         blossomPelvisBetaCache = BlossomSdfBodyBuilder.buildPelvisBetaCache(blossomBodyMesh)
+        blossomBodyBindHoleData = FloatArray(blossomBodyMesh.vertexCount * 4)
+        blossomBodyBindHoleBuffer = ByteBuffer
+            .allocateDirect(blossomBodyBindHoleData.size * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        syncBodyBindHoleFromMesh(onlyAnteriorPelvisCollar = false)
         blossomArmSkinCache = BlossomArmIkRig.buildArmSkinCache(blossomBodyMesh)
         blossomBreastsCache = BlossomUpperBodyBuilder.buildBreastsCache()
         blossomHeadMesh = BlossomUpperBodyBuilder.buildBlossomHeadMesh(
@@ -545,6 +558,42 @@ class VulvaAnatomySceneMesh {
         update(VulvaDeformationState(), includeLithotomyBody = true)
     }
 
+    private fun syncBodyBindHoleFromMesh(onlyAnteriorPelvisCollar: Boolean) {
+        val bData = blossomBodyMesh.vertexData
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val invRx = 1f / BlossomSdfBodyBuilder.PATCH_RX
+        val centerY = BlossomSdfBodyBuilder.PATCH_CENTER_Y
+        val invRy = 1f / BlossomSdfBodyBuilder.PATCH_RY
+
+        if (!onlyAnteriorPelvisCollar) {
+            for (v in 0 until blossomBodyMesh.vertexCount) {
+                val src = v * stride
+                val dst = v * 4
+                blossomBodyBindHoleData[dst] = bData[src] * invRx
+                blossomBodyBindHoleData[dst + 1] = (bData[src + 1] - centerY) * invRy
+                blossomBodyBindHoleData[dst + 2] = bData[src + 2]
+                blossomBodyBindHoleData[dst + 3] = bData[src + 5]
+            }
+        } else {
+            val indices = blossomPelvisBetaCache.bodyVertIndices
+            val isAnt = blossomPelvisBetaCache.isAnteriorCollar
+            for (k in indices.indices) {
+                if (!isAnt[k]) continue
+                val v = indices[k]
+                val src = v * stride
+                val dst = v * 4
+                blossomBodyBindHoleData[dst] = bData[src] * invRx
+                blossomBodyBindHoleData[dst + 1] = (bData[src + 1] - centerY) * invRy
+                blossomBodyBindHoleData[dst + 2] = bData[src + 2]
+                blossomBodyBindHoleData[dst + 3] = bData[src + 5]
+            }
+        }
+        blossomBodyBindHoleBuffer.position(0)
+        blossomBodyBindHoleBuffer.put(blossomBodyBindHoleData)
+        blossomBodyBindHoleBuffer.position(0)
+        blossomBodyBindHoleVersion++
+    }
+
     fun update(state: VulvaDeformationState, includeLithotomyBody: Boolean = false) {
         if (includeLithotomyBody) {
             val betaChanged = state.betaShortPerineum != lastBetaShortPerineum ||
@@ -568,6 +617,9 @@ class VulvaAnatomySceneMesh {
                 lastBetaSoftButtockTable = state.betaSoftButtockTable
                 lastBetaSmoothVulvaSeam = state.betaSmoothVulvaSeam
                 lastBetaBlendVulvaSeamColor = state.betaBlendVulvaSeamColor
+                // Sync bind-pose Seam D coordinates strictly for the unposed anterior pelvic rim
+                // (never touches moving leg/arm/head vertices; runs before applyLegSpread re-poses legs)
+                syncBodyBindHoleFromMesh(onlyAnteriorPelvisCollar = true)
                 // Force leg+glute re-composition if legs or glutes are currently posed
                 lastAppliedLeftGluteX = Float.NaN
             }

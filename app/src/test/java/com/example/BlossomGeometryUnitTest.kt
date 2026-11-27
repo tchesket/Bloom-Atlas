@@ -4077,6 +4077,234 @@ class BlossomGeometryUnitTest {
         assertTrue("Post-peak powerful sigh must be deep and bounded ($maxSighChest, $maxSighAbd)", maxSighChest in 0.16f..0.2201f && maxSighAbd in 0.18f..0.2401f)
     }
 
+    @Test
+    fun seamDBindPoseFixPreventsInnerThighCutoutWhilePreservingPelvicOpening() {
+        val scene = VulvaAnatomySceneMesh()
+        val body = scene.blossomBodyMesh
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val legCache = scene.blossomLegSkinCache
+        val armCache = scene.blossomArmSkinCache
+
+        val isLegVertex = BooleanArray(body.vertexCount)
+        for (idx in legCache.bodyVertIndices) isLegVertex[idx] = true
+        val isArmVertex = BooleanArray(body.vertexCount)
+        for (idx in armCache.bodyVertIndices) isArmVertex[idx] = true
+
+        assertEquals(
+            "Bind-pose Seam D array must hold 4 floats per body vertex",
+            body.vertexCount * 4,
+            scene.blossomBodyBindHoleData.size
+        )
+        for (v in scene.blossomBodyBindHoleData) {
+            assertTrue("Bind-pose Seam D attribute values must be finite", v.isFinite())
+        }
+
+        // Helper counting leg-owned vertices & leg-owned triangle fragment samples discarded by Legacy Posed vs Fixed Bind-Pose Seam D
+        data class SeamDCounts(
+            val legVertsDiscarded: Int,
+            val legTriSamplesDiscarded: Int,
+            val armVertsDiscarded: Int,
+            val pelvicVertsDiscarded: Int,
+            val pelvicTriSamplesDiscarded: Int
+        )
+
+        fun evaluateSceneSeamD(useBindPoseFix: Boolean, betaSmoothBodyHoleCutoff: Boolean): SeamDCounts {
+            val bData = body.vertexData
+            val bindData = scene.blossomBodyBindHoleData
+            val idxBuf = body.indexBuffer
+
+            var legVerts = 0
+            var armVerts = 0
+            var pelvicVerts = 0
+            for (v in 0 until body.vertexCount) {
+                val discarded = if (useBindPoseFix) {
+                    val bd = v * 4
+                    VulvaGlTextureView.evaluateBindPoseSeamDDiscard(
+                        bindOvalX = bindData[bd],
+                        bindOvalY = bindData[bd + 1],
+                        bindZ = bindData[bd + 2],
+                        bindNz = bindData[bd + 3],
+                        betaSmoothBodyHoleCutoff = betaSmoothBodyHoleCutoff
+                    )
+                } else {
+                    val b = v * stride
+                    VulvaGlTextureView.evaluateLegacyPosedSeamDDiscard(
+                        posedX = bData[b],
+                        posedY = bData[b + 1],
+                        posedZ = bData[b + 2],
+                        normalZ = bData[b + 5],
+                        betaSmoothBodyHoleCutoff = betaSmoothBodyHoleCutoff
+                    )
+                }
+                if (discarded) {
+                    when {
+                        isLegVertex[v] -> legVerts++
+                        isArmVertex[v] -> armVerts++
+                        else -> pelvicVerts++
+                    }
+                }
+            }
+
+            // Sample triangle barycentric interiors (centroid + 3 edge midpoints) to match fragment-shader interpolation
+            val bary = arrayOf(
+                floatArrayOf(1f / 3f, 1f / 3f, 1f / 3f),
+                floatArrayOf(0.5f, 0.5f, 0f),
+                floatArrayOf(0.5f, 0f, 0.5f),
+                floatArrayOf(0f, 0.5f, 0.5f)
+            )
+            var legSamples = 0
+            var pelvicSamples = 0
+            var t = 0
+            while (t + 2 < body.indexCount) {
+                val i0 = idxBuf.get(t).toInt() and 0xFFFF
+                val i1 = idxBuf.get(t + 1).toInt() and 0xFFFF
+                val i2 = idxBuf.get(t + 2).toInt() and 0xFFFF
+                t += 3
+                val triHasLeg = isLegVertex[i0] || isLegVertex[i1] || isLegVertex[i2]
+                val triNoLimb = !triHasLeg && !isArmVertex[i0] && !isArmVertex[i1] && !isArmVertex[i2]
+                if (!triHasLeg && !triNoLimb) continue
+
+                for (w in bary) {
+                    val w0 = w[0]; val w1 = w[1]; val w2 = w[2]
+                    val discarded = if (useBindPoseFix) {
+                        val d0 = i0 * 4; val d1 = i1 * 4; val d2 = i2 * 4
+                        VulvaGlTextureView.evaluateBindPoseSeamDDiscard(
+                            bindOvalX = bindData[d0] * w0 + bindData[d1] * w1 + bindData[d2] * w2,
+                            bindOvalY = bindData[d0 + 1] * w0 + bindData[d1 + 1] * w1 + bindData[d2 + 1] * w2,
+                            bindZ = bindData[d0 + 2] * w0 + bindData[d1 + 2] * w1 + bindData[d2 + 2] * w2,
+                            bindNz = bindData[d0 + 3] * w0 + bindData[d1 + 3] * w1 + bindData[d2 + 3] * w2,
+                            betaSmoothBodyHoleCutoff = betaSmoothBodyHoleCutoff
+                        )
+                    } else {
+                        val b0 = i0 * stride; val b1 = i1 * stride; val b2 = i2 * stride
+                        val nx = bData[b0 + 3] * w0 + bData[b1 + 3] * w1 + bData[b2 + 3] * w2
+                        val ny = bData[b0 + 4] * w0 + bData[b1 + 4] * w1 + bData[b2 + 4] * w2
+                        val nz = bData[b0 + 5] * w0 + bData[b1 + 5] * w1 + bData[b2 + 5] * w2
+                        val nLen = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-6f)
+                        VulvaGlTextureView.evaluateLegacyPosedSeamDDiscard(
+                            posedX = bData[b0] * w0 + bData[b1] * w1 + bData[b2] * w2,
+                            posedY = bData[b0 + 1] * w0 + bData[b1 + 1] * w1 + bData[b2 + 1] * w2,
+                            posedZ = bData[b0 + 2] * w0 + bData[b1 + 2] * w1 + bData[b2 + 2] * w2,
+                            normalZ = nz / nLen,
+                            betaSmoothBodyHoleCutoff = betaSmoothBodyHoleCutoff
+                        )
+                    }
+                    if (discarded) {
+                        if (triHasLeg) legSamples++ else pelvicSamples++
+                    }
+                }
+            }
+            return SeamDCounts(legVerts, legSamples, armVerts, pelvicVerts, pelvicSamples)
+        }
+
+        // 1. Verify exact Seam D parity at Rest (0/0) AND in "Ask Blossom to Spread" pose (selfSpreadPose = 1.0f)
+        val restState = VulvaDeformationState(betaSmoothBodyHoleCutoff = true)
+        scene.update(restState, includeLithotomyBody = true)
+        val restVersionBeforePosing = scene.blossomBodyBindHoleVersion
+        val restBindSnapshot = scene.blossomBodyBindHoleData.copyOf()
+        val restLegacy = evaluateSceneSeamD(useBindPoseFix = false, betaSmoothBodyHoleCutoff = true)
+        val restFixed = evaluateSceneSeamD(useBindPoseFix = true, betaSmoothBodyHoleCutoff = true)
+        assertTrue("Rest pose must discard the anterior pelvic opening under Seam D (> 20 verts)", restFixed.pelvicVertsDiscarded > 20)
+        assertEquals("Rest pose pelvic vertex discard count must match pre-fix Seam D identically", restLegacy.pelvicVertsDiscarded, restFixed.pelvicVertsDiscarded)
+        assertEquals("Rest pose pelvic fragment-sample discard count must match pre-fix Seam D identically", restLegacy.pelvicTriSamplesDiscarded, restFixed.pelvicTriSamplesDiscarded)
+        assertEquals("Rest pose must discard 0 leg vertices", 0, restFixed.legVertsDiscarded)
+        assertEquals("Rest pose must discard 0 leg/bridge triangle samples", 0, restFixed.legTriSamplesDiscarded)
+
+        val spreadState = VulvaDeformationState(
+            leftOuter = 0.50f,
+            rightOuter = 0.50f,
+            leftInner = 0.50f,
+            rightInner = 0.50f,
+            selfSpreadPose = 1.0f,
+            betaSmoothBodyHoleCutoff = true
+        )
+        scene.update(spreadState, includeLithotomyBody = true)
+        val spreadLegacy = evaluateSceneSeamD(useBindPoseFix = false, betaSmoothBodyHoleCutoff = true)
+        val spreadFixed = evaluateSceneSeamD(useBindPoseFix = true, betaSmoothBodyHoleCutoff = true)
+        assertEquals("Spread pose pelvic vertex discard count must match pre-fix Seam D identically", spreadLegacy.pelvicVertsDiscarded, spreadFixed.pelvicVertsDiscarded)
+        assertEquals("Spread pose pelvic fragment-sample discard count must match pre-fix Seam D identically", spreadLegacy.pelvicTriSamplesDiscarded, spreadFixed.pelvicTriSamplesDiscarded)
+        assertEquals("Spread pose must discard 0 leg vertices", 0, spreadFixed.legVertsDiscarded)
+        assertEquals("Spread pose must discard 0 arm vertices", 0, spreadFixed.armVertsDiscarded)
+
+        // 2. Isolated comparison on the frozen initial peak squeeze (legSpread = -0.84, kneeShift = -1.12 on both sides)
+        val initialSqueezeState = spreadState.copy(
+            leftLegSpread = -0.84f,
+            rightLegSpread = -0.84f,
+            leftKneeShift = -1.12f,
+            rightKneeShift = -1.12f,
+            betaSmoothBodyHoleCutoff = true
+        )
+        scene.update(initialSqueezeState, includeLithotomyBody = true)
+        val initLegacyOn = evaluateSceneSeamD(useBindPoseFix = false, betaSmoothBodyHoleCutoff = true)
+        val initLegacyOff = evaluateSceneSeamD(useBindPoseFix = false, betaSmoothBodyHoleCutoff = false)
+        val initFixedOn = evaluateSceneSeamD(useBindPoseFix = true, betaSmoothBodyHoleCutoff = true)
+
+        println(
+            "SEAM_D_DIAG initialSqueeze(-0.84/-1.12) " +
+                "legacyOn(legVerts=${initLegacyOn.legVertsDiscarded}, legSamples=${initLegacyOn.legTriSamplesDiscarded}, pelvicVerts=${initLegacyOn.pelvicVertsDiscarded}) " +
+                "legacyOff(legVerts=${initLegacyOff.legVertsDiscarded}) " +
+                "fixedOn(legVerts=${initFixedOn.legVertsDiscarded}, legSamples=${initFixedOn.legTriSamplesDiscarded}, pelvicVerts=${initFixedOn.pelvicVertsDiscarded}, pelvicSamples=${initFixedOn.pelvicTriSamplesDiscarded})"
+        )
+
+        // Confirm isolated root cause: posed Seam D ON falsely punched a hole through the squeezed thigh; OFF did not
+        assertTrue(
+            "Isolated pre-fix check: legacy posed Seam D ON must reproduce thigh cutout on initial squeeze (got ${initLegacyOn.legVertsDiscarded} verts, ${initLegacyOn.legTriSamplesDiscarded} samples)",
+            initLegacyOn.legVertsDiscarded > 0 && initLegacyOn.legTriSamplesDiscarded > 0
+        )
+        assertEquals("Isolated pre-fix check: Seam D OFF discards 0 thigh vertices", 0, initLegacyOff.legVertsDiscarded)
+        // Confirm bind-pose fix completely eliminates thigh cutout (including groin bridge triangles) while keeping pelvic opening intact
+        assertEquals("Fixed bind-pose Seam D ON must discard 0 thigh vertices on initial squeeze", 0, initFixedOn.legVertsDiscarded)
+        assertEquals("Fixed bind-pose Seam D ON must discard 0 thigh/bridge triangle samples on initial squeeze", 0, initFixedOn.legTriSamplesDiscarded)
+        assertEquals("Fixed bind-pose Seam D ON must discard 0 arm vertices on initial squeeze", 0, initFixedOn.armVertsDiscarded)
+        assertEquals("Fixed bind-pose Seam D ON must preserve exact pelvic opening during initial squeeze", restFixed.pelvicVertsDiscarded, initFixedOn.pelvicVertsDiscarded)
+        assertEquals("Fixed bind-pose Seam D ON must preserve exact pelvic fragment samples during initial squeeze", restFixed.pelvicTriSamplesDiscarded, initFixedOn.pelvicTriSamplesDiscarded)
+
+        // 3. Isolated comparison on later asymmetric squeezes from buildLaterPeakLegPulses across multiple seeds
+        var anyLaterPulseReproducedLegacyBug = false
+        for (seed in longArrayOf(101L, 2024L, 98765L)) {
+            val pulses = com.example.ui.components.buildLaterPeakLegPulses(kotlin.random.Random(seed))
+            for ((idx, pulse) in pulses.withIndex()) {
+                scene.update(
+                    spreadState.copy(
+                        leftLegSpread = pulse.closeSpreadL,
+                        rightLegSpread = pulse.closeSpreadR,
+                        leftKneeShift = pulse.closeKneeL,
+                        rightKneeShift = pulse.closeKneeR
+                    ),
+                    includeLithotomyBody = true
+                )
+                val legLegacy = evaluateSceneSeamD(useBindPoseFix = false, betaSmoothBodyHoleCutoff = true)
+                val legFixed = evaluateSceneSeamD(useBindPoseFix = true, betaSmoothBodyHoleCutoff = true)
+                if (legLegacy.legVertsDiscarded > 0) anyLaterPulseReproducedLegacyBug = true
+                if (pulse.isStrongSurge && seed == 101L) {
+                    println(
+                        "SEAM_D_DIAG laterAsymSurge(seed=$seed,idx=$idx,sp=${pulse.closeSpreadL}/${pulse.closeSpreadR},kn=${pulse.closeKneeL}/${pulse.closeKneeR}) " +
+                            "legacyOn(legVerts=${legLegacy.legVertsDiscarded},legSamples=${legLegacy.legTriSamplesDiscarded}) " +
+                            "fixedOn(legVerts=${legFixed.legVertsDiscarded},legSamples=${legFixed.legTriSamplesDiscarded})"
+                    )
+                }
+                assertEquals("Fixed Seam D must discard 0 thigh verts on later pulse seed=$seed idx=$idx", 0, legFixed.legVertsDiscarded)
+                assertEquals("Fixed Seam D must discard 0 thigh/bridge triangle samples on later pulse seed=$seed idx=$idx", 0, legFixed.legTriSamplesDiscarded)
+                assertEquals("Fixed Seam D must preserve exact pelvic opening on later pulse seed=$seed idx=$idx", restFixed.pelvicVertsDiscarded, legFixed.pelvicVertsDiscarded)
+            }
+        }
+        assertTrue("Isolated pre-fix check: later asymmetric strong squeezes must also trigger legacy posed Seam D cutout", anyLaterPulseReproducedLegacyBug)
+
+        // 4. Verify bind-pose Seam D buffer stayed bitwise immutable across all leg/arm/spread poses (zero per-frame mutation/upload)
+        assertEquals("Posing legs/arms must NOT increment blossomBodyBindHoleVersion", restVersionBeforePosing, scene.blossomBodyBindHoleVersion)
+        assertTrue("Posing legs/arms must NOT mutate blossomBodyBindHoleData", restBindSnapshot.contentEquals(scene.blossomBodyBindHoleData))
+
+        // 5. Verify toggling pelvis beta geometry while legs are squeezed keeps thighs 100% opaque & pelvic rim synced
+        scene.update(initialSqueezeState.copy(betaSmoothVulvaSeam = false), includeLithotomyBody = true)
+        val squeezedToggleOff = evaluateSceneSeamD(useBindPoseFix = true, betaSmoothBodyHoleCutoff = true)
+        assertEquals("Toggling betaSmoothVulvaSeam OFF while squeezed must still discard 0 thigh verts", 0, squeezedToggleOff.legVertsDiscarded)
+        assertEquals("Toggling betaSmoothVulvaSeam OFF while squeezed must still discard 0 thigh/bridge samples", 0, squeezedToggleOff.legTriSamplesDiscarded)
+        scene.update(initialSqueezeState, includeLithotomyBody = true)
+        val squeezedToggleRestored = evaluateSceneSeamD(useBindPoseFix = true, betaSmoothBodyHoleCutoff = true)
+        assertEquals("Restoring betaSmoothVulvaSeam ON while squeezed must keep 0 thigh verts discarded", 0, squeezedToggleRestored.legVertsDiscarded)
+        assertEquals("Restoring betaSmoothVulvaSeam ON while squeezed must restore exact pelvic opening", restFixed.pelvicVertsDiscarded, squeezedToggleRestored.pelvicVertsDiscarded)
+    }
+
     /**
      * Guards against reversed OpenGL triangle winding (which triggers `!gl_FrontFacing` normal flip
      * in the fragment shader and turns meshes dark/inverted). Verifies that > 95% of non-degenerate
