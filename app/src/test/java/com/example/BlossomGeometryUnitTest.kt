@@ -3801,9 +3801,12 @@ class BlossomGeometryUnitTest {
                     "Slam-shut toes ($minRightToeX) must draw dramatically closer than manual -0.30f ($manualMinToeX)",
                     minRightToeX < manualMinToeX - 0.45f
                 )
+                // v29 3D pelvic collar guard frees the forward upper-inner thigh (y ~ -1.2) so rigid hip
+                // adduction already draws it naturally to ~0.19; adding kneeShift must still close >65% of
+                // the remaining gap (> 0.15 units) flush to the midline contact barrier without crossing 0.
                 assertTrue(
                     "Thigh-squeeze slam knee X ($squeezedKneeX) must press much closer than rigid spread alone ($rigidSlamKneeX) without crossing midline",
-                    squeezedKneeX > 0.02f && squeezedKneeX < 0.14f && squeezedKneeX < rigidSlamKneeX - 0.25f
+                    squeezedKneeX > 0.02f && squeezedKneeX < 0.14f && squeezedKneeX < rigidSlamKneeX - 0.15f && squeezedKneeX < rigidSlamKneeX * 0.35f
                 )
             }
         }
@@ -4616,31 +4619,27 @@ class BlossomGeometryUnitTest {
 
     @Test
     fun v27VisualRealismToggleDefaultsAndSessionStateMemory() {
-        // Baseline VulvaDeformationState keeps all 5 v27.0 toggles OFF by default for test compatibility
+        // Baseline VulvaDeformationState keeps all active v27.0 toggles OFF by default for test compatibility
         val baseline = VulvaDeformationState()
         assertFalse(baseline.betaRealismLayeredHair)
-        assertFalse(baseline.betaRealismSkinDetail)
         assertFalse(baseline.betaRealismEyesAndLashes)
         assertFalse(baseline.betaRealismContactShadows)
         assertFalse(baseline.betaRealismDynamicCreases)
 
-        // Interactive BlossomViewportSessionState keeps all 5 v27.0 visual realism upgrades OFF by default
+        // Interactive BlossomViewportSessionState keeps all active v27.0 visual realism upgrades OFF by default
         val session = com.example.ui.components.BlossomViewportSessionState()
         assertFalse(session.betaRealismLayeredHair)
-        assertFalse(session.betaRealismSkinDetail)
         assertFalse(session.betaRealismEyesAndLashes)
         assertFalse(session.betaRealismContactShadows)
         assertFalse(session.betaRealismDynamicCreases)
 
-        // Enabling each toggle and calling disableAllBetaToggles() cleanly disables all 5 v27.0 toggles
+        // Enabling each toggle and calling disableAllBetaToggles() cleanly disables all active v27.0 toggles
         session.betaRealismLayeredHair = true
-        session.betaRealismSkinDetail = true
         session.betaRealismEyesAndLashes = true
         session.betaRealismContactShadows = true
         session.betaRealismDynamicCreases = true
         session.disableAllBetaToggles()
         assertFalse(session.betaRealismLayeredHair)
-        assertFalse(session.betaRealismSkinDetail)
         assertFalse(session.betaRealismEyesAndLashes)
         assertFalse(session.betaRealismContactShadows)
         assertFalse(session.betaRealismDynamicCreases)
@@ -4778,29 +4777,340 @@ class BlossomGeometryUnitTest {
         val baseline = VulvaDeformationState()
         assertFalse(baseline.betaV3HoodMonsBlend)
         assertEquals(0.75f, baseline.betaV3HoodMonsStrength, 1e-6f)
+        assertFalse(baseline.betaV3HoodMonsUpperBlend)
+        assertEquals(0.75f, baseline.betaV3HoodMonsUpperStrength, 1e-6f)
         assertFalse(baseline.betaRealismFacialMicro)
-        assertFalse(baseline.betaRealismStudioLighting)
         assertFalse(baseline.betaRealismSurfaceMicro)
 
         val session = com.example.ui.components.BlossomViewportSessionState()
         assertFalse(session.betaV3HoodMonsBlend)
         assertEquals(0.75f, session.betaV3HoodMonsStrength, 1e-6f)
+        assertFalse(session.betaV3HoodMonsUpperBlend)
+        assertEquals(0.75f, session.betaV3HoodMonsUpperStrength, 1e-6f)
         assertFalse(session.betaRealismFacialMicro)
-        assertFalse(session.betaRealismStudioLighting)
         assertFalse(session.betaRealismSurfaceMicro)
 
         session.betaV3HoodMonsBlend = true
         session.betaV3HoodMonsStrength = 0.42f
+        session.betaV3HoodMonsUpperBlend = true
+        session.betaV3HoodMonsUpperStrength = 0.63f
         session.betaRealismFacialMicro = true
-        session.betaRealismStudioLighting = true
         session.betaRealismSurfaceMicro = true
 
         session.disableAllBetaToggles()
         assertFalse(session.betaV3HoodMonsBlend)
         assertEquals("Option #8 slider must preserve last value across disableAllBetaToggles", 0.42f, session.betaV3HoodMonsStrength, 1e-6f)
+        assertFalse(session.betaV3HoodMonsUpperBlend)
+        assertEquals("Option #9 slider must preserve last value across disableAllBetaToggles", 0.63f, session.betaV3HoodMonsUpperStrength, 1e-6f)
         assertFalse(session.betaRealismFacialMicro)
-        assertFalse(session.betaRealismStudioLighting)
         assertFalse(session.betaRealismSurfaceMicro)
+    }
+
+    @Test
+    fun v29Option9UpperHoodMonsBlendHarmonizesUpperPatchAndShouldersAndTracksRetraction() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+
+        fun nearestVertexIndex(mesh: DynamicGlMesh, tx: Float, ty: Float): Int {
+            val d = mesh.vertexData
+            var bestIdx = 0
+            var bestDist2 = Float.MAX_VALUE
+            for (i in 0 until mesh.vertexCount) {
+                val b = i * stride
+                val dx = d[b] - tx
+                val dy = d[b + 1] - ty
+                val d2 = dx * dx + dy * dy
+                if (d2 < bestDist2) {
+                    bestDist2 = d2
+                    bestIdx = i
+                }
+            }
+            return bestIdx
+        }
+
+        // Test with Option #8 ON at 75% (matching user's on-device scenario where the upper patch remained)
+        val baseWithOpt8 = VulvaDeformationState(
+            betaV3HoodMonsBlend = true,
+            betaV3HoodMonsStrength = 0.75f,
+            betaV3HoodMonsUpperBlend = false,
+            betaV3HoodMonsUpperStrength = 0.75f
+        )
+        scene.update(baseWithOpt8, includeLithotomyBody = true)
+        val basePatch = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+        val baseArch = scene.labiaHoodArchMesh.vertexData.copyOf()
+        val baseGlans = scene.glansMesh.vertexData.copyOf()
+
+        // Option #9 ON at 0% strength must remain bit-identical to Option #9 OFF
+        scene.update(baseWithOpt8.copy(betaV3HoodMonsUpperBlend = true, betaV3HoodMonsUpperStrength = 0f), includeLithotomyBody = true)
+        assertTrue("Option #9 at 0% must be bit-identical on patch", basePatch.contentEquals(scene.blossomVulvaPatchMesh.vertexData))
+        assertTrue("Option #9 at 0% must be bit-identical on arch", baseArch.contentEquals(scene.labiaHoodArchMesh.vertexData))
+
+        val centerIdx = nearestVertexIndex(scene.blossomVulvaPatchMesh, 0f, 0.36f)
+        val leftShoulderIdx = nearestVertexIndex(scene.blossomVulvaPatchMesh, -0.09f, 0.34f)
+        val rightShoulderIdx = nearestVertexIndex(scene.blossomVulvaPatchMesh, 0.09f, 0.34f)
+        val vestIdx = nearestVertexIndex(scene.blossomVulvaPatchMesh, 0f, 0.05f)
+
+        // Probe at 50% and 100% strength: center & both shoulders must drop monotonically in mucosa/pigment
+        scene.update(baseWithOpt8.copy(betaV3HoodMonsUpperBlend = true, betaV3HoodMonsUpperStrength = 0.50f), includeLithotomyBody = true)
+        val patch50 = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+        scene.update(baseWithOpt8.copy(betaV3HoodMonsUpperBlend = true, betaV3HoodMonsUpperStrength = 1.00f), includeLithotomyBody = true)
+        val patch100 = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+
+        assertValidMesh(scene.blossomVulvaPatchMesh)
+        assertValidMesh(scene.labiaHoodArchMesh)
+        assertValidMesh(scene.glansMesh)
+        assertTrue("Option #9 must leave clitoral glans bit-identical", baseGlans.contentEquals(scene.glansMesh.vertexData))
+
+        for ((label, idx) in listOf("center" to centerIdx, "leftShoulder" to leftShoulderIdx, "rightShoulder" to rightShoulderIdx)) {
+            val b = idx * stride
+            val m0 = basePatch[b + 6]
+            val m50 = patch50[b + 6]
+            val m100 = patch100[b + 6]
+            assertTrue(
+                "Option #9 must smoothly reduce upper patch $label mucosa toward mons skin (m0=$m0 -> m50=$m50 -> m100=$m100)",
+                m100 < m50 - 0.04f && m50 < m0 - 0.04f
+            )
+            // Preserve micro-relief geometry (z), wetness (b+7), and fold AO (b+8)
+            assertEquals("Option #9 must preserve $label Z relief", basePatch[b + 2], patch100[b + 2], 1e-5f)
+            assertEquals("Option #9 must preserve $label wetness", basePatch[b + 7], patch100[b + 7], 1e-5f)
+            assertEquals("Option #9 must preserve $label AO shadow", basePatch[b + 8], patch100[b + 8], 1e-5f)
+        }
+
+        // Vestibular floor below the glans must remain untouched
+        val vb = vestIdx * stride
+        assertEquals("Option #9 must preserve vestibular floor mucosa", basePatch[vb + 6], patch100[vb + 6], 1e-4f)
+
+        // Inner preputial rim (u < 0.14 on labiaHoodArchMesh) must remain preserved
+        val cols = scene.archCols
+        val midRow = scene.archRows / 2
+        val innerRimBase = (midRow * cols + 1) * stride
+        assertEquals(
+            "Option #9 must preserve inner preputial arch rim mucosa",
+            baseArch[innerRimBase + 6],
+            scene.labiaHoodArchMesh.vertexData[innerRimBase + 6],
+            0.02f
+        )
+
+        // Landmark tracking: with hoodRetract = 1.0f, the upper blend band shifts upward with the retracted hood
+        val retractBase = VulvaDeformationState(hoodRetract = 1.0f, betaV3HoodMonsUpperBlend = false)
+        scene.update(retractBase, includeLithotomyBody = true)
+        val retractPatch0 = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+        scene.update(retractBase.copy(betaV3HoodMonsUpperBlend = true, betaV3HoodMonsUpperStrength = 1.0f), includeLithotomyBody = true)
+        val retractPatch100 = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+        val retractApexIdx = nearestVertexIndex(scene.blossomVulvaPatchMesh, 0f, 0.44f)
+        val rb = retractApexIdx * stride
+        assertTrue(
+            "Option #9 must track hoodRetract = 1.0f cleanly (drop > 0.15 at y=0.44), got ${retractPatch0[rb + 6] - retractPatch100[rb + 6]}",
+            retractPatch0[rb + 6] - retractPatch100[rb + 6] > 0.15f
+        )
+
+        // Reverting back OFF restores exact baseline
+        scene.update(baseWithOpt8, includeLithotomyBody = true)
+        assertTrue("Turning Option #9 OFF must restore exact baseline patch", basePatch.contentEquals(scene.blossomVulvaPatchMesh.vertexData))
+        assertTrue("Turning Option #9 OFF must restore exact baseline arch", baseArch.contentEquals(scene.labiaHoodArchMesh.vertexData))
+    }
+
+    @Test
+    fun v29UpperInnerThighSqueezeEliminatesBilateralFoldoverAndPreservesPelvicCollar() {
+        val scene = VulvaAnatomySceneMesh()
+        val body = scene.blossomBodyMesh
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val bindHole = scene.blossomBodyBindHoleData
+
+        // Snapshot bind-pose vertices & face normals at neutral rest
+        scene.update(VulvaDeformationState(), includeLithotomyBody = true)
+        val restVerts = body.vertexData.copyOf()
+
+        fun nearestBindVertex(tx: Float, ty: Float, tz: Float): Int {
+            var bestIdx = 0
+            var bestD2 = Float.MAX_VALUE
+            for (i in 0 until body.vertexCount) {
+                val b = i * stride
+                val dx = restVerts[b] - tx
+                val dy = restVerts[b + 1] - ty
+                val dz = restVerts[b + 2] - tz
+                val d2 = dx * dx + dy * dy + dz * dz
+                if (d2 < bestD2) {
+                    bestD2 = d2
+                    bestIdx = i
+                }
+            }
+            return bestIdx
+        }
+
+        val rightUpperInnerThighIdx = nearestBindVertex(0.808f, -0.410f, 0.959f)
+        val leftUpperInnerThighIdx = nearestBindVertex(-0.808f, -0.410f, 0.959f)
+
+        val squeezePoses = listOf(
+            "hardFirstSqueeze" to VulvaDeformationState(
+                selfSpreadPose = 1.0f,
+                leftLegSpread = -0.84f,
+                rightLegSpread = -0.84f,
+                leftKneeShift = -1.12f,
+                rightKneeShift = -1.12f
+            ),
+            "asymmetricPeakSurge" to VulvaDeformationState(
+                selfSpreadPose = 1.0f,
+                leftLegSpread = -0.78f,
+                rightLegSpread = -0.25f,
+                leftKneeShift = -0.95f,
+                rightKneeShift = -0.30f
+            )
+        )
+
+        val idxBuf = body.indexBuffer
+        for ((poseName, pose) in squeezePoses) {
+            scene.update(pose, includeLithotomyBody = true)
+            assertValidMesh(body)
+            assertOutwardWindingMatchesNormals("blossomBodyMesh($poseName)", body)
+
+            val posed = body.vertexData
+
+            // 1) Forward upper-inner-thigh vertices near (±0.808, -0.410, 0.959) must move inward freely (NOT pinned!)
+            val rMoveX = restVerts[rightUpperInnerThighIdx * stride] - posed[rightUpperInnerThighIdx * stride]
+            val lMoveX = posed[leftUpperInnerThighIdx * stride] - restVerts[leftUpperInnerThighIdx * stride]
+            assertTrue(
+                "$poseName: left forward upper-inner-thigh vertex must move inward freely (> 0.15), got $lMoveX",
+                lMoveX > 0.15f
+            )
+            if (pose.rightLegSpread < -0.5f) {
+                assertTrue(
+                    "$poseName: right forward upper-inner-thigh vertex must move inward freely (> 0.15), got $rMoveX",
+                    rMoveX > 0.15f
+                )
+            }
+
+            // 2) Actual anterior pelvic collar vertices (ovalR <= 1.04, z <= 0.34) must remain 100% pinned
+            var maxCollarDisp = 0f
+            for (i in 0 until body.vertexCount) {
+                val ox = bindHole[i * 4]
+                val oy = bindHole[i * 4 + 1]
+                val bz = bindHole[i * 4 + 2]
+                val ovalR = sqrt(ox * ox + oy * oy)
+                if (ovalR <= 1.02f && bz <= 0.34f) {
+                    val b = i * stride
+                    val disp = sqrt(
+                        (posed[b] - restVerts[b]).let { it * it } +
+                            (posed[b + 1] - restVerts[b + 1]).let { it * it } +
+                            (posed[b + 2] - restVerts[b + 2]).let { it * it }
+                    )
+                    if (disp > maxCollarDisp) maxCollarDisp = disp
+                }
+            }
+            assertTrue(
+                "$poseName: anterior pelvic collar must remain rigidly pinned (maxDisp < 1e-4), got $maxCollarDisp",
+                maxCollarDisp < 1e-4f
+            )
+
+            // 3) Check every triangle in the bilateral upper-inner-thigh zone for foldover / normal inversion
+            idxBuf.position(0)
+            var checkedTris = 0
+            var invertedTris = 0
+            var t = 0
+            while (t + 2 < body.indexCount) {
+                val i0 = idxBuf.get(t).toInt() and 0xFFFF
+                val i1 = idxBuf.get(t + 1).toInt() and 0xFFFF
+                val i2 = idxBuf.get(t + 2).toInt() and 0xFFFF
+                t += 3
+
+                val b0 = i0 * stride; val b1 = i1 * stride; val b2 = i2 * stride
+                val cx = (restVerts[b0] + restVerts[b1] + restVerts[b2]) / 3f
+                val cy = (restVerts[b0 + 1] + restVerts[b1 + 1] + restVerts[b2 + 1]) / 3f
+                val cz = (restVerts[b0 + 2] + restVerts[b1 + 2] + restVerts[b2 + 2]) / 3f
+                if (abs(cx) in 0.45f..1.35f && cy in -1.25f..0.05f && cz > 0.35f) {
+                    // Bind-pose face normal
+                    val re1x = restVerts[b1] - restVerts[b0]; val re1y = restVerts[b1 + 1] - restVerts[b0 + 1]; val re1z = restVerts[b1 + 2] - restVerts[b0 + 2]
+                    val re2x = restVerts[b2] - restVerts[b0]; val re2y = restVerts[b2 + 1] - restVerts[b0 + 1]; val re2z = restVerts[b2 + 2] - restVerts[b0 + 2]
+                    val rnx = re1y * re2z - re1z * re2y
+                    val rny = re1z * re2x - re1x * re2z
+                    val rnz = re1x * re2y - re1y * re2x
+                    val rLen = sqrt(rnx * rnx + rny * rny + rnz * rnz)
+                    if (rLen < 1e-7f) continue
+
+                    // Posed face normal
+                    val pe1x = posed[b1] - posed[b0]; val pe1y = posed[b1 + 1] - posed[b0 + 1]; val pe1z = posed[b1 + 2] - posed[b0 + 2]
+                    val pe2x = posed[b2] - posed[b0]; val pe2y = posed[b2 + 1] - posed[b0 + 1]; val pe2z = posed[b2 + 2] - posed[b0 + 2]
+                    val pnx = pe1y * pe2z - pe1z * pe2y
+                    val pny = pe1z * pe2x - pe1x * pe2z
+                    val pnz = pe1x * pe2y - pe1y * pe2x
+                    val pLen = sqrt(pnx * pnx + pny * pny + pnz * pnz)
+
+                    checkedTris++
+                    if (pLen < 1e-7f || (rnx * pnx + rny * pny + rnz * pnz) / (rLen * pLen) <= 0.05f) {
+                        invertedTris++
+                    }
+                }
+            }
+            assertTrue("$poseName: expected upper-inner-thigh triangles > 50, got $checkedTris", checkedTris > 50)
+            assertEquals(
+                "$poseName: upper-inner-thigh must have ZERO folded-over / inverted triangles (found $invertedTris of $checkedTris)",
+                0,
+                invertedTris
+            )
+        }
+    }
+
+    @Test
+    fun v29InverseHeadMatrixLocksFacialAndHairRestCoordinatesAcrossHeadPoses() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        scene.update(VulvaDeformationState(), includeLithotomyBody = true)
+
+        val restHead = scene.blossomHeadMesh.vertexData.copyOf()
+        val restHair = scene.blossomHairMesh.vertexData.copyOf()
+        val restWisps = scene.blossomHairWispsMesh.vertexData.copyOf()
+        val restEyes = scene.blossomEyesMesh.vertexData.copyOf()
+
+        val testPoses = listOf(
+            Triple(0.85f, -0.45f, 0.25f),
+            Triple(-0.92f, 0.50f, -0.30f),
+            Triple(0.35f, 0.15f, -0.18f)
+        )
+        val invMat = FloatArray(16)
+
+        fun maxReconstructionError(
+            restData: FloatArray,
+            posedData: FloatArray,
+            vertCount: Int,
+            minRestY: Float = -100f
+        ): Float {
+            var maxErr = 0f
+            for (i in 0 until vertCount) {
+                val b = i * stride
+                if (restData[b + 1] < minRestY) continue
+                val px = posedData[b]
+                val py = posedData[b + 1]
+                val pz = posedData[b + 2]
+                val rx = invMat[0] * px + invMat[4] * py + invMat[8] * pz + invMat[12]
+                val ry = invMat[1] * px + invMat[5] * py + invMat[9] * pz + invMat[13]
+                val rz = invMat[2] * px + invMat[6] * py + invMat[10] * pz + invMat[14]
+                val err = sqrt(
+                    (rx - restData[b]).let { it * it } +
+                        (ry - restData[b + 1]).let { it * it } +
+                        (rz - restData[b + 2]).let { it * it }
+                )
+                if (err > maxErr) maxErr = err
+            }
+            return maxErr
+        }
+
+        for ((turn, pitch, roll) in testPoses) {
+            scene.update(
+                VulvaDeformationState(headTurn = turn, headPitch = pitch, headRollOffset = roll),
+                includeLithotomyBody = true
+            )
+            BlossomUpperBodyBuilder.computeInverseHeadMatrix(turn, pitch, roll, invMat)
+
+            val headErr = maxReconstructionError(restHead, scene.blossomHeadMesh.vertexData, scene.blossomHeadMesh.vertexCount, minRestY = 5.82f)
+            val hairErr = maxReconstructionError(restHair, scene.blossomHairMesh.vertexData, scene.blossomHairMesh.vertexCount, minRestY = 5.82f)
+            val wispsErr = maxReconstructionError(restWisps, scene.blossomHairWispsMesh.vertexData, scene.blossomHairWispsMesh.vertexCount, minRestY = 5.82f)
+            val eyesErr = maxReconstructionError(restEyes, scene.blossomEyesMesh.vertexData, scene.blossomEyesMesh.vertexCount)
+
+            assertTrue("Head face rest-space inverse error must be < 1e-3, got $headErr", headErr < 1e-3f)
+            assertTrue("Hair rest-space inverse error must be < 1e-3, got $hairErr", hairErr < 1e-3f)
+            assertTrue("Hair wisps rest-space inverse error must be < 1e-3, got $wispsErr", wispsErr < 1e-3f)
+            assertTrue("Eyes rest-space inverse error must be < 1e-3, got $eyesErr", eyesErr < 1e-3f)
+        }
     }
 
     /**

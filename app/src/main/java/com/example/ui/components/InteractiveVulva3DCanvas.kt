@@ -778,6 +778,8 @@ fun InteractiveVulva3DCanvas(
     var betaV3MedialRootStrength by sessionState.betaV3MedialRootStrengthState
     var betaV3HoodMonsBlend by sessionState.betaV3HoodMonsBlendState
     var betaV3HoodMonsStrength by sessionState.betaV3HoodMonsStrengthState
+    var betaV3HoodMonsUpperBlend by sessionState.betaV3HoodMonsUpperBlendState
+    var betaV3HoodMonsUpperStrength by sessionState.betaV3HoodMonsUpperStrengthState
     var betaVulvaElasticityEnabled by sessionState.betaVulvaElasticityEnabledState
     var betaVulvaElasticity by sessionState.betaVulvaElasticityState
     var betaBreastSizeBoostEnabled by sessionState.betaBreastSizeBoostEnabledState
@@ -798,14 +800,12 @@ fun InteractiveVulva3DCanvas(
     var betaLife2BreathFaceCoupling by sessionState.betaLife2BreathFaceCouplingState
     var betaLife2LivingWarmth by sessionState.betaLife2LivingWarmthState
     var betaLife2ShowHeartRate by sessionState.betaLife2ShowHeartRateState
-    // v27.0–v28.0 Photorealistic Visual Realism Beta toggles (visible in Life+ tab even when Extra Beta Options is OFF)
+    // v27.0–v29.0 Photorealistic Visual Realism Beta toggles (visible in Life+ tab even when Extra Beta Options is OFF)
     var betaRealismLayeredHair by sessionState.betaRealismLayeredHairState
-    var betaRealismSkinDetail by sessionState.betaRealismSkinDetailState
     var betaRealismEyesAndLashes by sessionState.betaRealismEyesAndLashesState
     var betaRealismContactShadows by sessionState.betaRealismContactShadowsState
     var betaRealismDynamicCreases by sessionState.betaRealismDynamicCreasesState
     var betaRealismFacialMicro by sessionState.betaRealismFacialMicroState
-    var betaRealismStudioLighting by sessionState.betaRealismStudioLightingState
     var betaRealismSurfaceMicro by sessionState.betaRealismSurfaceMicroState
 
     var activePresetOrdinal by sessionState.activePresetOrdinalState
@@ -2471,6 +2471,8 @@ fun InteractiveVulva3DCanvas(
         betaV3MedialRootStrength = betaV3MedialRootStrength,
         betaV3HoodMonsBlend = betaV3HoodMonsBlend,
         betaV3HoodMonsStrength = betaV3HoodMonsStrength,
+        betaV3HoodMonsUpperBlend = betaV3HoodMonsUpperBlend,
+        betaV3HoodMonsUpperStrength = betaV3HoodMonsUpperStrength,
         betaBreastSizeBoost = activeBreastSizeBoost,
         eyeGazeX = (eyeGazeX.value + anticipationGazeX.value).coerceIn(-1f, 1f),
         eyeGazeY = (eyeGazeY.value + anticipationGazeY.value).coerceIn(-1f, 1f),
@@ -2496,12 +2498,10 @@ fun InteractiveVulva3DCanvas(
         rightFingerCurl = peakFingerCurlR.value,
         mouthOpen = peakMouthOpen.value,
         betaRealismLayeredHair = betaRealismLayeredHair,
-        betaRealismSkinDetail = betaRealismSkinDetail,
         betaRealismEyesAndLashes = betaRealismEyesAndLashes,
         betaRealismContactShadows = betaRealismContactShadows,
         betaRealismDynamicCreases = betaRealismDynamicCreases,
         betaRealismFacialMicro = betaRealismFacialMicro,
-        betaRealismStudioLighting = betaRealismStudioLighting,
         betaRealismSurfaceMicro = betaRealismSurfaceMicro
     )
     val currentCam = VulvaCamera3D(
@@ -3304,6 +3304,7 @@ fun InteractiveVulva3DCanvas(
                     betaV3IntricateLabiaFolds,
                     betaV3MedialRootContinuity,
                     betaV3HoodMonsBlend,
+                    betaV3HoodMonsUpperBlend,
                     betaVulvaElasticityEnabled && betaVulvaElasticity > 0.005f,
                     betaBreastSizeBoostEnabled && betaBreastSizeBoost > 0.005f
                 ).count { it }
@@ -3317,12 +3318,10 @@ fun InteractiveVulva3DCanvas(
                 ).count { it }
                 val activeVisualRealismCount = listOf(
                     betaRealismLayeredHair,
-                    betaRealismSkinDetail,
                     betaRealismEyesAndLashes,
                     betaRealismContactShadows,
                     betaRealismDynamicCreases,
                     betaRealismFacialMicro,
-                    betaRealismStudioLighting,
                     betaRealismSurfaceMicro
                 ).count { it }
                 val activeLifelike2BetaCount = listOf(
@@ -3338,7 +3337,7 @@ fun InteractiveVulva3DCanvas(
                 val displayedVulvaBetaCount = if (showExtraBetaOptions) {
                     activeVulvaBetaCount
                 } else {
-                    if (betaV3HoodMonsBlend) 1 else 0
+                    listOf(betaV3HoodMonsBlend, betaV3HoodMonsUpperBlend).count { it }
                 }
                 val displayedLifelikeBetaCount = if (showExtraBetaOptions) activeLifelikeBetaCount else 0
                 val displayedLifelike2BetaCount = if (showExtraBetaOptions) {
@@ -3855,6 +3854,29 @@ fun InteractiveVulva3DCanvas(
                                             onValueChange = { betaV3HoodMonsStrength = it }
                                         )
                                     }
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    VulvaBetaToggleRow(
+                                        title = "9. Upper hood–mons color blend",
+                                        subtitle = "Blends the triangular upper hood patch & shoulders into adjacent mons skin while preserving the glans",
+                                        checked = betaV3HoodMonsUpperBlend,
+                                        tag = "toggle_beta_v3_hood_mons_upper_blend",
+                                        compact = true,
+                                        onToggle = {
+                                            betaV3HoodMonsUpperBlend = !betaV3HoodMonsUpperBlend
+                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
+                                        }
+                                    )
+                                    AnimatedVisibility(visible = betaV3HoodMonsUpperBlend) {
+                                        BetaStrengthSliderRow(
+                                            label = "Upper hood–mons blend strength",
+                                            value = betaV3HoodMonsUpperStrength,
+                                            tag = "slider_beta_v3_hood_mons_upper_strength",
+                                            onValueChange = { betaV3HoodMonsUpperStrength = it }
+                                        )
+                                    }
                                 } else if (betaMenuTab == 1) {
                                     if (!showExtraBetaOptions) {
                                         Spacer(modifier = Modifier.height(64.dp))
@@ -4067,34 +4089,19 @@ fun InteractiveVulva3DCanvas(
                                     )
                                     }
                                     Text(
-                                        text = "Visual realism (v27–v28 Beta)",
+                                        text = "Visual realism (v27–v29 Beta)",
                                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, lineHeight = 11.sp),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                     VulvaBetaToggleRow(
                                         title = "Layered hair & Kajiya-Kay",
-                                        subtitle = "62 sculpted multi-tier locks, natural scalp part, dual-lobe sheen & backlit flyaways",
+                                        subtitle = "62 head-locked multi-tier locks, natural scalp part, soft sheen & flyaways",
                                         checked = betaRealismLayeredHair,
                                         tag = "toggle_beta_realism_layered_hair",
                                         compact = true,
                                         onToggle = {
                                             betaRealismLayeredHair = !betaRealismLayeredHair
-                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
-                                        }
-                                    )
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 12.dp),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
-                                    )
-                                    VulvaBetaToggleRow(
-                                        title = "Skin micro-detail & SSS",
-                                        subtitle = "Deep hemoglobin subsurface scattering, backlit rim glow, pores & regional undertones",
-                                        checked = betaRealismSkinDetail,
-                                        tag = "toggle_beta_realism_skin_detail",
-                                        compact = true,
-                                        onToggle = {
-                                            betaRealismSkinDetail = !betaRealismSkinDetail
                                             if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
                                         }
                                     )
@@ -4149,27 +4156,12 @@ fun InteractiveVulva3DCanvas(
                                     )
                                     VulvaBetaToggleRow(
                                         title = "Lip, brow & freckle detail",
-                                        subtitle = "Vertical lip creases & hydrated pillow sheen, feathered brows & subtle freckles",
+                                        subtitle = "Head-locked subtle organic lip texture, soft feathered brows & delicate freckles",
                                         checked = betaRealismFacialMicro,
                                         tag = "toggle_beta_realism_facial_micro",
                                         compact = true,
                                         onToggle = {
                                             betaRealismFacialMicro = !betaRealismFacialMicro
-                                            if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
-                                        }
-                                    )
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 12.dp),
-                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
-                                    )
-                                    VulvaBetaToggleRow(
-                                        title = "Studio rim & cushion bounce",
-                                        subtitle = "Warm linen bounce light on undersides, cool overhead softbox & sculpting rim",
-                                        checked = betaRealismStudioLighting,
-                                        tag = "toggle_beta_realism_studio_lighting",
-                                        compact = true,
-                                        onToggle = {
-                                            betaRealismStudioLighting = !betaRealismStudioLighting
                                             if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
                                         }
                                     )

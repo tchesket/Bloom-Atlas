@@ -1530,17 +1530,18 @@ internal object BlossomUpperBodyBuilder {
                     dzFace += (upperLipVol + upperTubercle + lowerLipVol + upperVermilionRidge + lowerVermilionRidge +
                         lipPartGroove + cornerDimple + mentolabialDip) * fW
 
-                    // Natural muted lip rose tightly aligned to the sculpted vermilion border + clean skin-matched cheeks
+                    // Natural healthy muted-rose lips softly feathered at the vermilion border + clean skin-matched cheeks
                     val rawLipMask = ((exp(-((ly - upperLipY) / 0.022f).let { it * it }) +
                         exp(-((ly - lowerLipY) / 0.026f).let { it * it })) * lipSpan).coerceIn(0f, 1f)
-                    val lipColorMask = smoothStep(0.12f, 0.72f, rawLipMask)
+                    val lipColorMask = smoothStep(0.10f, 0.72f, rawLipMask)
+                    val lipCoreBoost = smoothStep(0.32f, 0.84f, rawLipMask)
                     val cheekWarmth = 0.011f * exp(-(((ax - 0.360f) / 0.175f).let { it * it } + ((ly + 0.08f) / 0.150f).let { it * it }))
 
-                    faceMucosa = (lipColorMask * 0.44f + cheekWarmth + innerCanthusMask * 0.12f).coerceIn(0f, 0.48f)
-                    faceWetness = (0.028f + lipColorMask * 0.040f).coerceIn(0.024f, 0.072f)
+                    faceMucosa = (lipColorMask * 0.56f + lipCoreBoost * 0.12f + cheekWarmth + innerCanthusMask * 0.12f).coerceIn(0f, 0.70f)
+                    faceWetness = (0.028f + lipColorMask * 0.048f + lipCoreBoost * 0.018f).coerceIn(0.024f, 0.095f)
                     val nostrilAo = exp(-(((ax - 0.054f) / 0.030f).let { it * it } + ((ly + 0.266f) / 0.025f).let { it * it })) * 0.26f
                     val alarAo = alarCreaseMask * 0.095f
-                    val lipLineAo = exp(-((ly - lipPartY) / 0.0095f).let { it * it }) * lipSpan * 0.25f
+                    val lipLineAo = exp(-((ly - lipPartY) / 0.0092f).let { it * it }) * lipSpan * 0.28f
                     val cornerAo = cornerDimpleMask * 0.12f
                     val canthusAo = innerCanthusMask * 0.11f
                     val creaseAo = exp(-((ly - (upperLidY + 0.042f)) / 0.015f).let { it * it }) * smoothStep(1.00f, 0.52f, abs(eyeU)) * 0.20f
@@ -1551,7 +1552,7 @@ internal object BlossomUpperBodyBuilder {
                     // Clean separation: brows stay in 0.08..0.54 (hair-matched) while lashes reach 0.72..0.92 (dark lashes)!
                     val browPigment = (browMask * 0.50f).coerceAtMost(0.52f)
                     val lashPigment = lashLine * 0.88f + lowerLash * 0.36f
-                    facePigment = (0.008f + max(browPigment, lashPigment) + lipColorMask * 0.06f).coerceIn(0f, 0.96f)
+                    facePigment = (0.008f + max(browPigment, lashPigment) + lipColorMask * 0.05f).coerceIn(0f, 0.96f)
                 }
 
                 // 5. Delicate Sculpted Ears on lateral temples
@@ -1728,45 +1729,46 @@ internal object BlossomUpperBodyBuilder {
 
         // Exact original clean side-swept fringe silhouette, overall shape, length & part preserved in BOTH baseline and Beta 6!
         val locks = listOf(
-            // 4 Sleek close-hugging feathered temple & curtain-bang strands curving cleanly along hairline (zero slab edges!)
-            LockSpec(floatArrayOf(0.22f, 0.86f, 0.36f), floatArrayOf(-0.16f, 0.69f, 0.60f), floatArrayOf(-0.62f, 0.22f, 0.38f), 0.145f, 0.018f, 0.18f),
-            LockSpec(floatArrayOf(0.16f, 0.88f, 0.38f), floatArrayOf(-0.32f, 0.58f, 0.54f), floatArrayOf(-0.68f, 0.02f, 0.28f), 0.140f, 0.018f, 0.14f),
-            LockSpec(floatArrayOf(0.26f, 0.85f, 0.36f), floatArrayOf(0.52f, 0.54f, 0.45f), floatArrayOf(0.68f, 0.02f, 0.28f), 0.140f, 0.018f, 0.16f),
-            LockSpec(floatArrayOf(0.10f, 0.92f, 0.30f), floatArrayOf(-0.36f, 0.72f, 0.49f), floatArrayOf(-0.70f, 0.14f, 0.26f), 0.142f, 0.019f, 0.22f),
+            // 4 Soft, naturally parted side-swept curtain bangs curving gently off the forehead into the temples
+            LockSpec(floatArrayOf(0.20f, 0.88f, 0.34f), floatArrayOf(-0.14f, 0.74f, 0.56f), floatArrayOf(-0.62f, 0.24f, 0.36f), 0.165f, 0.018f, 0.16f),
+            LockSpec(floatArrayOf(0.14f, 0.90f, 0.35f), floatArrayOf(-0.34f, 0.64f, 0.50f), floatArrayOf(-0.67f, -0.04f, 0.26f), 0.160f, 0.018f, 0.13f),
+            LockSpec(floatArrayOf(0.24f, 0.87f, 0.34f), floatArrayOf(0.50f, 0.60f, 0.44f), floatArrayOf(0.67f, -0.02f, 0.26f), 0.162f, 0.018f, 0.15f),
+            LockSpec(floatArrayOf(0.08f, 0.93f, 0.28f), floatArrayOf(-0.38f, 0.74f, 0.45f), floatArrayOf(-0.69f, 0.10f, 0.24f), 0.158f, 0.019f, 0.19f),
 
-            // 10 Smooth face-framing layered bob side locks hugging temples, cheekbones & jawline along a cohesive curved cut line
-            LockSpec(floatArrayOf(-0.34f, 0.78f, 0.30f), floatArrayOf(-0.72f, 0.16f, 0.29f), floatArrayOf(-0.70f, -0.92f, 0.15f), 0.132f, 0.028f, 0.16f),
-            LockSpec(floatArrayOf(-0.42f, 0.72f, 0.16f), floatArrayOf(-0.77f, 0.02f, 0.14f), floatArrayOf(-0.76f, -1.04f, -0.02f), 0.142f, 0.030f, 0.12f),
-            LockSpec(floatArrayOf(-0.38f, 0.76f, 0.23f), floatArrayOf(-0.74f, 0.08f, 0.22f), floatArrayOf(-0.68f, -0.96f, 0.09f), 0.124f, 0.026f, 0.22f),
-            LockSpec(floatArrayOf(-0.26f, 0.86f, 0.12f), floatArrayOf(-0.75f, 0.22f, 0.15f), floatArrayOf(-0.79f, -1.08f, -0.10f), 0.138f, 0.030f, 0.18f),
-            LockSpec(floatArrayOf(-0.46f, 0.60f, 0.02f), floatArrayOf(-0.79f, -0.14f, -0.04f), floatArrayOf(-0.82f, -1.18f, -0.22f), 0.146f, 0.032f, 0.10f),
+            // 10 Cohesive overlapping chin-length bob side curtain locks draping smoothly around temples, cheeks & jaw
+            // (wider, overlapping & gently curved inward along a unified bob silhouette — zero splayed pointy claws!)
+            LockSpec(floatArrayOf(-0.32f, 0.78f, 0.28f), floatArrayOf(-0.69f, 0.14f, 0.27f), floatArrayOf(-0.65f, -0.84f, 0.15f), 0.168f, 0.024f, 0.15f),
+            LockSpec(floatArrayOf(-0.40f, 0.72f, 0.16f), floatArrayOf(-0.74f, 0.02f, 0.14f), floatArrayOf(-0.69f, -0.94f, 0.02f), 0.178f, 0.026f, 0.12f),
+            LockSpec(floatArrayOf(-0.36f, 0.76f, 0.22f), floatArrayOf(-0.71f, 0.08f, 0.20f), floatArrayOf(-0.66f, -0.88f, 0.09f), 0.162f, 0.024f, 0.19f),
+            LockSpec(floatArrayOf(-0.26f, 0.86f, 0.10f), floatArrayOf(-0.73f, 0.20f, 0.13f), floatArrayOf(-0.72f, -0.98f, -0.06f), 0.176f, 0.026f, 0.16f),
+            LockSpec(floatArrayOf(-0.44f, 0.62f, 0.02f), floatArrayOf(-0.76f, -0.10f, -0.02f), floatArrayOf(-0.75f, -1.06f, -0.16f), 0.184f, 0.027f, 0.10f),
 
-            LockSpec(floatArrayOf(0.32f, 0.78f, 0.30f), floatArrayOf(0.72f, 0.16f, 0.29f), floatArrayOf(0.70f, -0.92f, 0.15f), 0.132f, 0.028f, 0.16f),
-            LockSpec(floatArrayOf(0.40f, 0.72f, 0.16f), floatArrayOf(0.77f, 0.02f, 0.14f), floatArrayOf(0.76f, -1.04f, -0.02f), 0.142f, 0.030f, 0.12f),
-            LockSpec(floatArrayOf(0.30f, 0.76f, 0.34f), floatArrayOf(0.68f, 0.20f, 0.34f), floatArrayOf(0.68f, -0.94f, 0.18f), 0.124f, 0.026f, 0.22f),
-            LockSpec(floatArrayOf(0.26f, 0.86f, 0.14f), floatArrayOf(0.75f, 0.22f, 0.16f), floatArrayOf(0.79f, -1.08f, -0.08f), 0.138f, 0.030f, 0.18f),
-            LockSpec(floatArrayOf(0.46f, 0.60f, 0.02f), floatArrayOf(0.79f, -0.14f, -0.04f), floatArrayOf(0.82f, -1.18f, -0.22f), 0.146f, 0.032f, 0.10f),
+            LockSpec(floatArrayOf(0.30f, 0.78f, 0.28f), floatArrayOf(0.69f, 0.14f, 0.27f), floatArrayOf(0.65f, -0.84f, 0.15f), 0.168f, 0.024f, 0.15f),
+            LockSpec(floatArrayOf(0.38f, 0.72f, 0.16f), floatArrayOf(0.74f, 0.02f, 0.14f), floatArrayOf(0.69f, -0.94f, 0.02f), 0.178f, 0.026f, 0.12f),
+            LockSpec(floatArrayOf(0.30f, 0.76f, 0.30f), floatArrayOf(0.67f, 0.16f, 0.30f), floatArrayOf(0.65f, -0.86f, 0.16f), 0.162f, 0.024f, 0.19f),
+            LockSpec(floatArrayOf(0.26f, 0.86f, 0.12f), floatArrayOf(0.73f, 0.20f, 0.14f), floatArrayOf(0.72f, -0.98f, -0.05f), 0.176f, 0.026f, 0.16f),
+            LockSpec(floatArrayOf(0.44f, 0.62f, 0.02f), floatArrayOf(0.76f, -0.10f, -0.02f), floatArrayOf(0.75f, -1.06f, -0.16f), 0.184f, 0.027f, 0.10f),
 
-            // 10 Cleanly aligned nape & pillow-draping lower bob locks tapering along an even, softly layered chin-to-nape arc
-            LockSpec(floatArrayOf(-0.56f, 0.26f, -0.18f), floatArrayOf(-0.88f, -0.44f, -0.26f), floatArrayOf(-0.96f, -1.28f, -0.34f), 0.162f, 0.034f, 0.14f),
-            LockSpec(floatArrayOf(-0.48f, 0.14f, -0.34f), floatArrayOf(-0.82f, -0.58f, -0.42f), floatArrayOf(-0.98f, -1.34f, -0.46f), 0.168f, 0.034f, 0.08f),
-            LockSpec(floatArrayOf(-0.34f, 0.02f, -0.48f), floatArrayOf(-0.68f, -0.68f, -0.54f), floatArrayOf(-0.86f, -1.38f, -0.54f), 0.164f, 0.032f, 0.12f),
-            LockSpec(floatArrayOf(-0.54f, 0.42f, -0.08f), floatArrayOf(-0.86f, -0.26f, -0.18f), floatArrayOf(-0.92f, -1.24f, -0.28f), 0.154f, 0.032f, 0.20f),
-            LockSpec(floatArrayOf(-0.62f, 0.04f, 0.04f), floatArrayOf(-0.79f, -0.56f, 0.02f), floatArrayOf(-0.82f, -1.22f, -0.14f), 0.138f, 0.030f, 0.18f),
+            // 10 Unified nape & pillow-draping lower bob curtain locks blending smoothly behind the jawline
+            LockSpec(floatArrayOf(-0.54f, 0.28f, -0.16f), floatArrayOf(-0.80f, -0.38f, -0.22f), floatArrayOf(-0.82f, -1.16f, -0.30f), 0.192f, 0.028f, 0.13f),
+            LockSpec(floatArrayOf(-0.46f, 0.16f, -0.32f), floatArrayOf(-0.76f, -0.52f, -0.38f), floatArrayOf(-0.84f, -1.24f, -0.44f), 0.198f, 0.028f, 0.09f),
+            LockSpec(floatArrayOf(-0.34f, 0.04f, -0.46f), floatArrayOf(-0.64f, -0.62f, -0.52f), floatArrayOf(-0.76f, -1.30f, -0.52f), 0.194f, 0.026f, 0.12f),
+            LockSpec(floatArrayOf(-0.52f, 0.42f, -0.08f), floatArrayOf(-0.79f, -0.22f, -0.14f), floatArrayOf(-0.80f, -1.12f, -0.24f), 0.184f, 0.026f, 0.18f),
+            LockSpec(floatArrayOf(-0.58f, 0.08f, 0.02f), floatArrayOf(-0.74f, -0.48f, -0.02f), floatArrayOf(-0.74f, -1.10f, -0.12f), 0.174f, 0.025f, 0.16f),
 
-            LockSpec(floatArrayOf(0.56f, 0.26f, -0.18f), floatArrayOf(0.88f, -0.44f, -0.26f), floatArrayOf(0.96f, -1.28f, -0.34f), 0.162f, 0.034f, 0.14f),
-            LockSpec(floatArrayOf(0.48f, 0.14f, -0.34f), floatArrayOf(0.82f, -0.58f, -0.42f), floatArrayOf(0.98f, -1.34f, -0.46f), 0.168f, 0.034f, 0.08f),
-            LockSpec(floatArrayOf(0.34f, 0.02f, -0.48f), floatArrayOf(0.68f, -0.68f, -0.54f), floatArrayOf(0.86f, -1.38f, -0.54f), 0.164f, 0.032f, 0.12f),
-            LockSpec(floatArrayOf(0.54f, 0.42f, -0.08f), floatArrayOf(0.86f, -0.26f, -0.18f), floatArrayOf(0.92f, -1.24f, -0.28f), 0.154f, 0.032f, 0.20f),
-            LockSpec(floatArrayOf(0.62f, 0.04f, 0.04f), floatArrayOf(0.79f, -0.56f, 0.02f), floatArrayOf(0.82f, -1.22f, -0.14f), 0.138f, 0.030f, 0.18f),
+            LockSpec(floatArrayOf(0.54f, 0.28f, -0.16f), floatArrayOf(0.80f, -0.38f, -0.22f), floatArrayOf(0.82f, -1.16f, -0.30f), 0.192f, 0.028f, 0.13f),
+            LockSpec(floatArrayOf(0.46f, 0.16f, -0.32f), floatArrayOf(0.76f, -0.52f, -0.38f), floatArrayOf(0.84f, -1.24f, -0.44f), 0.198f, 0.028f, 0.09f),
+            LockSpec(floatArrayOf(0.34f, 0.04f, -0.46f), floatArrayOf(0.64f, -0.62f, -0.52f), floatArrayOf(0.76f, -1.30f, -0.52f), 0.194f, 0.026f, 0.12f),
+            LockSpec(floatArrayOf(0.52f, 0.42f, -0.08f), floatArrayOf(0.79f, -0.22f, -0.14f), floatArrayOf(0.80f, -1.12f, -0.24f), 0.184f, 0.026f, 0.18f),
+            LockSpec(floatArrayOf(0.58f, 0.08f, 0.02f), floatArrayOf(0.74f, -0.48f, -0.02f), floatArrayOf(0.74f, -1.10f, -0.12f), 0.174f, 0.025f, 0.16f),
 
-            // 6 Layered dimensional crown volume locks (gives natural glossy silhouette from every angle)
-            LockSpec(floatArrayOf(0.14f, 1.01f, 0.08f), floatArrayOf(-0.22f, 0.92f, 0.40f), floatArrayOf(-0.58f, 0.54f, 0.44f), 0.155f, 0.038f, 0.24f),
-            LockSpec(floatArrayOf(0.24f, 0.99f, 0.02f), floatArrayOf(0.56f, 0.78f, 0.24f), floatArrayOf(0.76f, 0.30f, 0.20f), 0.152f, 0.036f, 0.18f),
-            LockSpec(floatArrayOf(-0.08f, 1.01f, -0.08f), floatArrayOf(-0.52f, 0.76f, 0.16f), floatArrayOf(-0.76f, 0.20f, 0.10f), 0.152f, 0.036f, 0.14f),
-            LockSpec(floatArrayOf(0.06f, 1.04f, -0.14f), floatArrayOf(-0.36f, 0.90f, -0.04f), floatArrayOf(-0.72f, 0.40f, -0.12f), 0.155f, 0.036f, 0.20f),
-            LockSpec(floatArrayOf(0.12f, 1.02f, -0.16f), floatArrayOf(0.48f, 0.84f, -0.04f), floatArrayOf(0.75f, 0.34f, -0.12f), 0.152f, 0.035f, 0.16f),
-            LockSpec(floatArrayOf(-0.02f, 1.04f, 0.14f), floatArrayOf(0.28f, 0.94f, 0.38f), floatArrayOf(0.60f, 0.56f, 0.40f), 0.148f, 0.035f, 0.22f)
+            // 6 Layered dimensional crown volume locks (gives natural cohesive crown silhouette from every angle)
+            LockSpec(floatArrayOf(0.14f, 1.01f, 0.08f), floatArrayOf(-0.22f, 0.92f, 0.38f), floatArrayOf(-0.58f, 0.54f, 0.42f), 0.164f, 0.032f, 0.22f),
+            LockSpec(floatArrayOf(0.24f, 0.99f, 0.02f), floatArrayOf(0.56f, 0.78f, 0.24f), floatArrayOf(0.75f, 0.30f, 0.19f), 0.160f, 0.030f, 0.16f),
+            LockSpec(floatArrayOf(-0.08f, 1.01f, -0.08f), floatArrayOf(-0.52f, 0.76f, 0.16f), floatArrayOf(-0.75f, 0.20f, 0.10f), 0.160f, 0.030f, 0.14f),
+            LockSpec(floatArrayOf(0.06f, 1.04f, -0.14f), floatArrayOf(-0.36f, 0.90f, -0.04f), floatArrayOf(-0.71f, 0.40f, -0.12f), 0.162f, 0.030f, 0.18f),
+            LockSpec(floatArrayOf(0.12f, 1.02f, -0.16f), floatArrayOf(0.48f, 0.84f, -0.04f), floatArrayOf(0.74f, 0.34f, -0.12f), 0.160f, 0.030f, 0.15f),
+            LockSpec(floatArrayOf(-0.02f, 1.04f, 0.14f), floatArrayOf(0.28f, 0.94f, 0.36f), floatArrayOf(0.60f, 0.56f, 0.38f), 0.156f, 0.030f, 0.20f)
         )
 
         val lockCols = 11
@@ -1793,7 +1795,7 @@ internal object BlossomUpperBodyBuilder {
             }
         }
 
-        // Part A: Layered Bob Crown & Clean Smooth-Hem Nape Volume Cap (exact silhouette preserved!)
+        // Part A: Layered Bob Crown & Natural Arched Parted Hairline (dissolves ruler-straight forehead edge!)
         for (r in 0 until capRows) {
             val v = r.toFloat() / (capRows - 1)
             for (c in 0 until capCols) {
@@ -1802,12 +1804,17 @@ internal object BlossomUpperBodyBuilder {
                 val sinP = sin(phi)
                 val cosP = cos(phi)
 
-                val frontMask = smoothStep(-0.25f, 0.72f, cosP)
+                val frontMask = smoothStep(-0.18f, 0.78f, cosP)
                 val backMask = smoothStep(0.05f, 0.85f, -cosP)
                 val sideMask = smoothStep(0.28f, 0.88f, abs(sinP))
-                val partLift = 0.052f * smoothStep(-0.20f, 0.56f, sinP) * frontMask
+                // Natural right-of-center parted forehead arch: highest near the part (sinP ~ +0.24),
+                // sweeping gracefully lower across the left & right temples with subtle organic feathering
+                val partPeak = exp(-((sinP - 0.24f) / 0.36f).let { it * it }) * frontMask
+                val templeSweep = smoothStep(0.18f, 0.76f, abs(sinP - 0.16f)) * frontMask
+                val organicEdge = (0.0085f * sin(phi * 9f + 0.7f) + 0.0045f * cos(phi * 17f - 0.4f)) * frontMask
+                val frontRecess = (0.238f + 0.068f * partPeak - 0.048f * templeSweep + organicEdge)
                 val maxTheta = 0.63f * PI.toFloat() -
-                    (0.265f + partLift) * PI.toFloat() * frontMask +
+                    frontRecess * PI.toFloat() * frontMask +
                     0.22f * PI.toFloat() * backMask +
                     0.12f * PI.toFloat() * sideMask * (1f - frontMask)
 
@@ -1815,16 +1822,17 @@ internal object BlossomUpperBodyBuilder {
                 val sinT = sin(theta)
                 val cosT = cos(theta)
 
-                val crownVolume = 0.112f * (1f - smoothStep(0.26f, 0.90f, v)) + 0.042f * smoothStep(0.18f, 0.82f, v)
-                val edgeTaper = 1f - 0.94f * smoothStep(0.74f, 1.0f, v)
-                val strandRib = 0.0042f * sin(phi * 20f + v * 4.0f) + 0.0024f * cos(phi * 36f - v * 5.6f)
-                val loft = (crownVolume * edgeTaper + strandRib * (1f - smoothStep(0.78f, 1.0f, v))).coerceAtLeast(0.003f)
+                val crownVolume = 0.106f * (1f - smoothStep(0.26f, 0.90f, v)) + 0.040f * smoothStep(0.18f, 0.82f, v)
+                // Taper forehead hairline cleanly down to the scalp at v -> 1 so there is zero thick shelf/cut lip
+                val edgeTaper = 1f - (0.94f + 0.045f * frontMask) * smoothStep(0.70f, 1.0f, v)
+                val strandRib = 0.0038f * sin(phi * 20f + v * 4.0f) + 0.0022f * cos(phi * 36f - v * 5.6f)
+                val loft = (crownVolume * edgeTaper + strandRib * (1f - smoothStep(0.76f, 1.0f, v))).coerceAtLeast(0.0018f)
 
                 val craniumBack = 1f + 0.09f * backMask * sinT
                 val napeBlend = smoothStep(-0.12f, 0.65f, -cosP)
-                val pillowFan = 0.135f * smoothStep(0.60f, 0.96f, v) * napeBlend * (1f - 0.25f * smoothStep(0.88f, 1.0f, v))
+                val pillowFan = 0.120f * smoothStep(0.60f, 0.96f, v) * napeBlend * (1f - 0.25f * smoothStep(0.88f, 1.0f, v))
                 val lx = sinT * sinP * (0.682f + loft + pillowFan)
-                val ly = cosT * (0.975f + loft * 0.90f) - 0.18f * smoothStep(0.66f, 1.0f, v) * napeBlend
+                val ly = cosT * (0.975f + loft * 0.90f) - 0.17f * smoothStep(0.66f, 1.0f, v) * napeBlend
                 val lz = sinT * cosP * (0.778f * craniumBack + loft)
 
                 val wPt = headLocalToWorld(lx, ly, lz)
@@ -1902,20 +1910,20 @@ internal object BlossomUpperBodyBuilder {
                 val by = tz * ox - tx * oz
                 val bz = tx * oy - ty * ox
 
-                // Fine silky feathered width & thickness tapering smoothly to soft points (Beta 6 adds slightly finer tapered tips)
-                val rootEnv = 0.62f + 0.38f * smoothStep(0.0f, 0.18f, t)
+                // Cohesive feathered bob curtain width & thickness (softly tapered unified hem, never pointy claws!)
+                val rootEnv = 0.68f + 0.32f * smoothStep(0.0f, 0.18f, t)
                 val tipWidthFade = if (betaSoftHair) {
-                    1f - 0.91f * smoothStep(0.58f, 1.0f, t)
+                    1f - 0.68f * smoothStep(0.64f, 1.0f, t)
                 } else {
-                    1f - 0.86f * smoothStep(0.62f, 1.0f, t)
+                    1f - 0.62f * smoothStep(0.66f, 1.0f, t)
                 }
-                val curW = lock.halfW * 1.06f * rootEnv * (0.86f + 0.16f * sin(t * PI.toFloat())) * tipWidthFade
+                val curW = lock.halfW * 1.08f * rootEnv * (0.90f + 0.12f * sin(t * PI.toFloat())) * tipWidthFade
                 val tipThickFade = if (betaSoftHair) {
-                    1f - 0.90f * smoothStep(0.56f, 1.0f, t)
+                    1f - 0.84f * smoothStep(0.58f, 1.0f, t)
                 } else {
-                    1f - 0.85f * smoothStep(0.58f, 1.0f, t)
+                    1f - 0.78f * smoothStep(0.60f, 1.0f, t)
                 }
-                val curThick = lock.thick * 0.40f * rootEnv * (0.45f + 0.55f * sin(t * PI.toFloat())) * tipThickFade
+                val curThick = lock.thick * 0.38f * rootEnv * (0.48f + 0.52f * sin(t * PI.toFloat())) * tipThickFade
                 val tipZone = smoothStep(0.70f, 1.0f, t)
 
                 for (c in 0 until lockCols) {
@@ -2016,53 +2024,53 @@ internal object BlossomUpperBodyBuilder {
             WispSpec(floatArrayOf(0.48f, 0.58f, 0.34f), floatArrayOf(0.64f, 0.28f, 0.37f), floatArrayOf(0.69f, -0.06f, 0.31f), 0.048f, 0.008f, 0.009f, false, 0.91f),
             WispSpec(floatArrayOf(0.44f, 0.66f, 0.38f), floatArrayOf(0.60f, 0.38f, 0.42f), floatArrayOf(0.67f, 0.08f, 0.37f), 0.042f, 0.007f, 0.008f, false, 0.52f),
 
-            // --- Tier 3 (16): Staggered Cheekbone, Jaw & Shoulder Face-Framing Curtain Locks ---
-            WispSpec(floatArrayOf(-0.36f, 0.77f, 0.33f), floatArrayOf(-0.74f, 0.16f, 0.35f), floatArrayOf(-0.70f, -0.92f, 0.23f), 0.096f, 0.020f, 0.017f, true, 0.15f),
-            WispSpec(floatArrayOf(-0.44f, 0.70f, 0.20f), floatArrayOf(-0.82f, -0.02f, 0.20f), floatArrayOf(-0.78f, -1.10f, 0.05f), 0.102f, 0.021f, 0.018f, true, 0.29f),
-            WispSpec(floatArrayOf(-0.30f, 0.82f, 0.27f), floatArrayOf(-0.76f, 0.26f, 0.27f), floatArrayOf(-0.74f, -0.78f, 0.19f), 0.088f, 0.018f, 0.016f, true, 0.43f),
-            WispSpec(floatArrayOf(-0.50f, 0.54f, 0.08f), floatArrayOf(-0.85f, -0.20f, 0.04f), floatArrayOf(-0.86f, -1.20f, -0.14f), 0.104f, 0.020f, 0.016f, true, 0.57f),
-            WispSpec(floatArrayOf(-0.38f, 0.72f, 0.36f), floatArrayOf(-0.72f, 0.04f, 0.38f), floatArrayOf(-0.66f, -0.68f, 0.30f), 0.068f, 0.014f, 0.015f, false, 0.71f),
-            WispSpec(floatArrayOf(-0.48f, 0.64f, 0.12f), floatArrayOf(-0.84f, -0.10f, 0.12f), floatArrayOf(-0.84f, -1.04f, -0.04f), 0.092f, 0.019f, 0.018f, true, 0.84f),
-            WispSpec(floatArrayOf(-0.56f, 0.44f, 0.00f), floatArrayOf(-0.88f, -0.32f, -0.04f), floatArrayOf(-0.92f, -1.26f, -0.18f), 0.098f, 0.019f, 0.015f, true, 0.35f),
-            WispSpec(floatArrayOf(-0.42f, 0.66f, 0.26f), floatArrayOf(-0.78f, -0.16f, 0.24f), floatArrayOf(-0.74f, -1.16f, 0.12f), 0.064f, 0.013f, 0.016f, false, 0.94f),
+            // --- Tier 3 (16): Cohesive Cheekbone, Jaw & Shoulder Face-Framing Curtain Locks (hugged smoothly to bob) ---
+            WispSpec(floatArrayOf(-0.34f, 0.77f, 0.30f), floatArrayOf(-0.71f, 0.14f, 0.31f), floatArrayOf(-0.67f, -0.84f, 0.20f), 0.088f, 0.014f, 0.011f, true, 0.15f),
+            WispSpec(floatArrayOf(-0.42f, 0.70f, 0.18f), floatArrayOf(-0.77f, -0.02f, 0.18f), floatArrayOf(-0.73f, -0.98f, 0.06f), 0.092f, 0.015f, 0.012f, true, 0.29f),
+            WispSpec(floatArrayOf(-0.30f, 0.82f, 0.25f), floatArrayOf(-0.73f, 0.24f, 0.24f), floatArrayOf(-0.70f, -0.74f, 0.17f), 0.082f, 0.013f, 0.011f, true, 0.43f),
+            WispSpec(floatArrayOf(-0.48f, 0.54f, 0.08f), floatArrayOf(-0.79f, -0.18f, 0.04f), floatArrayOf(-0.78f, -1.08f, -0.10f), 0.094f, 0.015f, 0.011f, true, 0.57f),
+            WispSpec(floatArrayOf(-0.36f, 0.72f, 0.33f), floatArrayOf(-0.69f, 0.04f, 0.33f), floatArrayOf(-0.64f, -0.66f, 0.26f), 0.062f, 0.010f, 0.010f, false, 0.71f),
+            WispSpec(floatArrayOf(-0.46f, 0.64f, 0.12f), floatArrayOf(-0.78f, -0.08f, 0.11f), floatArrayOf(-0.76f, -0.96f, -0.02f), 0.084f, 0.014f, 0.012f, true, 0.84f),
+            WispSpec(floatArrayOf(-0.54f, 0.44f, 0.00f), floatArrayOf(-0.81f, -0.28f, -0.03f), floatArrayOf(-0.82f, -1.14f, -0.15f), 0.088f, 0.014f, 0.010f, true, 0.35f),
+            WispSpec(floatArrayOf(-0.40f, 0.66f, 0.24f), floatArrayOf(-0.74f, -0.14f, 0.21f), floatArrayOf(-0.70f, -1.02f, 0.11f), 0.058f, 0.010f, 0.011f, false, 0.94f),
 
-            WispSpec(floatArrayOf(0.35f, 0.77f, 0.33f), floatArrayOf(0.74f, 0.16f, 0.35f), floatArrayOf(0.70f, -0.94f, 0.23f), 0.096f, 0.020f, 0.017f, true, 0.19f),
-            WispSpec(floatArrayOf(0.43f, 0.70f, 0.20f), floatArrayOf(0.82f, -0.02f, 0.20f), floatArrayOf(0.78f, -1.12f, 0.05f), 0.102f, 0.021f, 0.018f, true, 0.33f),
-            WispSpec(floatArrayOf(0.31f, 0.81f, 0.29f), floatArrayOf(0.76f, 0.26f, 0.28f), floatArrayOf(0.74f, -0.80f, 0.20f), 0.088f, 0.018f, 0.016f, true, 0.47f),
-            WispSpec(floatArrayOf(0.50f, 0.54f, 0.08f), floatArrayOf(0.85f, -0.20f, 0.04f), floatArrayOf(0.86f, -1.22f, -0.14f), 0.104f, 0.020f, 0.016f, true, 0.63f),
-            WispSpec(floatArrayOf(0.37f, 0.72f, 0.36f), floatArrayOf(0.72f, 0.04f, 0.38f), floatArrayOf(0.66f, -0.70f, 0.30f), 0.068f, 0.014f, 0.015f, false, 0.76f),
-            WispSpec(floatArrayOf(0.48f, 0.64f, 0.12f), floatArrayOf(0.84f, -0.10f, 0.12f), floatArrayOf(0.84f, -1.06f, -0.04f), 0.092f, 0.019f, 0.018f, true, 0.89f),
-            WispSpec(floatArrayOf(0.56f, 0.44f, 0.00f), floatArrayOf(0.88f, -0.32f, -0.04f), floatArrayOf(0.92f, -1.28f, -0.18f), 0.098f, 0.019f, 0.015f, true, 0.41f),
-            WispSpec(floatArrayOf(0.42f, 0.66f, 0.26f), floatArrayOf(0.78f, -0.16f, 0.24f), floatArrayOf(0.74f, -1.18f, 0.12f), 0.064f, 0.013f, 0.016f, false, 0.06f),
+            WispSpec(floatArrayOf(0.34f, 0.77f, 0.30f), floatArrayOf(0.71f, 0.14f, 0.31f), floatArrayOf(0.67f, -0.86f, 0.20f), 0.088f, 0.014f, 0.011f, true, 0.19f),
+            WispSpec(floatArrayOf(0.42f, 0.70f, 0.18f), floatArrayOf(0.77f, -0.02f, 0.18f), floatArrayOf(0.73f, -1.00f, 0.06f), 0.092f, 0.015f, 0.012f, true, 0.33f),
+            WispSpec(floatArrayOf(0.31f, 0.81f, 0.26f), floatArrayOf(0.73f, 0.24f, 0.25f), floatArrayOf(0.70f, -0.76f, 0.18f), 0.082f, 0.013f, 0.011f, true, 0.47f),
+            WispSpec(floatArrayOf(0.48f, 0.54f, 0.08f), floatArrayOf(0.79f, -0.18f, 0.04f), floatArrayOf(0.78f, -1.10f, -0.10f), 0.094f, 0.015f, 0.011f, true, 0.63f),
+            WispSpec(floatArrayOf(0.36f, 0.72f, 0.33f), floatArrayOf(0.69f, 0.04f, 0.33f), floatArrayOf(0.64f, -0.68f, 0.26f), 0.062f, 0.010f, 0.010f, false, 0.76f),
+            WispSpec(floatArrayOf(0.46f, 0.64f, 0.12f), floatArrayOf(0.78f, -0.08f, 0.11f), floatArrayOf(0.76f, -0.98f, -0.02f), 0.084f, 0.014f, 0.012f, true, 0.89f),
+            WispSpec(floatArrayOf(0.54f, 0.44f, 0.00f), floatArrayOf(0.81f, -0.28f, -0.03f), floatArrayOf(0.82f, -1.16f, -0.15f), 0.088f, 0.014f, 0.010f, true, 0.41f),
+            WispSpec(floatArrayOf(0.40f, 0.66f, 0.24f), floatArrayOf(0.74f, -0.14f, 0.21f), floatArrayOf(0.70f, -1.04f, 0.11f), 0.058f, 0.010f, 0.011f, false, 0.06f),
 
-            // --- Tier 4 (16): Lush Pillow-Fanned Volumetric Nape & Back Cascading Locks ---
-            WispSpec(floatArrayOf(-0.56f, 0.24f, -0.14f), floatArrayOf(-0.92f, -0.46f, -0.22f), floatArrayOf(-1.05f, -1.36f, -0.30f), 0.118f, 0.021f, 0.018f, true, 0.14f),
-            WispSpec(floatArrayOf(-0.48f, 0.10f, -0.30f), floatArrayOf(-0.86f, -0.64f, -0.38f), floatArrayOf(-1.08f, -1.46f, -0.44f), 0.124f, 0.020f, 0.017f, true, 0.38f),
-            WispSpec(floatArrayOf(-0.62f, 0.02f, 0.02f), floatArrayOf(-0.88f, -0.60f, 0.02f), floatArrayOf(-0.95f, -1.34f, -0.10f), 0.106f, 0.019f, 0.016f, true, 0.72f),
-            WispSpec(floatArrayOf(-0.36f, -0.02f, -0.44f), floatArrayOf(-0.74f, -0.74f, -0.50f), floatArrayOf(-0.96f, -1.52f, -0.52f), 0.122f, 0.018f, 0.016f, true, 0.22f),
-            WispSpec(floatArrayOf(-0.52f, 0.38f, -0.06f), floatArrayOf(-0.90f, -0.30f, -0.14f), floatArrayOf(-1.02f, -1.28f, -0.24f), 0.110f, 0.020f, 0.017f, true, 0.55f),
-            WispSpec(floatArrayOf(-0.60f, -0.16f, -0.16f), floatArrayOf(-0.96f, -0.82f, -0.26f), floatArrayOf(-1.14f, -1.48f, -0.34f), 0.094f, 0.016f, 0.015f, false, 0.87f),
-            WispSpec(floatArrayOf(-0.42f, -0.12f, -0.38f), floatArrayOf(-0.80f, -0.86f, -0.46f), floatArrayOf(-1.04f, -1.58f, -0.48f), 0.098f, 0.015f, 0.014f, false, 0.65f),
-            WispSpec(floatArrayOf(-0.24f, -0.08f, -0.50f), floatArrayOf(-0.56f, -0.84f, -0.56f), floatArrayOf(-0.78f, -1.50f, -0.56f), 0.114f, 0.016f, 0.014f, true, 0.09f),
+            // --- Tier 4 (16): Softly Draping Nape & Back Locks aligned cleanly behind jawline ---
+            WispSpec(floatArrayOf(-0.54f, 0.24f, -0.14f), floatArrayOf(-0.83f, -0.40f, -0.20f), floatArrayOf(-0.88f, -1.22f, -0.28f), 0.104f, 0.015f, 0.012f, true, 0.14f),
+            WispSpec(floatArrayOf(-0.46f, 0.12f, -0.30f), floatArrayOf(-0.79f, -0.56f, -0.36f), floatArrayOf(-0.90f, -1.30f, -0.42f), 0.108f, 0.015f, 0.012f, true, 0.38f),
+            WispSpec(floatArrayOf(-0.58f, 0.04f, 0.00f), floatArrayOf(-0.80f, -0.52f, -0.02f), floatArrayOf(-0.82f, -1.20f, -0.12f), 0.096f, 0.014f, 0.011f, true, 0.72f),
+            WispSpec(floatArrayOf(-0.34f, 0.00f, -0.44f), floatArrayOf(-0.68f, -0.66f, -0.48f), floatArrayOf(-0.82f, -1.36f, -0.50f), 0.106f, 0.014f, 0.011f, true, 0.22f),
+            WispSpec(floatArrayOf(-0.50f, 0.38f, -0.06f), floatArrayOf(-0.82f, -0.26f, -0.12f), floatArrayOf(-0.86f, -1.16f, -0.22f), 0.098f, 0.015f, 0.012f, true, 0.55f),
+            WispSpec(floatArrayOf(-0.56f, -0.12f, -0.16f), floatArrayOf(-0.84f, -0.72f, -0.24f), floatArrayOf(-0.92f, -1.32f, -0.32f), 0.082f, 0.012f, 0.010f, false, 0.87f),
+            WispSpec(floatArrayOf(-0.40f, -0.10f, -0.38f), floatArrayOf(-0.72f, -0.76f, -0.44f), floatArrayOf(-0.88f, -1.40f, -0.46f), 0.084f, 0.011f, 0.010f, false, 0.65f),
+            WispSpec(floatArrayOf(-0.24f, -0.06f, -0.50f), floatArrayOf(-0.52f, -0.76f, -0.54f), floatArrayOf(-0.70f, -1.38f, -0.54f), 0.100f, 0.012f, 0.010f, true, 0.09f),
 
-            WispSpec(floatArrayOf(0.56f, 0.24f, -0.14f), floatArrayOf(0.92f, -0.46f, -0.22f), floatArrayOf(1.05f, -1.38f, -0.30f), 0.118f, 0.021f, 0.018f, true, 0.21f),
-            WispSpec(floatArrayOf(0.48f, 0.10f, -0.30f), floatArrayOf(0.86f, -0.64f, -0.38f), floatArrayOf(1.08f, -1.48f, -0.44f), 0.124f, 0.020f, 0.017f, true, 0.54f),
-            WispSpec(floatArrayOf(0.62f, 0.02f, 0.02f), floatArrayOf(0.88f, -0.60f, 0.02f), floatArrayOf(0.95f, -1.36f, -0.10f), 0.106f, 0.019f, 0.016f, true, 0.79f),
-            WispSpec(floatArrayOf(0.36f, -0.02f, -0.44f), floatArrayOf(0.74f, -0.74f, -0.50f), floatArrayOf(0.96f, -1.54f, -0.52f), 0.122f, 0.018f, 0.016f, true, 0.30f),
-            WispSpec(floatArrayOf(0.52f, 0.38f, -0.06f), floatArrayOf(0.90f, -0.30f, -0.14f), floatArrayOf(1.02f, -1.30f, -0.24f), 0.110f, 0.020f, 0.017f, true, 0.62f),
-            WispSpec(floatArrayOf(0.60f, -0.16f, -0.16f), floatArrayOf(0.96f, -0.82f, -0.26f), floatArrayOf(1.14f, -1.50f, -0.34f), 0.094f, 0.016f, 0.015f, false, 0.93f),
-            WispSpec(floatArrayOf(0.42f, -0.12f, -0.38f), floatArrayOf(0.80f, -0.86f, -0.46f), floatArrayOf(1.04f, -1.60f, -0.48f), 0.098f, 0.015f, 0.014f, false, 0.48f),
-            WispSpec(floatArrayOf(0.24f, -0.08f, -0.50f), floatArrayOf(0.56f, -0.84f, -0.56f), floatArrayOf(0.78f, -1.52f, -0.56f), 0.114f, 0.016f, 0.014f, true, 0.17f),
+            WispSpec(floatArrayOf(0.54f, 0.24f, -0.14f), floatArrayOf(0.83f, -0.40f, -0.20f), floatArrayOf(0.88f, -1.24f, -0.28f), 0.104f, 0.015f, 0.012f, true, 0.21f),
+            WispSpec(floatArrayOf(0.46f, 0.12f, -0.30f), floatArrayOf(0.79f, -0.56f, -0.36f), floatArrayOf(0.90f, -1.32f, -0.42f), 0.108f, 0.015f, 0.012f, true, 0.54f),
+            WispSpec(floatArrayOf(0.58f, 0.04f, 0.00f), floatArrayOf(0.80f, -0.52f, -0.02f), floatArrayOf(0.82f, -1.22f, -0.12f), 0.096f, 0.014f, 0.011f, true, 0.79f),
+            WispSpec(floatArrayOf(0.34f, 0.00f, -0.44f), floatArrayOf(0.68f, -0.66f, -0.48f), floatArrayOf(0.82f, -1.38f, -0.50f), 0.106f, 0.014f, 0.011f, true, 0.30f),
+            WispSpec(floatArrayOf(0.50f, 0.38f, -0.06f), floatArrayOf(0.82f, -0.26f, -0.12f), floatArrayOf(0.86f, -1.18f, -0.22f), 0.098f, 0.015f, 0.012f, true, 0.62f),
+            WispSpec(floatArrayOf(0.56f, -0.12f, -0.16f), floatArrayOf(0.84f, -0.72f, -0.24f), floatArrayOf(0.92f, -1.34f, -0.32f), 0.082f, 0.012f, 0.010f, false, 0.93f),
+            WispSpec(floatArrayOf(0.40f, -0.10f, -0.38f), floatArrayOf(0.72f, -0.76f, -0.44f), floatArrayOf(0.88f, -1.42f, -0.46f), 0.084f, 0.011f, 0.010f, false, 0.48f),
+            WispSpec(floatArrayOf(0.24f, -0.06f, -0.50f), floatArrayOf(0.52f, -0.76f, -0.54f), floatArrayOf(0.70f, -1.40f, -0.54f), 0.100f, 0.012f, 0.010f, true, 0.17f),
 
-            // --- Tier 5 (8): Airy Sunlit Backlit Flyaway Halo Strands ---
-            WispSpec(floatArrayOf(0.16f, 1.07f, 0.15f), floatArrayOf(-0.26f, 1.02f, 0.44f), floatArrayOf(-0.66f, 0.58f, 0.46f), 0.062f, 0.014f, 0.013f, false, 0.26f),
-            WispSpec(floatArrayOf(0.22f, 1.06f, 0.06f), floatArrayOf(0.60f, 0.86f, 0.30f), floatArrayOf(0.83f, 0.34f, 0.24f), 0.062f, 0.014f, 0.013f, false, 0.41f),
-            WispSpec(floatArrayOf(-0.06f, 1.08f, -0.06f), floatArrayOf(-0.56f, 0.86f, 0.18f), floatArrayOf(-0.84f, 0.24f, 0.14f), 0.060f, 0.014f, 0.012f, false, 0.68f),
-            WispSpec(floatArrayOf(0.08f, 1.09f, -0.10f), floatArrayOf(0.48f, 0.94f, 0.04f), floatArrayOf(0.82f, 0.40f, -0.04f), 0.060f, 0.013f, 0.012f, false, 0.86f),
-            WispSpec(floatArrayOf(-0.54f, 0.62f, 0.22f), floatArrayOf(-0.88f, -0.02f, 0.18f), floatArrayOf(-0.92f, -0.96f, 0.04f), 0.056f, 0.012f, 0.016f, false, 0.12f),
-            WispSpec(floatArrayOf(0.54f, 0.62f, 0.22f), floatArrayOf(0.88f, -0.02f, 0.18f), floatArrayOf(0.92f, -0.96f, 0.04f), 0.056f, 0.012f, 0.016f, false, 0.59f),
-            WispSpec(floatArrayOf(-0.62f, 0.12f, -0.08f), floatArrayOf(-0.98f, -0.56f, -0.16f), floatArrayOf(-1.12f, -1.32f, -0.26f), 0.064f, 0.012f, 0.016f, false, 0.34f),
-            WispSpec(floatArrayOf(0.62f, 0.12f, -0.08f), floatArrayOf(0.98f, -0.56f, -0.16f), floatArrayOf(1.12f, -1.32f, -0.26f), 0.064f, 0.012f, 0.016f, false, 0.77f)
+            // --- Tier 5 (8): Delicate Crown & Outer-Silhouette Wisps (close-hugging, never protruding) ---
+            WispSpec(floatArrayOf(0.16f, 1.05f, 0.15f), floatArrayOf(-0.26f, 1.00f, 0.42f), floatArrayOf(-0.64f, 0.56f, 0.44f), 0.052f, 0.010f, 0.009f, false, 0.26f),
+            WispSpec(floatArrayOf(0.22f, 1.04f, 0.06f), floatArrayOf(0.58f, 0.84f, 0.28f), floatArrayOf(0.79f, 0.34f, 0.22f), 0.052f, 0.010f, 0.009f, false, 0.41f),
+            WispSpec(floatArrayOf(-0.06f, 1.06f, -0.06f), floatArrayOf(-0.54f, 0.84f, 0.16f), floatArrayOf(-0.80f, 0.24f, 0.12f), 0.050f, 0.010f, 0.009f, false, 0.68f),
+            WispSpec(floatArrayOf(0.08f, 1.07f, -0.10f), floatArrayOf(0.46f, 0.92f, 0.04f), floatArrayOf(0.78f, 0.38f, -0.04f), 0.050f, 0.010f, 0.009f, false, 0.86f),
+            WispSpec(floatArrayOf(-0.50f, 0.62f, 0.20f), floatArrayOf(-0.81f, -0.02f, 0.16f), floatArrayOf(-0.82f, -0.88f, 0.04f), 0.048f, 0.009f, 0.011f, false, 0.12f),
+            WispSpec(floatArrayOf(0.50f, 0.62f, 0.20f), floatArrayOf(0.81f, -0.02f, 0.16f), floatArrayOf(0.82f, -0.88f, 0.04f), 0.048f, 0.009f, 0.011f, false, 0.59f),
+            WispSpec(floatArrayOf(-0.58f, 0.14f, -0.08f), floatArrayOf(-0.86f, -0.48f, -0.16f), floatArrayOf(-0.92f, -1.16f, -0.24f), 0.052f, 0.009f, 0.011f, false, 0.34f),
+            WispSpec(floatArrayOf(0.58f, 0.14f, -0.08f), floatArrayOf(0.86f, -0.48f, -0.16f), floatArrayOf(0.92f, -1.16f, -0.24f), 0.052f, 0.009f, 0.011f, false, 0.77f)
         )
 
         val wispCols = 7
@@ -2970,6 +2978,71 @@ internal object BlossomUpperBodyBuilder {
             lashVertIsRight = lashIsRight,
             lashVertIsUpper = lashIsUpper
         )
+    }
+
+    /**
+     * Computes the exact column-major 4x4 inverse rigid head rotation matrix matching [applyHeadTurn]
+     * so GPU fragment-space procedural facial & hair textures (freckles, lip micro-texture, brow hairs,
+     * hairline shadow, hair strand fibers & scalp part) remain 100% locked to Blossom's moving head.
+     */
+    fun computeInverseHeadMatrix(
+        headTurn: Float,
+        headPitch: Float = 0f,
+        headRollOffset: Float = 0f,
+        outMat4: FloatArray
+    ) {
+        val turn = headTurn.coerceIn(-1f, 1f)
+        val pitch = headPitch.coerceIn(-1f, 1f)
+        val rollExtra = headRollOffset.coerceIn(-0.12f, 0.12f)
+        if (abs(turn) < 1e-4f && abs(pitch) < 1e-4f && abs(rollExtra) < 1e-4f) {
+            outMat4[0] = 1f; outMat4[1] = 0f; outMat4[2] = 0f; outMat4[3] = 0f
+            outMat4[4] = 0f; outMat4[5] = 1f; outMat4[6] = 0f; outMat4[7] = 0f
+            outMat4[8] = 0f; outMat4[9] = 0f; outMat4[10] = 1f; outMat4[11] = 0f
+            outMat4[12] = 0f; outMat4[13] = 0f; outMat4[14] = 0f; outMat4[15] = 1f
+            return
+        }
+        val pivotY = HEAD_CENTER_Y - 0.18f
+        val pivotZ = HEAD_CENTER_Z - 0.22f
+        val fullPitch = if (pitch >= 0f) pitch * 0.21f else pitch * 0.34f
+        val fullYaw = turn * 0.488f
+        val fullRoll = -turn * 0.068f + rollExtra
+
+        // Forward rotation is R = Rz(fullRoll) * Ry(fullYaw) * Rx(fullPitch).
+        // Exact inverse rotation is R^-1 = Rx(-fullPitch) * Ry(-fullYaw) * Rz(-fullRoll).
+        val cp = cos(-fullPitch); val sp = sin(-fullPitch)
+        val cy = cos(-fullYaw); val sy = sin(-fullYaw)
+        val cr = cos(-fullRoll); val sr = sin(-fullRoll)
+
+        fun applyInvRot(vx: Float, vy: Float, vz: Float, colOffset: Int) {
+            // 1. Rz(-roll)
+            val x1 = vx * cr - vy * sr
+            val y1 = vx * sr + vy * cr
+            val z1 = vz
+            // 2. Ry(-yaw)
+            val x0 = x1 * cy + z1 * sy
+            val y0 = y1
+            val z0 = -x1 * sy + z1 * cy
+            // 3. Rx(-pitch)
+            val rx = x0
+            val ry = y0 * cp - z0 * sp
+            val rz = y0 * sp + z0 * cp
+            outMat4[colOffset] = rx
+            outMat4[colOffset + 1] = ry
+            outMat4[colOffset + 2] = rz
+            outMat4[colOffset + 3] = 0f
+        }
+
+        applyInvRot(1f, 0f, 0f, 0)
+        applyInvRot(0f, 1f, 0f, 4)
+        applyInvRot(0f, 0f, 1f, 8)
+        // Translation column: pivot - R^-1 * pivot (pivotX = 0)
+        val rpX = outMat4[4] * pivotY + outMat4[8] * pivotZ
+        val rpY = outMat4[5] * pivotY + outMat4[9] * pivotZ
+        val rpZ = outMat4[6] * pivotY + outMat4[10] * pivotZ
+        outMat4[12] = -rpX
+        outMat4[13] = pivotY - rpY
+        outMat4[14] = pivotZ - rpZ
+        outMat4[15] = 1f
     }
 
     /**

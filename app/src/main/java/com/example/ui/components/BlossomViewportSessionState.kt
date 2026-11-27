@@ -238,6 +238,12 @@ class BlossomViewportSessionState {
     internal val betaV3HoodMonsStrengthState = mutableFloatStateOf(0.75f)
     var betaV3HoodMonsStrength: Float by betaV3HoodMonsStrengthState
 
+    // Beta Option #9 (v29.0): Upper Hood–Mons Color Blend — OFF by default (remembers 75% strength)
+    internal val betaV3HoodMonsUpperBlendState = mutableStateOf(false)
+    var betaV3HoodMonsUpperBlend: Boolean by betaV3HoodMonsUpperBlendState
+    internal val betaV3HoodMonsUpperStrengthState = mutableFloatStateOf(0.75f)
+    var betaV3HoodMonsUpperStrength: Float by betaV3HoodMonsUpperStrengthState
+
     internal val betaVulvaElasticityEnabledState = mutableStateOf(true)
     var betaVulvaElasticityEnabled: Boolean by betaVulvaElasticityEnabledState
     internal val betaVulvaElasticityState = mutableFloatStateOf(VULVA_ELASTIC_DEFAULT_RESISTANCE)
@@ -292,12 +298,9 @@ class BlossomViewportSessionState {
     internal val betaLife2ShowHeartRateState = mutableStateOf(false)
     var betaLife2ShowHeartRate: Boolean by betaLife2ShowHeartRateState
 
-    // --- Tab 2 (Life+) v27.0 Photorealistic Visual Realism Beta toggles (all 5 OFF by default) ---
+    // --- Tab 2 (Life+) v27.0–v29.0 Photorealistic Visual Realism Beta toggles (all OFF by default) ---
     internal val betaRealismLayeredHairState = mutableStateOf(false)
     var betaRealismLayeredHair: Boolean by betaRealismLayeredHairState
-
-    internal val betaRealismSkinDetailState = mutableStateOf(false)
-    var betaRealismSkinDetail: Boolean by betaRealismSkinDetailState
 
     internal val betaRealismEyesAndLashesState = mutableStateOf(false)
     var betaRealismEyesAndLashes: Boolean by betaRealismEyesAndLashesState
@@ -308,12 +311,8 @@ class BlossomViewportSessionState {
     internal val betaRealismDynamicCreasesState = mutableStateOf(false)
     var betaRealismDynamicCreases: Boolean by betaRealismDynamicCreasesState
 
-    // --- Tab 2 (Life+) v28.0 Additional Photorealistic Realism Beta toggles (all OFF by default) ---
     internal val betaRealismFacialMicroState = mutableStateOf(false)
     var betaRealismFacialMicro: Boolean by betaRealismFacialMicroState
-
-    internal val betaRealismStudioLightingState = mutableStateOf(false)
-    var betaRealismStudioLighting: Boolean by betaRealismStudioLightingState
 
     internal val betaRealismSurfaceMicroState = mutableStateOf(false)
     var betaRealismSurfaceMicro: Boolean by betaRealismSurfaceMicroState
@@ -347,6 +346,7 @@ class BlossomViewportSessionState {
         betaV3IntricateLabiaFolds = false
         betaV3MedialRootContinuity = false
         betaV3HoodMonsBlend = false
+        betaV3HoodMonsUpperBlend = false
         betaVulvaElasticityEnabled = false
         betaBreastSizeBoostEnabled = false
         betaLifeEyeMicrosaccades = false
@@ -364,12 +364,10 @@ class BlossomViewportSessionState {
         betaLife2LivingWarmth = false
         betaLife2ShowHeartRate = false
         betaRealismLayeredHair = false
-        betaRealismSkinDetail = false
         betaRealismEyesAndLashes = false
         betaRealismContactShadows = false
         betaRealismDynamicCreases = false
         betaRealismFacialMicro = false
-        betaRealismStudioLighting = false
         betaRealismSurfaceMicro = false
     }
 }

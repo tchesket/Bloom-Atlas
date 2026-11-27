@@ -2698,20 +2698,28 @@ internal object BlossomSdfBodyBuilder {
             // Keep forearm, wrist & palm strictly stationary even beside hips!
             if (y > -0.72f && ax > 1.82f && z < -0.35f) continue
 
-            // Keep Ultra-HD vulva patch perimeter 100% locked (zero seam drift!)
+            // 3D anterior pelvic collar guard (v29.0): keeps actual anterior pelvic-collar attachment
+            // vertices 100% pinned (zero vulva-patch seam drift or Seam D bridge leakage) and feathers
+            // neighboring pelvic-collar vertices gently across the inguinal crease, while freeing
+            // forward inner-thigh tissue once clear of the anterior pelvic surface in depth (+Z).
+            // Applied identically to both spread (w) and planted-knee (kw) weights so strong inward
+            // squeezes never fold the upper inner thigh.
             val ovalR = sqrt((x / PATCH_RX).let { it * it } + ((y - PATCH_CENTER_Y) / PATCH_RY).let { it * it })
-            if (ovalR <= 1.04f) continue
+            val collarSurfaceZ = 0.56f
+            val collarDzNorm = max(0f, z - collarSurfaceZ) / 0.30f
+            val collarDist3d = sqrt(ovalR * ovalR + collarDzNorm * collarDzNorm)
+            if (collarDist3d <= 1.05f) continue
 
             val hFem = ((ax - HIP_PIVOT_AX) * fdx + (y - HIP_PIVOT_Y) * fdy + (z - HIP_PIVOT_Z) * fdz) / fLen2
-            val patchGuard = smoothStep(1.04f, 1.38f, ovalR)
+            val patchGuard = smoothStep(1.05f, 1.68f, collarDist3d)
             val groinYGuard = smoothStep(0.38f, -0.58f, y)
-            val femRamp = smoothStep(0.06f, 0.42f, hFem)
+            val femRamp = smoothStep(0.10f, 0.54f, hFem)
             val lowerLimbFull = smoothStep(-1.05f, -1.65f, y)
             val w = max(femRamp * groinYGuard, lowerLimbFull) * patchGuard
             if (w > 0.001f) {
                 // Planted-foot knee/upper-leg shift weight: 0 at pelvis & vulva, rises smoothly to 1.0 at knee,
                 // and tapers cleanly back to 0.0 above ankle/foot (y <= -3.85) so feet stay 100% planted!
-                val thighRamp = smoothStep(0.08f, 0.92f, hFem) * groinYGuard * patchGuard
+                val thighRamp = smoothStep(0.18f, 0.94f, hFem) * groinYGuard * patchGuard
                 val ankleAnchor = smoothStep(-3.86f, -2.02f, y)
                 val kw = (thighRamp * ankleAnchor).coerceIn(0f, 1f)
                 // Smoothly rotates thigh normals one way and calf normals the opposite way around the knee crest

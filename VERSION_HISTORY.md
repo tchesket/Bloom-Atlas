@@ -1,5 +1,26 @@
 # Bloom Atlas — Version History
 
+## Version 29.0 (`versionCode = 29`)
+**Date:** 2026-11-26
+
+- **Head-Locked Facial & Hair Procedural Textures (`BlossomUpperBodyBuilder.kt`, `VulvaGlRenderer.kt`)**
+  - Added `BlossomUpperBodyBuilder.computeInverseHeadMatrix()` computing the exact column-major 4×4 inverse of `applyHeadTurn`'s rigid head transform (`T(pivot) * Rz * Ry * Rx * T(-pivot)`), uploaded per-draw as `uInvHeadMatrix` for head, hair, hair-wisps, eye, and eyelash meshes.
+  - Evaluates `vRestPos = (uModel * (uInvHeadMatrix * vec4(aPos, 1.0))).xyz` in `VERTEX_SHADER` (and switched legacy Pass D hair and Pass C iris noise from `vWorldPos` to `vRestPos`), completely eliminating world-space texture swimming on freckles, eyebrows, lip detail, hairline shadows, iris fibers, and hair strands whenever Blossom's head turns or nods.
+- **Improved Base Hair Silhouette, Reduced Hair Reflectivity & Refined Base + Beta Facial Detail (`BlossomUpperBodyBuilder.kt`, `VulvaGlRenderer.kt`)**
+  - **Base Hair Geometry**: Replaced the ruler-straight horizontal forehead bangs edge in `buildBlossomHairMesh()` with a softly arched right-of-center parted hairline, and reshaped the 20 side and nape locks into a wider, overlapping curved bob curtain with gentler hem taper so the bob no longer breaks into spiky triangular wedges beside her chin. Tightened `blossomHairWispsMesh` Tiers 3–5 to hug the cohesive bob silhouette.
+  - **Restrained Hair Sheen**: Significantly dialed back Pass D & Pass F specular and rim-halo reflectivity and replaced white-tinted specular highlights with warm hair-toned sheen so hair looks natural and silky rather than metallic/silvery.
+  - **Natural Base Lips & Refined `betaRealismFacialMicro`**: Enriched base lips (both `faceMucosa` in `buildBlossomHeadMesh` and `facialLipTone` in Pass A) from pale beige to soft, healthy muted rose. Replaced periodic vertical barcode lip stripes with ultra-subtle organic non-periodic micro-texture, dialed freckles back ~65% into soft organic clusters, and softened eyebrow hair strokes.
+- **Removed Retired Visual Realism Toggles (`VulvaGeometryBuilder.kt`, `BlossomViewportSessionState.kt`, `VulvaGlRenderer.kt`, `InteractiveVulva3DCanvas.kt`)**
+  - Completely removed `betaRealismSkinDetail` (*Skin micro-detail & SSS*) and `betaRealismStudioLighting` (*Studio rim & cushion bounce*) from state, Beta Lab UI, renderer uniforms, shaders, and tests.
+- **New Vulva Beta Option #9 — Upper Hood–Mons Color Blend (`VulvaGeometryBuilder.kt`, `VulvaGlRenderer.kt`, `BlossomViewportSessionState.kt`, `InteractiveVulva3DCanvas.kt`)**
+  - Added an independent **OFF-by-default** toggle + 0–100% strength slider (`betaV3HoodMonsUpperBlend` / `betaV3HoodMonsUpperStrength`, `75%` default, always visible in Tab 0 `Vulva` right below Option #8).
+  - Targets the triangular rose-brown patch (center + both lateral shoulders) immediately above the exposed glans and below the pubic hair, anchored to hood/anterior commissure landmarks so it tracks `hoodRetract`. Smoothly blends base albedo across both `blossomVulvaPatchMesh` and dorsal `labiaHoodArchMesh` toward surrounding mons skin across all skin tones without suppressing high-mucosa upper patch vertices, while strictly excluding `glansMesh`, the inner preputial rim, and the lower vestibular floor, and preserving micro-relief, fold AO, and wetness.
+- **Fixed Bilateral Upper-Inner-Thigh Fold & Bind-Pose Pelvic Shading Guard During Peak Leg Animation (`BlossomSdfBodyBuilder.kt`, `VulvaGlRenderer.kt`)**
+  - Replaced the 2D `(x, y)` `ovalR` exclusion and `patchGuard` in `BlossomSdfBodyBuilder.buildLegSkinCache()` with a 3D anterior pelvic collar distance (`collarSurfaceZ = 0.56`, `collarDzNorm = max(0, z - collarSurfaceZ) / 0.30`, `collarDist3d = sqrt(ovalR^2 + collarDzNorm^2)`), pinning actual pelvic collar vertices (`collarDist3d <= 1.05`) and feathering smoothly across the groin crease (`1.05..1.68`, with gentler proximal femur ramps `femRamp 0.10..0.54` and `thighRamp 0.18..0.94`) while freeing forward inner-thigh vertices (e.g. `(±0.808, -0.410, 0.959)`) consistently for both spread (`w`) and planted-knee (`kw`) weights — eliminating bilateral upper-inner-thigh mesh foldover/inversion during hard inward squeezes with zero Seam D bridge leakage.
+  - Updated Pass A `pelvicSkinZone`, `pelvicRegionMask`, and `pelvicFinishMask` to evaluate in unposed bind-pose coordinates (`pelvicCoord`) with a bind-depth guard (`pelvicBindZGuard = 1.0 - smoothstep(0.42, 0.68, bindPos.z)` on `blossomBodyMesh`), preventing squeezed forward thighs from triggering pelvic-region shading transitions or `hipCreaseZone` attenuation bands.
+
+---
+
 ## Version 28.0 (`versionCode = 28`)
 **Date:** 2026-11-26
 

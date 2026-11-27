@@ -151,14 +151,21 @@ data class VulvaDeformationState(
      */
     val betaV3HoodMonsBlend: Boolean = false,
     val betaV3HoodMonsStrength: Float = 0.75f,
-    // v27.0–v28.0 Photorealistic Visual Realism Beta toggles (all default false so baseline stays bit-identical)
+    /**
+     * Vulva Beta v3 Option 9 (v29.0 Upper Hood–Mons Color Blend): softly blends the triangular
+     * rose-brown upper hood & anterior commissure patch (center + shoulders) immediately above the
+     * clitoral glans and below the pubic hair into adjacent mons skin, tracking hoodRetract while
+     * explicitly excluding the glans, inner preputial rim, and vestibular floor, and preserving
+     * micro-relief, fold shadow AO, and wetness. OFF by default.
+     */
+    val betaV3HoodMonsUpperBlend: Boolean = false,
+    val betaV3HoodMonsUpperStrength: Float = 0.75f,
+    // v27.0–v29.0 Photorealistic Visual Realism Beta toggles (all default false so baseline stays bit-identical)
     val betaRealismLayeredHair: Boolean = false,
-    val betaRealismSkinDetail: Boolean = false,
     val betaRealismEyesAndLashes: Boolean = false,
     val betaRealismContactShadows: Boolean = false,
     val betaRealismDynamicCreases: Boolean = false,
     val betaRealismFacialMicro: Boolean = false,
-    val betaRealismStudioLighting: Boolean = false,
     val betaRealismSurfaceMicro: Boolean = false
 )
 
@@ -349,6 +356,8 @@ class VulvaAnatomySceneMesh {
     private var lastVulvaBetaV3MedialRootStrength = Float.NaN
     private var lastVulvaBetaV3HoodMonsBlend = false
     private var lastVulvaBetaV3HoodMonsStrength = Float.NaN
+    private var lastVulvaBetaV3HoodMonsUpperBlend = false
+    private var lastVulvaBetaV3HoodMonsUpperStrength = Float.NaN
     private var lastBetaShortPerineum = false
     private var lastBetaSoftButtockTable = false
     private var lastBetaSmoothVulvaSeam = false
@@ -719,7 +728,10 @@ class VulvaAnatomySceneMesh {
                     state.betaV3MedialRootStrength != lastVulvaBetaV3MedialRootStrength) ||
                 state.betaV3HoodMonsBlend != lastVulvaBetaV3HoodMonsBlend ||
                 (state.betaV3HoodMonsBlend &&
-                    state.betaV3HoodMonsStrength != lastVulvaBetaV3HoodMonsStrength)
+                    state.betaV3HoodMonsStrength != lastVulvaBetaV3HoodMonsStrength) ||
+                state.betaV3HoodMonsUpperBlend != lastVulvaBetaV3HoodMonsUpperBlend ||
+                (state.betaV3HoodMonsUpperBlend &&
+                    state.betaV3HoodMonsUpperStrength != lastVulvaBetaV3HoodMonsUpperStrength)
             if (vulvaNeedsUpdate) {
                 updateBlossomVulvaPatch(state)
                 updateClitoralGlans(state, includeLithotomy = true)
@@ -909,7 +921,10 @@ class VulvaAnatomySceneMesh {
                     state.betaV3MedialRootStrength != lastVulvaBetaV3MedialRootStrength) ||
                 state.betaV3HoodMonsBlend != lastVulvaBetaV3HoodMonsBlend ||
                 (state.betaV3HoodMonsBlend &&
-                    state.betaV3HoodMonsStrength != lastVulvaBetaV3HoodMonsStrength)
+                    state.betaV3HoodMonsStrength != lastVulvaBetaV3HoodMonsStrength) ||
+                state.betaV3HoodMonsUpperBlend != lastVulvaBetaV3HoodMonsUpperBlend ||
+                (state.betaV3HoodMonsUpperBlend &&
+                    state.betaV3HoodMonsUpperStrength != lastVulvaBetaV3HoodMonsUpperStrength)
             if (pelvisVulvaNeedsUpdate) {
                 updateContouredPelvis(state)
                 updateClitoralGlans(state, includeLithotomy = false)
@@ -957,6 +972,8 @@ class VulvaAnatomySceneMesh {
         lastVulvaBetaV3MedialRootStrength = state.betaV3MedialRootStrength
         lastVulvaBetaV3HoodMonsBlend = state.betaV3HoodMonsBlend
         lastVulvaBetaV3HoodMonsStrength = state.betaV3HoodMonsStrength
+        lastVulvaBetaV3HoodMonsUpperBlend = state.betaV3HoodMonsUpperBlend
+        lastVulvaBetaV3HoodMonsUpperStrength = state.betaV3HoodMonsUpperStrength
     }
 
     private fun updateBlossomBreasts(s: VulvaDeformationState) {
@@ -1059,6 +1076,7 @@ class VulvaAnatomySceneMesh {
         val foldS = if (s.betaV3IntricateLabiaFolds) s.betaV3LabiaFoldsStrength.coerceIn(0f, 1f) * v3PatchMask else 0f
         val medRootS = if (s.betaV3MedialRootContinuity) s.betaV3MedialRootStrength.coerceIn(0f, 1f) * v3PatchMask else 0f
         val hoodMonsS = if (s.betaV3HoodMonsBlend) s.betaV3HoodMonsStrength.coerceIn(0f, 1f) * v3PatchMask else 0f
+        val hoodMonsUpperS = if (s.betaV3HoodMonsUpperBlend) s.betaV3HoodMonsUpperStrength.coerceIn(0f, 1f) * v3PatchMask else 0f
 
         // Teardrop outer labia majora crests framing the continuous inner arch naturally
         // Beta v3 Toggle 3 (Subtle Anatomical Asymmetry): organic left/right fullness & longitudinal peak offset
@@ -1404,7 +1422,7 @@ class VulvaAnatomySceneMesh {
             smoothStep(0.38f, 0.08f, abs(x)) * smoothBell(y, -0.52f, 0.46f, 0.16f)
         }
         val anusMucosaHint = exp(-aR2 * 3.2f) * 0.24f
-        val mucosa = (effectiveVestibuleColorMask * 1.05f + warmInnerLabiaMajora * 0.16f + anusMucosaHint).coerceIn(0f, 1f)
+        var mucosa = (effectiveVestibuleColorMask * 1.05f + warmInnerLabiaMajora * 0.16f + anusMucosaHint).coerceIn(0f, 1f)
         val wetness = (effectiveVestibuleColorMask * (0.34f + 0.28f * cavityOpen) +
             exp(-uR2 * 1.8f) * 0.28f * effectiveVestibuleColorMask +
             exp(-iR2 * 1.05f) * 0.34f +
@@ -1491,6 +1509,27 @@ class VulvaAnatomySceneMesh {
             val hoodApronX = 1f - smoothStep(0.085f, 0.185f, abs(x))
             val hoodApron = hoodApronY * hoodApronX * (1f - smoothStep(0.32f, 0.72f, mucosa))
             pigment *= (1f - hoodApron * hoodMonsS * 0.78f)
+        }
+        // Beta v3 Option 9 (v29.0 Upper Hood–Mons Color Blend):
+        // Softly feathers the rose-brown triangular upper-hood & anterior-commissure island (center +
+        // two shoulders) immediately above the glans and below the pubic hair into adjacent mons skin,
+        // even where vestibule mucosa is high (~0.81). Anchored to hoodApexY so it follows hoodRetract,
+        // strictly above the vestibular floor, and preserves dz, wetness, and AO fold shadow identically.
+        if (hoodMonsUpperS > 1e-5f) {
+            val hoodApexY = 0.292f + s.hoodRetract * 0.088f
+            val spreadExpand = avgOuter.coerceIn(0f, 1f) * 0.045f
+            val upperYLow = smoothStep(hoodApexY - 0.020f, hoodApexY + 0.055f, y)
+            val upperYHigh = 1f - smoothStep(0.47f + s.hoodRetract * 0.04f, 0.63f + s.hoodRetract * 0.04f, y)
+            val yTriNorm = ((y - hoodApexY) / (0.24f + s.hoodRetract * 0.03f)).coerceIn(0f, 1f)
+            val halfWInner = 0.115f + spreadExpand - 0.035f * yTriNorm
+            val halfWOuter = 0.215f + spreadExpand - 0.050f * yTriNorm
+            val upperXMask = 1f - smoothStep(halfWInner, halfWOuter, abs(x))
+            val upperHoodMask = (upperYLow * upperYHigh * upperXMask).coerceIn(0f, 1f)
+            if (upperHoodMask > 1e-5f) {
+                val blendW = upperHoodMask * hoodMonsUpperS
+                mucosa *= (1f - blendW * 0.90f)
+                pigment *= (1f - blendW * 0.86f)
+            }
         }
 
         out.dz = dz
@@ -1658,6 +1697,7 @@ class VulvaAnatomySceneMesh {
         val foldS = if (s.betaV3IntricateLabiaFolds) s.betaV3LabiaFoldsStrength.coerceIn(0f, 1f) else 0f
         val medRootS = if (s.betaV3MedialRootContinuity) s.betaV3MedialRootStrength.coerceIn(0f, 1f) else 0f
         val hoodMonsS = if (s.betaV3HoodMonsBlend) s.betaV3HoodMonsStrength.coerceIn(0f, 1f) else 0f
+        val hoodMonsUpperS = if (s.betaV3HoodMonsUpperBlend) s.betaV3HoodMonsUpperStrength.coerceIn(0f, 1f) else 0f
 
         for (r in 0 until archRows) {
             val arcS = (r.toFloat() / (archRows - 1)) * 2f - 1f
@@ -2005,9 +2045,18 @@ class VulvaAnatomySceneMesh {
                 val hoodDorsalSkinW = if (hoodMonsS > 1e-5f) {
                     (hoodMask * smoothStep(0.11f, 0.34f, u) * hoodMonsS).coerceIn(0f, 1f)
                 } else 0f
+                // Beta v3 Option 9 (v29.0): matching upper-hood & anterior-commissure color blend on the
+                // dorsal arch side of the arch-to-patch transition (follows apexY/hoodRetract, strictly
+                // preserves inner preputial rim u < 0.16, lower labia, wetness, and fold shadow AO).
+                val hoodUpperDorsalW = if (hoodMonsUpperS > 1e-5f) {
+                    val upperArchY = smoothStep(apexY - 0.030f, apexY + 0.045f, py)
+                    val dorsalRimGuard = smoothStep(0.16f, 0.36f, u)
+                    (hoodMask * upperArchY * dorsalRimGuard * hoodMonsUpperS).coerceIn(0f, 1f)
+                } else 0f
+                val combinedHoodColorW = max(hoodDorsalSkinW, hoodUpperDorsalW)
 
                 val archMucosa = ((0.90f * innerFaceMask + 0.40f * (1f - innerFaceMask) * (1f - smoothStep(0.34f, 0.74f, u))) *
-                    (1f - hoodOuterSkin * 0.96f) * (1f - hoodDorsalSkinW * 0.88f)).coerceIn(0f, 1f)
+                    (1f - hoodOuterSkin * 0.96f) * (1f - combinedHoodColorW * 0.90f)).coerceIn(0f, 1f)
                 // Beta v3 Toggle 6: richer wetness pooling in inner labial fold troughs & softer sheen on crests
                 val tangleWetDelta = if (innerTangleMask > 1e-5f) {
                     (-innerTangleWave * 0.22f + 0.08f) * innerTangleMask
@@ -2023,7 +2072,7 @@ class VulvaAnatomySceneMesh {
                 val rawArchPigment = (0.12f + 0.44f * freeEdgeRim * rimOrganicMod * labiaMask +
                     0.16f * freeEdgeRim * hoodMask + foldCrevice * 0.12f + tanglePigDelta)
                     .coerceIn(0f, 1f)
-                val archPigment = (rawArchPigment * (1f - hoodDorsalSkinW * 0.88f)).coerceIn(0f, 1f)
+                val archPigment = (rawArchPigment * (1f - combinedHoodColorW * 0.88f)).coerceIn(0f, 1f)
 
                 // Beta v3 Toggle 5 (Soft Labial-Vestibule Color Blend) & Option 7: ease the dark rootShadow band
                 // at the medial labial base so it merges into the aligned vestibule floor without a harsh line!
