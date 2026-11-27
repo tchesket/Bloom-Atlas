@@ -143,7 +143,23 @@ data class VulvaDeformationState(
     val rightArmShift: Float = 0f,
     val leftFingerCurl: Float = 0f,
     val rightFingerCurl: Float = 0f,
-    val mouthOpen: Float = 0f
+    val mouthOpen: Float = 0f,
+    /**
+     * Vulva Beta v3 Option 8 (v28.0 Clitoral Hood–Mons Skin Blend): smoothly harmonizes the dorsal
+     * and outer clitoral hood coloration & pigmentation into the natural surrounding mons pubis skin
+     * while preserving the delicate glistening inner preputial edge and clitoral glans. OFF by default.
+     */
+    val betaV3HoodMonsBlend: Boolean = false,
+    val betaV3HoodMonsStrength: Float = 0.75f,
+    // v27.0–v28.0 Photorealistic Visual Realism Beta toggles (all default false so baseline stays bit-identical)
+    val betaRealismLayeredHair: Boolean = false,
+    val betaRealismSkinDetail: Boolean = false,
+    val betaRealismEyesAndLashes: Boolean = false,
+    val betaRealismContactShadows: Boolean = false,
+    val betaRealismDynamicCreases: Boolean = false,
+    val betaRealismFacialMicro: Boolean = false,
+    val betaRealismStudioLighting: Boolean = false,
+    val betaRealismSurfaceMicro: Boolean = false
 )
 
 class DynamicGlMesh(
@@ -331,6 +347,8 @@ class VulvaAnatomySceneMesh {
     private var lastVulvaBetaV3LabiaFoldsStrength = Float.NaN
     private var lastVulvaBetaV3MedialRootContinuity = false
     private var lastVulvaBetaV3MedialRootStrength = Float.NaN
+    private var lastVulvaBetaV3HoodMonsBlend = false
+    private var lastVulvaBetaV3HoodMonsStrength = Float.NaN
     private var lastBetaShortPerineum = false
     private var lastBetaSoftButtockTable = false
     private var lastBetaSmoothVulvaSeam = false
@@ -345,6 +363,8 @@ class VulvaAnatomySceneMesh {
     val blossomHeadMesh: DynamicGlMesh
     val blossomEyesMesh: DynamicGlMesh
     val blossomHairMesh: DynamicGlMesh
+    val blossomHairWispsMesh: DynamicGlMesh
+    val blossomEyelashesMesh: DynamicGlMesh
     private val blossomAnteriorLut = BlossomSdfBodyBuilder.buildAnteriorSurfaceLut()
     private var syncedAnteriorLut: BlossomSdfBodyBuilder.AnteriorSurfaceLut? = null
     private var syncedLutShortPerineum = false
@@ -429,7 +449,9 @@ class VulvaAnatomySceneMesh {
 
     val blossomSkinMeshes: List<DynamicGlMesh>
     val blossomEyeMeshes: List<DynamicGlMesh>
+    val blossomEyelashMeshes: List<DynamicGlMesh>
     val blossomHairMeshes: List<DynamicGlMesh>
+    val blossomHairWispMeshes: List<DynamicGlMesh>
     val blossomNailMeshes: List<DynamicGlMesh>
     val blossomDrapeMeshes: List<DynamicGlMesh>
 
@@ -522,11 +544,15 @@ class VulvaAnatomySceneMesh {
         )
         blossomEyesMesh = BlossomUpperBodyBuilder.buildBlossomEyesMesh()
         blossomHairMesh = BlossomUpperBodyBuilder.buildBlossomHairMesh()
+        blossomHairWispsMesh = BlossomUpperBodyBuilder.buildBlossomHairWispsMesh()
+        blossomEyelashesMesh = BlossomUpperBodyBuilder.buildBlossomEyelashesMesh(blossomHeadMesh)
         blossomHeadRigCache = BlossomUpperBodyBuilder.buildHeadRigCache(
             bodyMesh = blossomBodyMesh,
             headMesh = blossomHeadMesh,
             eyesMesh = blossomEyesMesh,
-            hairMesh = blossomHairMesh
+            hairMesh = blossomHairMesh,
+            hairWispsMesh = blossomHairWispsMesh,
+            eyelashesMesh = blossomEyelashesMesh
         )
         blossomHeadNeckHairBetaCache = BlossomUpperBodyBuilder.buildHeadNeckHairBetaCache(
             bodyMesh = blossomBodyMesh,
@@ -550,7 +576,9 @@ class VulvaAnatomySceneMesh {
             labiaHoodArchMesh
         )
         blossomEyeMeshes = listOf(blossomEyesMesh)
+        blossomEyelashMeshes = listOf(blossomEyelashesMesh)
         blossomHairMeshes = listOf(blossomHairMesh)
+        blossomHairWispMeshes = listOf(blossomHairWispsMesh)
         blossomNailMeshes = listOf(blossomNailsMesh)
         blossomDrapeMeshes = listOf(examCushionMesh)
 
@@ -688,7 +716,10 @@ class VulvaAnatomySceneMesh {
                     state.betaV3LabiaFoldsStrength != lastVulvaBetaV3LabiaFoldsStrength) ||
                 state.betaV3MedialRootContinuity != lastVulvaBetaV3MedialRootContinuity ||
                 (state.betaV3MedialRootContinuity &&
-                    state.betaV3MedialRootStrength != lastVulvaBetaV3MedialRootStrength)
+                    state.betaV3MedialRootStrength != lastVulvaBetaV3MedialRootStrength) ||
+                state.betaV3HoodMonsBlend != lastVulvaBetaV3HoodMonsBlend ||
+                (state.betaV3HoodMonsBlend &&
+                    state.betaV3HoodMonsStrength != lastVulvaBetaV3HoodMonsStrength)
             if (vulvaNeedsUpdate) {
                 updateBlossomVulvaPatch(state)
                 updateClitoralGlans(state, includeLithotomy = true)
@@ -820,7 +851,9 @@ class VulvaAnatomySceneMesh {
                     eyelidGazeTrack = state.eyelidGazeTrack,
                     swallowPhase = state.swallowPhase,
                     nostrilBreath = state.nostrilBreath,
-                    mouthOpen = state.mouthOpen
+                    mouthOpen = state.mouthOpen,
+                    hairWispsMesh = blossomHairWispsMesh,
+                    eyelashesMesh = blossomEyelashesMesh
                 )
                 lastAppliedHeadTurn = state.headTurn
                 lastAppliedHeadPitch = state.headPitch
@@ -873,7 +906,10 @@ class VulvaAnatomySceneMesh {
                     state.betaV3LabiaFoldsStrength != lastVulvaBetaV3LabiaFoldsStrength) ||
                 state.betaV3MedialRootContinuity != lastVulvaBetaV3MedialRootContinuity ||
                 (state.betaV3MedialRootContinuity &&
-                    state.betaV3MedialRootStrength != lastVulvaBetaV3MedialRootStrength)
+                    state.betaV3MedialRootStrength != lastVulvaBetaV3MedialRootStrength) ||
+                state.betaV3HoodMonsBlend != lastVulvaBetaV3HoodMonsBlend ||
+                (state.betaV3HoodMonsBlend &&
+                    state.betaV3HoodMonsStrength != lastVulvaBetaV3HoodMonsStrength)
             if (pelvisVulvaNeedsUpdate) {
                 updateContouredPelvis(state)
                 updateClitoralGlans(state, includeLithotomy = false)
@@ -919,6 +955,8 @@ class VulvaAnatomySceneMesh {
         lastVulvaBetaV3LabiaFoldsStrength = state.betaV3LabiaFoldsStrength
         lastVulvaBetaV3MedialRootContinuity = state.betaV3MedialRootContinuity
         lastVulvaBetaV3MedialRootStrength = state.betaV3MedialRootStrength
+        lastVulvaBetaV3HoodMonsBlend = state.betaV3HoodMonsBlend
+        lastVulvaBetaV3HoodMonsStrength = state.betaV3HoodMonsStrength
     }
 
     private fun updateBlossomBreasts(s: VulvaDeformationState) {
@@ -1020,6 +1058,7 @@ class VulvaAnatomySceneMesh {
         val surfS = if (s.betaV3RegionalSurfaceDetail) s.betaV3SurfaceStrength.coerceIn(0f, 1f) * 3.0f * v3PatchMask else 0f
         val foldS = if (s.betaV3IntricateLabiaFolds) s.betaV3LabiaFoldsStrength.coerceIn(0f, 1f) * v3PatchMask else 0f
         val medRootS = if (s.betaV3MedialRootContinuity) s.betaV3MedialRootStrength.coerceIn(0f, 1f) * v3PatchMask else 0f
+        val hoodMonsS = if (s.betaV3HoodMonsBlend) s.betaV3HoodMonsStrength.coerceIn(0f, 1f) * v3PatchMask else 0f
 
         // Teardrop outer labia majora crests framing the continuous inner arch naturally
         // Beta v3 Toggle 3 (Subtle Anatomical Asymmetry): organic left/right fullness & longitudinal peak offset
@@ -1440,11 +1479,19 @@ class VulvaAnatomySceneMesh {
         val raphePigment = if (rapheSpan > 0.001f) {
             0.130f * exp(-((x / 0.0185f).let { it * it })) * rapheSpan
         } else 0f
-        val pigment = (majoraBodyPigment * 0.22f +
+        var pigment = (majoraBodyPigment * 0.22f +
             medialMargin * 0.28f +
             (leftGroinColorDip + rightGroinColorDip) * 0.09f * groinColorWeight +
             perianalPigment +
             raphePigment).coerceIn(0f, 1f)
+        // Beta v3 Option 8 (v28.0): soften excess anterior-commissure pigmentation right around the
+        // clitoral hood landing apron so the hood transitions organically into natural mons pubis skin.
+        if (hoodMonsS > 1e-5f) {
+            val hoodApronY = smoothStep(0.16f, 0.28f, y) * (1f - smoothStep(0.46f, 0.62f, y))
+            val hoodApronX = 1f - smoothStep(0.085f, 0.185f, abs(x))
+            val hoodApron = hoodApronY * hoodApronX * (1f - smoothStep(0.32f, 0.72f, mucosa))
+            pigment *= (1f - hoodApron * hoodMonsS * 0.78f)
+        }
 
         out.dz = dz
         out.mucosa = mucosa
@@ -1610,6 +1657,7 @@ class VulvaAnatomySceneMesh {
         val blendS = if (s.betaV3LabialVestibuleBlend) s.betaV3LabialBlendStrength.coerceIn(0f, 1f) else 0f
         val foldS = if (s.betaV3IntricateLabiaFolds) s.betaV3LabiaFoldsStrength.coerceIn(0f, 1f) else 0f
         val medRootS = if (s.betaV3MedialRootContinuity) s.betaV3MedialRootStrength.coerceIn(0f, 1f) else 0f
+        val hoodMonsS = if (s.betaV3HoodMonsBlend) s.betaV3HoodMonsStrength.coerceIn(0f, 1f) else 0f
 
         for (r in 0 until archRows) {
             val arcS = (r.toFloat() / (archRows - 1)) * 2f - 1f
@@ -1952,24 +2000,30 @@ class VulvaAnatomySceneMesh {
                 //  - Outer hood & outer skirt (u -> 0.84): 100% EXACT lerp into underlying body skin material -> ZERO border!
                 val innerFaceMask = 1f - smoothStep(0.24f, 0.50f, u)
                 val hoodOuterSkin = hoodMask * smoothStep(0.20f, 0.58f, u)
+                // Beta v3 Option 8 (v28.0): expand natural mons-skin continuity over the dorsal & outer
+                // clitoral hood while keeping the delicate inner preputial edge (u < 0.16) naturally rosy.
+                val hoodDorsalSkinW = if (hoodMonsS > 1e-5f) {
+                    (hoodMask * smoothStep(0.11f, 0.34f, u) * hoodMonsS).coerceIn(0f, 1f)
+                } else 0f
 
                 val archMucosa = ((0.90f * innerFaceMask + 0.40f * (1f - innerFaceMask) * (1f - smoothStep(0.34f, 0.74f, u))) *
-                    (1f - hoodOuterSkin * 0.96f)).coerceIn(0f, 1f)
+                    (1f - hoodOuterSkin * 0.96f) * (1f - hoodDorsalSkinW * 0.88f)).coerceIn(0f, 1f)
                 // Beta v3 Toggle 6: richer wetness pooling in inner labial fold troughs & softer sheen on crests
                 val tangleWetDelta = if (innerTangleMask > 1e-5f) {
                     (-innerTangleWave * 0.22f + 0.08f) * innerTangleMask
                 } else 0f
-                val archWetness = (((0.64f * innerFaceMask + 0.20f * heightFrac) * (1f - hoodOuterSkin * 0.92f) +
-                    0.055f) + tangleWetDelta).coerceIn(0.055f, 0.88f)
+                val archWetness = (((0.64f * innerFaceMask + 0.20f * heightFrac) * (1f - hoodOuterSkin * 0.92f) *
+                    (1f - hoodDorsalSkinW * 0.86f) + 0.055f) + tangleWetDelta).coerceIn(0.055f, 0.88f)
 
                 val foldCrevice = (0.5f - 0.5f * radialFoldWave) * heightFrac * labiaMask * wrinkleTension
                 val freeEdgeRim = exp(-((u - crestU) / 0.15f).let { it * it })
                 val tanglePigDelta = if (innerTangleMask > 1e-5f) {
                     (0.09f * innerTangleWave + 0.06f * sin(absS * 21.0f + u * 9.5f + asymPhase)) * innerTangleMask
                 } else 0f
-                val archPigment = (0.12f + 0.44f * freeEdgeRim * rimOrganicMod * labiaMask +
+                val rawArchPigment = (0.12f + 0.44f * freeEdgeRim * rimOrganicMod * labiaMask +
                     0.16f * freeEdgeRim * hoodMask + foldCrevice * 0.12f + tanglePigDelta)
                     .coerceIn(0f, 1f)
+                val archPigment = (rawArchPigment * (1f - hoodDorsalSkinW * 0.88f)).coerceIn(0f, 1f)
 
                 // Beta v3 Toggle 5 (Soft Labial-Vestibule Color Blend) & Option 7: ease the dark rootShadow band
                 // at the medial labial base so it merges into the aligned vestibule floor without a harsh line!
@@ -1979,7 +2033,8 @@ class VulvaAnatomySceneMesh {
                 val tangleAoDrop = if (innerTangleMask > 1e-5f) {
                     ((-innerTangleWave).coerceAtLeast(0f) * 0.14f) * innerTangleMask
                 } else 0f
-                val archAo = (0.95f - rootShadow - foldCrevice * 0.11f - tangleAoDrop + 0.06f * heightFrac).coerceIn(0.46f, 1f)
+                val baseArchAo = (0.95f - rootShadow - foldCrevice * 0.11f - tangleAoDrop + 0.06f * heightFrac).coerceIn(0.46f, 1f)
+                val archAo = (baseArchAo + (0.98f - baseArchAo) * hoodDorsalSkinW * 0.42f).coerceIn(0.46f, 1f)
 
                 // Reach 100% exact underlying body material BEFORE u = 0.84 so outer skirt transition is invisible!
                 // Beta v3 Toggle 1 (Organic Tissue Continuity, 3x scaled): softens base landing transition smoothly

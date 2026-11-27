@@ -221,6 +221,10 @@ class VulvaGlTextureView(
     private var uBetaV3IntricateLabiaFoldsLoc = -1
     private var uBetaV3MedialRootContinuityLoc = -1
     private var uIsLabiaArchMeshLoc = -1
+    private var uBetaRealismFlags1Loc = -1
+    private var uBetaRealismFlags2Loc = -1
+    private var uBetaRealismPoseLoc = -1
+    private var uBetaRealismFlags3Loc = -1
 
     private var surfaceWidth = 1
     private var surfaceHeight = 1
@@ -574,6 +578,10 @@ class VulvaGlTextureView(
         uBetaV3IntricateLabiaFoldsLoc = GLES20.glGetUniformLocation(program, "uBetaV3IntricateLabiaFolds")
         uBetaV3MedialRootContinuityLoc = GLES20.glGetUniformLocation(program, "uBetaV3MedialRootContinuity")
         uIsLabiaArchMeshLoc = GLES20.glGetUniformLocation(program, "uIsLabiaArchMesh")
+        uBetaRealismFlags1Loc = GLES20.glGetUniformLocation(program, "uBetaRealismFlags1")
+        uBetaRealismFlags2Loc = GLES20.glGetUniformLocation(program, "uBetaRealismFlags2")
+        uBetaRealismPoseLoc = GLES20.glGetUniformLocation(program, "uBetaRealismPose")
+        uBetaRealismFlags3Loc = GLES20.glGetUniformLocation(program, "uBetaRealismFlags3")
 
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glDepthFunc(GLES20.GL_LEQUAL)
@@ -811,6 +819,36 @@ class VulvaGlTextureView(
         GLES20.glUniform1f(
             uBetaV3MedialRootContinuityLoc,
             if (currentDeform.betaV3MedialRootContinuity) currentDeform.betaV3MedialRootStrength.coerceIn(0f, 1f) else 0f
+        )
+        // v27.0 Photorealistic Visual Realism packed uniforms (all strictly 0.0 when toggled OFF or outside full-body mode)
+        GLES20.glUniform4f(
+            uBetaRealismFlags1Loc,
+            if (legsMode && currentDeform.betaRealismLayeredHair) 1.0f else 0.0f,
+            if (legsMode && currentDeform.betaRealismSkinDetail) 1.0f else 0.0f,
+            if (legsMode && currentDeform.betaRealismEyesAndLashes) 1.0f else 0.0f,
+            if (legsMode && currentDeform.betaRealismContactShadows) 1.0f else 0.0f
+        )
+        GLES20.glUniform4f(
+            uBetaRealismFlags2Loc,
+            if (legsMode && currentDeform.betaRealismDynamicCreases) 1.0f else 0.0f,
+            currentDeform.headTurn.coerceIn(-1f, 1f),
+            currentDeform.leftLegSpread.coerceIn(-1.2f, 1.2f),
+            currentDeform.rightLegSpread.coerceIn(-1.2f, 1.2f)
+        )
+        GLES20.glUniform4f(
+            uBetaRealismPoseLoc,
+            currentDeform.selfSpreadPose.coerceIn(0f, 1f),
+            currentDeform.leftKneeShift.coerceIn(-1.5f, 1.5f),
+            currentDeform.rightKneeShift.coerceIn(-1.5f, 1.5f),
+            currentDeform.eyeBlink.coerceIn(0f, 1f)
+        )
+        // v28.0 packed uniform: x=Option #8 hood-mons blend (0..1), y=facial micro-detail, z=3-pt studio lighting, w=surface micro-detail
+        GLES20.glUniform4f(
+            uBetaRealismFlags3Loc,
+            if (currentDeform.betaV3HoodMonsBlend) currentDeform.betaV3HoodMonsStrength.coerceIn(0f, 1f) else 0.0f,
+            if (legsMode && currentDeform.betaRealismFacialMicro) 1.0f else 0.0f,
+            if (legsMode && currentDeform.betaRealismStudioLighting) 1.0f else 0.0f,
+            if (legsMode && currentDeform.betaRealismSurfaceMicro) 1.0f else 0.0f
         )
 
         GLES20.glEnableVertexAttribArray(aPosLoc)
@@ -1054,8 +1092,9 @@ class VulvaGlTextureView(
                         GLES20.glVertexAttrib1f(aArchAlphaLoc, 1.0f)
                     }
                 }
+                val useBodyBindCoords = legsMode && glMesh === mesh.blossomBodyMesh
                 if (aBodyBindHoleLoc >= 0) {
-                    if (useSmoothBodyHole) {
+                    if (useSmoothBodyHole || useBodyBindCoords) {
                         ensureBodyBindHoleBuffer()
                         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, session.bodyBindHoleVboId)
                         GLES20.glEnableVertexAttribArray(aBodyBindHoleLoc)
@@ -1143,7 +1182,25 @@ class VulvaGlTextureView(
             drawMeshList(mesh.blossomNailMeshes, materialType = 4.0f)
             GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL)
             drawMeshList(mesh.blossomEyeMeshes, materialType = 2.0f)
+            if (currentDeform.betaRealismEyesAndLashes) {
+                // Pass G: Alpha-feathered 3D upper & lower eyelash fans (depth-tested, no depth write)
+                GLES20.glEnable(GLES20.GL_BLEND)
+                GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                GLES20.glDepthMask(false)
+                drawMeshList(mesh.blossomEyelashMeshes, materialType = 6.0f)
+                GLES20.glDepthMask(true)
+                GLES20.glDisable(GLES20.GL_BLEND)
+            }
             drawMeshList(mesh.blossomHairMeshes, materialType = 3.0f)
+            if (currentDeform.betaRealismLayeredHair) {
+                // Pass F: Alpha-feathered layered hair wisps, baby hairs & backlit flyaways
+                GLES20.glEnable(GLES20.GL_BLEND)
+                GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                GLES20.glDepthMask(false)
+                drawMeshList(mesh.blossomHairWispMeshes, materialType = 5.0f)
+                GLES20.glDepthMask(true)
+                GLES20.glDisable(GLES20.GL_BLEND)
+            }
         } else {
             drawMeshList(mesh.coreMeshes, materialType = 0.0f)
         }
@@ -1861,7 +1918,13 @@ class VulvaGlTextureView(
          *  - Dual-lobe wet mucosal specular BRDF for glistening vestibule & clitoral glans
          *  - Dedicated matte charcoal-plum woven clinical linen pass for Blossom's exam cushion
          */
-        private val FRAGMENT_SHADER: String by lazy { FRAGMENT_SHADER_PART_1 + FRAGMENT_SHADER_PART_2 }
+        private val FRAGMENT_SHADER: String by lazy {
+            buildString(FRAGMENT_SHADER_PART_1.length + FRAGMENT_SHADER_PART_2.length + FRAGMENT_SHADER_PART_3.length) {
+                append(FRAGMENT_SHADER_PART_1)
+                append(FRAGMENT_SHADER_PART_2)
+                append(FRAGMENT_SHADER_PART_3)
+            }
+        }
 
         private const val FRAGMENT_SHADER_PART_1 = """
             precision highp float;
@@ -1904,6 +1967,23 @@ class VulvaGlTextureView(
             uniform float uBetaV3IntricateLabiaFolds;
             uniform float uBetaV3MedialRootContinuity;
             uniform float uIsLabiaArchMesh;
+            uniform vec4 uBetaRealismFlags1; // x=layeredHair, y=skinDetail, z=eyesAndLashes, w=contactShadows
+            uniform vec4 uBetaRealismFlags2; // x=dynamicCreases, y=headTurn, z=leftLegSpread, w=rightLegSpread
+            uniform vec4 uBetaRealismPose;   // x=selfSpreadPose, y=leftKneeShift, z=rightKneeShift, w=eyeBlink
+            uniform vec4 uBetaRealismFlags3; // x=hoodMonsBlend, y=facialMicro, z=studioLighting, w=surfaceMicro
+
+            float sq(float x) {
+                return x * x;
+            }
+
+            float mattressZFrag(float y) {
+                if (y <= 0.72) return -1.14;
+                float yRec = y - 0.72;
+                if (y <= 3.00) return -1.14 - 0.16 * yRec - 0.014 * yRec * yRec;
+                float zAt3 = -1.14 - 0.16 * 2.28 - 0.014 * 2.28 * 2.28;
+                float dy = y - 3.00;
+                return zAt3 - 0.06 * dy - 0.39009524 * (1.0 - exp(-0.42 * dy));
+            }
 
             float hash31(vec3 p) {
                 p = fract(p * vec3(0.1031, 0.11369, 0.13787));
@@ -1979,6 +2059,128 @@ class VulvaGlTextureView(
                 vec3 Lrim = normalize(vec3(0.42, 0.28, -0.84));
 
                 // -----------------------------------------------------------------
+                // PASS G (v27.0): ALPHA-FEATHERED 3D UPPER & LOWER EYELASH FANS
+                // -----------------------------------------------------------------
+                if (uMaterialType > 5.5) {
+                    float lashT = clamp(vMat.x, 0.0, 1.0); // 0=lid root -> 1=curled needle tip
+                    float lashU = clamp(vMat.y, 0.0, 1.0); // 0=inner canthus -> 1=outer canthus
+                    float lashAo = clamp(vMat.z, 0.55, 1.0);
+                    float isUpper = vMat.w;
+
+                    // Procedural tapered individual lash clusters with natural density variation
+                    float freqA = mix(22.0, 32.0, isUpper);
+                    float freqB = mix(37.0, 53.0, isUpper);
+                    float jitter = vnoise3(vRestPos * 140.0) * 0.45;
+                    float clA = 0.5 + 0.5 * sin(lashU * freqA * 6.2831853 + jitter * 4.0 + lashT * 1.15);
+                    float clB = 0.5 + 0.5 * sin(lashU * freqB * 6.2831853 - jitter * 3.0 - lashT * 0.85);
+                    float lashWave = clA * 0.64 + clB * 0.36;
+
+                    // Thick cohesive root band separating cleanly into fine tapered needle tips
+                    float tipThresh = mix(0.20, 0.72, pow(max(lashT, 0.0001), 1.18));
+                    float strandMask = smoothstep(tipThresh - 0.16, tipThresh + 0.14, lashWave);
+                    float rootBand = (1.0 - smoothstep(0.0, 0.24, lashT)) * mix(0.32, 0.78, isUpper);
+                    float tipFade = 1.0 - smoothstep(0.70, 1.0, lashT);
+                    float endFade = smoothstep(0.0, 0.12, lashU) * (1.0 - smoothstep(0.88, 1.0, lashU));
+                    float densityGain = mix(0.50, 0.90, isUpper);
+                    float lashAlpha = clamp(max(strandMask, rootBand) * tipFade * endFade * densityGain, 0.0, 0.92);
+                    if (lashAlpha < 0.025) {
+                        discard;
+                    }
+
+                    // Hair-harmonized deep espresso-charcoal lash fibers with a crisp studio catchlight
+                    vec3 lashBase = mix(uHairBase * 0.22, vec3(0.032, 0.024, 0.024), 0.64);
+                    vec3 lashTip = mix(uHairBase * 0.36, vec3(0.075, 0.058, 0.054), 0.50);
+                    vec3 lashAlbedo = mix(lashBase, lashTip, lashT * 0.65);
+                    float dKeyL = clamp((dot(N, Lkey) + 0.35) / 1.35, 0.0, 1.0);
+                    vec3 HkeyL = normalize(Lkey + V);
+                    float lashSpec = pow(max(dot(N, HkeyL), 0.0), 58.0) * 0.14 * (0.4 + 0.6 * lashT);
+                    vec3 lashLit = lashAlbedo * (0.34 + dKeyL * 0.66) * lashAo +
+                                   mix(uHairSheen, vec3(0.95, 0.90, 0.86), 0.45) * lashSpec;
+                    vec3 lashMapped = lashLit / (lashLit + vec3(0.72));
+                    lashMapped = pow(clamp(lashMapped * 1.24, 0.0, 1.0), vec3(1.01));
+                    gl_FragColor = vec4(lashMapped, lashAlpha);
+                    return;
+                }
+
+                // -----------------------------------------------------------------
+                // PASS F (v28.0): SPECTACULAR MULTI-TIER VOLUMETRIC HAIR LOCK CARDS & FLYAWAYS
+                //                 Kajiya-Kay Dual-Lobe Anisotropic Specular + Jagged Needle Tips
+                // -----------------------------------------------------------------
+                if (uMaterialType > 4.5) {
+                    float tLen = clamp(vMat.x, 0.0, 1.0);   // 0=root -> 1=tip
+                    float uCross = clamp(vMat.y, 0.0, 1.0); // 0..1 across lock width
+                    float wispAo = clamp(vMat.z, 0.45, 1.0);
+                    float isVolLock = step(0.99, vMat.w);   // 1.0 = dense sculpted lock card, 0.0 = airy flyaway wisp
+                    float seed = fract(vMat.w);
+
+                    // 3-scale silky hair fiber hierarchy across the ribbon with staggered jagged needle tips
+                    float uCentered = abs(uCross - 0.5) * 2.0;
+                    float waveShift = (vnoise3(vRestPos * vec3(14.0, 8.0, 14.0) + vec3(seed * 9.3, 0.0, 0.0)) - 0.5) * 0.16;
+                    float uWarp = uCross + waveShift;
+                    float bundleF = 0.5 + 0.5 * sin(uWarp * (3.5 + seed * 2.5) * 6.2831853 + tLen * 2.0 + seed * 11.0);
+                    float strandA = 0.5 + 0.5 * sin(uWarp * (8.0 + seed * 5.0) * 6.2831853 + tLen * 3.4 + seed * 7.3);
+                    float strandB = 0.5 + 0.5 * cos(uWarp * (19.0 + seed * 8.0) * 6.2831853 - tLen * 2.6 + seed * 5.1);
+                    float fineFiber = strandA * 0.56 + strandB * 0.44;
+                    float strandPattern = bundleF * 0.30 + fineFiber * 0.70;
+
+                    // Individual-strand staggered tip lengths so lock ends split into natural feathered points!
+                    float tipReach = mix(0.60, 0.98, bundleF * 0.55 + strandA * 0.45);
+                    float widthFade = 1.0 - smoothstep(mix(0.36, 0.58, isVolLock), 0.99, uCentered);
+                    float rootFade = smoothstep(0.0, mix(0.14, 0.09, isVolLock), tLen);
+                    float tipFade = 1.0 - smoothstep(tipReach - 0.20, tipReach, tLen);
+                    float splitTipThresh = mix(mix(0.24, 0.12, isVolLock), mix(0.66, 0.54, isVolLock), smoothstep(0.32, 0.96, tLen));
+                    float strandMask = smoothstep(splitTipThresh - 0.17, splitTipThresh + 0.17, strandPattern);
+                    float coreFill = mix(0.24, 0.62, isVolLock) * (1.0 - smoothstep(0.45, 0.92, tLen));
+                    float maxAlpha = mix(0.68, 0.94, isVolLock);
+                    float wispAlpha = clamp(widthFade * rootFade * tipFade * max(strandMask, coreFill) * maxAlpha, 0.0, 0.95);
+                    if (wispAlpha < 0.025) {
+                        discard;
+                    }
+
+                    // Hair-fiber cross-normal perturbation + true Kajiya-Kay R & TRT dual-lobe specular bands
+                    vec3 flowRefW = abs(N.y) < 0.94 ? vec3(0.0, -1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+                    vec3 Twisp = normalize(flowRefW - N * dot(flowRefW, N));
+                    vec3 Bwisp = normalize(cross(N, Twisp));
+                    vec3 Nw = normalize(N + Bwisp * ((strandA - 0.5) * 0.24 + (strandB - 0.5) * 0.14));
+
+                    float strandJitter = (fineFiber - 0.5) * 0.14 + (seed - 0.5) * 0.06;
+                    vec3 T1w = normalize(Twisp + Nw * (-0.10 + strandJitter));
+                    vec3 T2w = normalize(Twisp + Nw * (0.14 + (bundleF - 0.5) * 0.08));
+                    vec3 HkeyW = normalize(Lkey + V);
+                    vec3 HfillW = normalize(Lfill + V);
+                    float sinTH1w = sqrt(max(1.0 - sq(dot(T1w, HkeyW)), 0.0001));
+                    float sinTH2w = sqrt(max(1.0 - sq(dot(T2w, HkeyW)), 0.0001));
+                    float sinTH2f = sqrt(max(1.0 - sq(dot(T2w, HfillW)), 0.0001));
+
+                    // Rich natural melanin lowlights & sunlit warm highlight streaks per fiber
+                    float melaninVar = clamp(bundleF * 0.40 + fineFiber * 0.45 + seed * 0.15, 0.0, 1.0);
+                    vec3 deepLow = uHairBase * 0.56;
+                    vec3 warmHigh = mix(uHairHighlight, uHairSheen, 0.22);
+                    vec3 wispAlbedo = mix(deepLow, uHairBase, smoothstep(0.10, 0.52, melaninVar));
+                    wispAlbedo = mix(wispAlbedo, warmHigh, smoothstep(0.46, 0.92, melaninVar) * (0.55 + 0.35 * tLen));
+                    float rootShadowW = mix(0.76, 1.08, smoothstep(0.0, 0.38, tLen));
+
+                    float dKeyW = clamp((dot(Nw, Lkey) + 0.34) / 1.34, 0.0, 1.0);
+                    float dFillW = clamp((dot(Nw, Lfill) + 0.34) / 1.34, 0.0, 1.0);
+                    float keyVisW = smoothstep(-0.22, 0.36, dot(Nw, Lkey));
+                    float specRw = pow(sinTH1w, 72.0) * (0.18 + 0.34 * fineFiber) * keyVisW;
+                    float specTRTw = (pow(sinTH2w, 20.0) * 0.22 * keyVisW + pow(sinTH2f, 18.0) * 0.12) * (0.55 + 0.45 * bundleF);
+                    float studioBoostW = (uBetaRealismFlags3.z > 0.5) ? 1.35 : 1.0;
+                    float haloRim = pow(clamp(1.0 - max(dot(Nw, V), 0.0), 0.0, 1.0), 2.0) *
+                                    (0.28 + 0.26 * clamp(dot(Nw, Lrim) * 0.5 + 0.5, 0.15, 1.0)) * studioBoostW;
+                    float fiberAo = clamp(wispAo * mix(0.74, 1.06, bundleF * 0.65 + fineFiber * 0.35), 0.38, 1.0);
+
+                    vec3 wispLit = wispAlbedo * rootShadowW * (0.25 + dKeyW * 0.72 + dFillW * 0.26) * fiberAo +
+                                   mix(uHairSheen, vec3(1.0, 0.97, 0.93), 0.30) * specRw * fiberAo +
+                                   uHairHighlight * specTRTw * 1.45 * fiberAo +
+                                   mix(uHairHighlight, uHairSheen, 0.50) * haloRim * (0.55 + 0.45 * (1.0 - isVolLock));
+                    vec3 wispMapped = wispLit / (wispLit + vec3(0.72));
+                    wispMapped = pow(clamp(wispMapped * 1.26, 0.0, 1.0), vec3(1.01));
+                    gl_FragColor = vec4(wispMapped, wispAlpha);
+                    return;
+                }
+
+                // -----------------------------------------------------------------
                 // PASS E: NATURAL WARM TRANSLUCENT PINK KERATIN 3D FINGERNAILS & TOENAILS
                 // -----------------------------------------------------------------
                 if (uMaterialType > 3.5) {
@@ -2018,14 +2220,22 @@ class VulvaGlTextureView(
                     vec3 HkeyN = normalize(Lkey + V);
                     vec3 HfillN = normalize(Lfill + V);
                     // Tight, natural healthy keratin gloss (warm cream tint, zero broad metallic/silver Fresnel!)
-                    float spec1 = pow(max(dot(N, HkeyN), 0.0), 108.0) * 0.22;
-                    float spec2 = pow(max(dot(N, HfillN), 0.0), 52.0) * 0.08;
-                    float nailFresnel = pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 4.0) * 0.035;
+                    // v28.0 Surface Micro-Detail: crisp longitudinal keratin micro-ridges, soft lunula clarity & hydrated nail crown sheen
+                    float nailMicroRidge = 0.0;
+                    if (uBetaRealismFlags3.w > 0.5) {
+                        nailMicroRidge = sin(nailU * 58.0 + vnoise3(vRestPos * 90.0) * 2.2) * 0.5 + 0.5;
+                        nailAlbedo = mix(nailAlbedo, mix(nailBed, warmCream, 0.40), lunulaMask * 0.55);
+                        nailAlbedo *= mix(0.975, 1.022, nailMicroRidge);
+                    }
+                    float spec1 = pow(max(dot(N, HkeyN), 0.0), mix(108.0, 148.0, uBetaRealismFlags3.w)) *
+                                  (0.22 + uBetaRealismFlags3.w * (0.14 + 0.05 * nailMicroRidge));
+                    float spec2 = pow(max(dot(N, HfillN), 0.0), 52.0) * (0.08 + uBetaRealismFlags3.w * 0.05);
+                    float nailFresnel = pow(clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0), 4.0) * (0.035 + uBetaRealismFlags3.w * 0.03);
 
                     vec3 nailLit = nailAlbedo * (0.28 + 0.06 * (N.y * 0.5 + 0.5)) * nailColorAo +
                                    nailAlbedo * (diffKeyNail * 0.80 * vec3(1.03, 0.96, 0.92) + diffFillNail * 0.24 * vec3(0.98, 0.93, 0.90)) * (vec3(0.32) + 0.68 * nailColorAo) +
                                    nailSssGlow * nailTerminator * nailColorAo +
-                                   vec3(1.0, 0.92, 0.87) * (spec1 + spec2 + nailFresnel);
+                                   vec3(1.0, 0.93, 0.89) * (spec1 + spec2 + nailFresnel);
                     vec3 nailMapped = nailLit / (nailLit + vec3(0.76));
                     nailMapped = pow(clamp(nailMapped * 1.32, 0.0, 1.0), vec3(1.01));
                     float nailLuma = dot(nailMapped, vec3(0.299, 0.587, 0.114));
@@ -2094,6 +2304,55 @@ class VulvaGlTextureView(
                                        uHairSheen * primarySheen * strandAo +
                                        uHairHighlight * secondarySheen * 1.15 * strandAo +
                                        uHairSheen * 0.50 * rimSheen * strandAo;
+                        if (uBetaRealismFlags1.x > 0.5) {
+                            // v28.0 Spectacular Layered Hair: Natural Scalp Part Line, Macro Lock Clump Valleys,
+                            // 3-Scale Melanin Strand Richness & True Kajiya-Kay R + TRT Dual-Lobe Anisotropic Sheen!
+                            float macroClump = vnoise3(hp * vec3(28.0, 6.2, 28.0));
+                            float ultraFineStrand = vnoise3(hp * vec3(290.0, 48.0, 290.0));
+                            float clumpGroove = smoothstep(0.18, 0.78, macroClump);
+                            float deepClumpAo = mix(0.68, 1.08, clumpGroove) * mix(0.86, 1.06, ultraFineStrand);
+
+                            // Natural right-of-center scalp part line on the upper crown (subtle warm scalp peek + dark root crease)
+                            float partCurveX = 0.145 + (hp.y - 6.85) * 0.08 + (macroClump - 0.5) * 0.025;
+                            float partDist = abs(hp.x - partCurveX);
+                            float partZone = smoothstep(6.72, 6.94, hp.y) * smoothstep(-0.22, 0.18, hp.z) *
+                                             smoothstep(0.25, 0.78, N.y + N.z * 0.55);
+                            float partSliver = exp(-sq(partDist / 0.020)) * partZone;
+                            float partRootShadow = exp(-sq((partDist - 0.036) / 0.032)) * partZone;
+
+                            // Rich natural strand-by-strand melanin color depth (deep lowlights + warm sunlit highlights)
+                            float strandRich = clamp(macroClump * 0.34 + fineStrandTone * 0.40 + ultraFineStrand * 0.26, 0.0, 1.0);
+                            vec3 v28Albedo = mix(uHairBase * 0.58, hairAlbedo, smoothstep(0.12, 0.56, strandRich));
+                            v28Albedo = mix(v28Albedo, mix(uHairHighlight, uHairSheen, 0.20) * 1.12, smoothstep(0.54, 0.92, strandRich) * 0.52);
+                            v28Albedo = mix(v28Albedo, uSkinBase * vec3(0.92, 0.84, 0.80), partSliver * 0.58);
+                            float rootToTip = mix(0.76, 1.09, smoothstep(0.0, 0.44, strandFlow));
+                            float v28Ao = clamp(strandAo * deepClumpAo * (1.0 - partRootShadow * 0.28), 0.26, 1.0);
+
+                            // True Kajiya-Kay Anisotropic Specular: sin(T, H) = sqrt(1 - (T.H)^2)
+                            // Primary R-lobe (crisp neutral-gold cuticle halo shifted toward root) +
+                            // Secondary TRT-lobe (rich glowing pigment-colored transmittance band shifted toward tips)
+                            float fiberShift = (fineStrandTone - 0.5) * 0.14 + (ultraFineStrand - 0.5) * 0.09;
+                            vec3 Tk1 = normalize(Tstrand + Nhair * (-0.11 + fiberShift));
+                            vec3 Tk2 = normalize(Tstrand + Nhair * (0.14 + (macroClump - 0.5) * 0.10));
+                            float sinTH1 = sqrt(max(1.0 - sq(dot(Tk1, HkeyH)), 0.0001));
+                            float sinTH2k = sqrt(max(1.0 - sq(dot(Tk2, HkeyH)), 0.0001));
+                            float sinTH2f = sqrt(max(1.0 - sq(dot(Tk2, HfillH)), 0.0001));
+                            float keyVisH = smoothstep(-0.24, 0.34, dot(Nhair, Lkey));
+                            float specR = pow(sinTH1, 76.0) * (0.18 + 0.38 * smoothstep(0.20, 0.88, ultraFineStrand * 0.55 + fineStrandTone * 0.45)) * keyVisH * (1.0 - partSliver * 0.85);
+                            float specTRT = (pow(sinTH2k, 21.0) * 0.24 * keyVisH + pow(sinTH2f, 18.0) * 0.13) * (0.58 + 0.42 * clumpGroove) * (1.0 - partSliver * 0.70);
+                            float studioRimMul = (uBetaRealismFlags3.z > 0.5) ? 1.48 : 1.0;
+                            float backHaloH = pow(clamp(1.0 - max(dot(Nhair, V), 0.0), 0.0, 1.0), 2.15) *
+                                              (0.24 + 0.22 * clamp(dot(Nhair, Lrim) * 0.5 + 0.5, 0.15, 1.0)) * studioRimMul;
+                            vec3 coolSoftboxH = (uBetaRealismFlags3.z > 0.5)
+                                ? vec3(0.88, 0.94, 1.04) * pow(sinTH1, 28.0) * 0.09 * smoothstep(0.15, 0.85, Nhair.z)
+                                : vec3(0.0);
+
+                            hairLit = v28Albedo * rootToTip * (0.22 + dKeyH * 0.74 + dFillH * 0.25) * v28Ao +
+                                      mix(uHairSheen, vec3(1.0, 0.98, 0.94), 0.32) * specR * v28Ao +
+                                      uHairHighlight * specTRT * 1.48 * v28Ao +
+                                      mix(uHairHighlight, uHairSheen, 0.48) * backHaloH * (0.45 + 0.55 * v28Ao) +
+                                      coolSoftboxH;
+                        }
                         vec3 hairMapped = hairLit / (hairLit + vec3(0.72));
                         hairMapped = pow(clamp(hairMapped * 1.26, 0.0, 1.0), vec3(1.01));
                         gl_FragColor = vec4(hairMapped, 1.0);
@@ -2158,6 +2417,31 @@ class VulvaGlTextureView(
                     float inIris = 1.0 - smoothstep(0.286, 0.314, irisR);
                     float inPupil = 1.0 - smoothstep(0.112, 0.138, irisR);
 
+                    float causticBoost = 0.0;
+                    float wetTearBoost = 0.0;
+                    float extraCatchlight = 0.0;
+                    if (uBetaRealismFlags1.z > 0.5) {
+                        // v27.0 Eyes & Lashes Realism: collarette stroma ring, radial crypt depth,
+                        // refracted opposite-side iris caustic, warm inner-canthus caruncle & crisp wet tear line
+                        float collaretteR = 0.188 + 0.011 * sin(irisAngle * 11.0 + 1.2) + 0.006 * cos(irisAngle * 19.0);
+                        float collaretteRing = exp(-sq((irisR - collaretteR) / 0.017));
+                        float cryptVal = smoothstep(0.25, 0.78, sin(irisAngle * 16.0 + fiber * 2.4) * 0.5 + 0.5);
+                        vec3 collaretteTint = vec3(0.42, 0.52, 0.56);
+                        irisCol = mix(irisCol * mix(0.84, 1.12, cryptVal), collaretteTint, collaretteRing * 0.32);
+
+                        // Warm delicate inner-canthus (medial tear duct) rose softening on sclera
+                        float medialSide = smoothstep(0.06, 0.42, -sign(vRestPos.x) * cos(irisAngle));
+                        float caruncleMask = smoothstep(0.56, 0.88, irisR) * medialSide * (1.0 - inIris);
+                        scleraCol = mix(scleraCol, vec3(0.79, 0.58, 0.55), caruncleMask * 0.38);
+
+                        // Corneal refraction caustic: light from Lkey focuses softly on the opposite iris crescent
+                        vec2 irisDir = vec2(cos(irisAngle), sin(irisAngle));
+                        vec2 invLightXY = normalize(-Lkey.xy + vec2(0.0001));
+                        float oppCrescent = smoothstep(-0.10, 0.88, dot(irisDir, invLightXY));
+                        float midStroma = smoothstep(0.125, 0.175, irisR) * (1.0 - smoothstep(0.245, 0.295, irisR));
+                        causticBoost = inIris * (1.0 - inPupil) * oppCrescent * midStroma * (0.28 + 0.22 * fiber);
+                    }
+
                     vec3 eyeAlbedo = mix(scleraCol, irisCol, inIris);
                     eyeAlbedo = mix(eyeAlbedo, vec3(0.018, 0.019, 0.024), inPupil);
 
@@ -2176,9 +2460,19 @@ class VulvaGlTextureView(
                     float corneaGlint2 = pow(max(dot(Ncornea, HfillE), 0.0), 96.0) * 0.34;
                     // Delicate lower-lid tear-meniscus moisture sheen along the bottom scleral margin
                     float tearLine = smoothstep(0.56, 0.78, 1.0 - vMat.w) * (1.0 - inIris) * 0.14 * pow(max(dot(N, HkeyE), 0.0), 48.0);
+                    if (uBetaRealismFlags1.z > 0.5) {
+                        // Crisp continuous wet tear-line meniscus hugging the lower lid rim + secondary studio rim glint
+                        float meniscusBand = exp(-sq(((1.0 - vMat.w) - 0.68) / 0.055));
+                        wetTearBoost = meniscusBand * (0.28 * pow(max(dot(N, HkeyE), 0.0), 64.0) +
+                                                       0.12 * pow(max(dot(N, HfillE), 0.0), 42.0));
+                        vec3 HrimE = normalize(normalize(vec3(0.45, 0.42, 0.78)) + V);
+                        extraCatchlight = pow(max(dot(Ncornea, HrimE), 0.0), 220.0) * 0.55 * corneaZone;
+                    }
 
+                    vec3 causticTint = vec3(0.44, 0.66, 0.82) * causticBoost;
                     vec3 eyeLit = eyeAlbedo * (0.28 + dKeyE * 0.66 + dFillE * 0.22 + irisGlow) * lidAo +
-                                  vec3(1.0, 0.99, 0.98) * (corneaGlint1 + corneaGlint2 + tearLine);
+                                  causticTint * (0.45 + 0.55 * lidAo) +
+                                  vec3(1.0, 0.99, 0.98) * (corneaGlint1 + corneaGlint2 + tearLine + wetTearBoost + extraCatchlight);
                     vec3 eyeMapped = eyeLit / (eyeLit + vec3(0.70));
                     eyeMapped = pow(clamp(eyeMapped * 1.22, 0.0, 1.0), vec3(1.01));
                     gl_FragColor = vec4(eyeMapped, 1.0);
@@ -2197,6 +2491,40 @@ class VulvaGlTextureView(
                     float linenMottle = vnoise3(vWorldPos * 9.5);
 
                     vec3 drapeBase = vec3(0.155, 0.132, 0.148) * weave * mix(0.90, 1.12, linenMottle * 0.65 + foldShade * 0.35);
+                    if (uBetaRealismFlags1.w > 0.5) {
+                        // v27.0 Soft Contact Shadows & Cushion Weight Grounding:
+                        // Pose-aware contact AO beneath head/hair, shoulders, back, glutes, resting arms (fading with selfSpreadPose),
+                        // and moving calves/heels (tracking leftLegSpread & rightLegSpread), plus soft weight-tension linen ripples.
+                        float topMask = smoothstep(0.20, 0.62, N.z);
+                        float cx = vWorldPos.x;
+                        float cy = vWorldPos.y;
+                        float acx = abs(cx);
+                        float spreadPose = uBetaRealismPose.x;
+                        float lLeg = uBetaRealismFlags2.z;
+                        float rLeg = uBetaRealismFlags2.w;
+
+                        float shHead = exp(-sq(cx / 0.88) - sq((cy - 6.38) / 0.84)) * 0.44;
+                        float shHair = exp(-sq((acx - 0.72) / 0.55) - sq((cy - 5.62) / 0.68)) * 0.26;
+                        float shBack = exp(-sq(cx / 1.28) - sq((cy - 3.35) / 1.55)) * 0.38;
+                        float shGlute = exp(-sq((acx - 0.52) / 0.88) - sq((cy + 0.48) / 0.92)) * 0.46;
+                        float armGround = 1.0 - spreadPose * 0.86;
+                        float shArms = exp(-sq((acx - 1.92) / 0.48) - sq((cy - 1.75) / 1.38)) * 0.30 * armGround;
+                        // Dynamic thigh-to-heel contact shadows tracking live leg spread choreography
+                        float leftHeelX = -1.28 - lLeg * 0.58;
+                        float rightHeelX = 1.28 + rLeg * 0.58;
+                        float shCalfL = exp(-sq((cx - leftHeelX) / 0.52) - sq((cy + 4.45) / 1.15)) * 0.40;
+                        float shCalfR = exp(-sq((cx - rightHeelX) / 0.52) - sq((cy + 4.45) / 1.15)) * 0.40;
+
+                        float totalContact = clamp(max(max(shHead, shHair), max(max(shBack, shGlute), max(shArms, max(shCalfL, shCalfR)))), 0.0, 0.54) * topMask;
+                        clothAo = clamp(clothAo * (1.0 - totalContact), 0.10, 1.0);
+
+                        // Subtle radial tension micro-creases around gluteal & shoulder weight wells
+                        float wellDist = min(length(vec2((acx - 0.62) * 0.9, (cy + 0.50) * 0.85)),
+                                             length(vec2((acx - 0.75) * 0.85, (cy - 3.95) * 0.75)));
+                        float tensionEnv = smoothstep(1.95, 0.65, wellDist) * smoothstep(0.28, 0.72, wellDist) * topMask;
+                        float tensionRipple = sin(wellDist * 18.0 + linenMottle * 2.6) * 0.036 * tensionEnv;
+                        drapeBase *= (1.0 + tensionRipple);
+                    }
                     float dKey = clamp((dot(N, Lkey) + 0.18) / 1.18, 0.0, 1.0);
                     float dFill = clamp((dot(N, Lfill) + 0.22) / 1.22, 0.0, 1.0);
                     // Soft matte fabric grazing sheen (micro-fiber velvet scatter, zero glossy specular)
@@ -2370,6 +2698,152 @@ class VulvaGlTextureView(
                         wetness = clamp(wetness + wetDelta, 0.02, 0.98);
                     }
                 }
+                // v28.0: Reconstruct unposed bind-pose body coordinates for vertex-locked leg/knee/thigh landmarks!
+                bool isBodyMeshBind = (vBodyBindHole.z > -1.85);
+                vec3 bindPos = isBodyMeshBind
+                    ? vec3(vBodyBindHole.x * 0.64, vBodyBindHole.y * 1.02 - 0.06, vBodyBindHole.z)
+                    : vRestPos;
+
+                // v27.0–v28.0 Feature 2: Regional Skin Micro-Texture (strictly outside vulvar mucosa & pelvic interior!)
+                float bodyRealismMask = (1.0 - mucosa) * (1.0 - pelvicRegionMask * 0.92);
+                float skinMicroPorePattern = 0.5;
+                if (uBetaRealismFlags1.y > 0.5 && bodyRealismMask > 0.02 && camDist < 5.6) {
+                    float closeR = 1.0 - smoothstep(3.8, 5.6, camDist);
+                    float rEps = 0.0022;
+                    vec3 rP = bindPos;
+                    // Ultra-fine velvety facial pores vs delicate diamond micro-dermal lines across torso & limbs
+                    float freqF = mix(190.0, 265.0, isHeadRegion);
+                    float gC = vnoise3(rP * freqF) * 0.55 +
+                               (0.5 + 0.5 * sin(rP.x * 135.0 + rP.y * 125.0 + nMid * 3.2)) * 0.225 +
+                               (0.5 + 0.5 * sin(rP.x * 135.0 - rP.y * 125.0 + nMacro * 3.0)) * 0.225;
+                    float gX = vnoise3((rP + vec3(rEps, 0.0, 0.0)) * freqF) * 0.55 +
+                               (0.5 + 0.5 * sin((rP.x + rEps) * 135.0 + rP.y * 125.0 + nMid * 3.2)) * 0.225 +
+                               (0.5 + 0.5 * sin((rP.x + rEps) * 135.0 - rP.y * 125.0 + nMacro * 3.0)) * 0.225;
+                    float gY = vnoise3((rP + vec3(0.0, rEps, 0.0)) * freqF) * 0.55 +
+                               (0.5 + 0.5 * sin(rP.x * 135.0 + (rP.y + rEps) * 125.0 + nMid * 3.2)) * 0.225 +
+                               (0.5 + 0.5 * sin(rP.x * 135.0 - (rP.y + rEps) * 125.0 + nMacro * 3.0)) * 0.225;
+                    float gZ = vnoise3((rP + vec3(0.0, 0.0, rEps)) * freqF) * 0.55 +
+                               (0.5 + 0.5 * sin(rP.x * 135.0 + rP.y * 125.0 + nMid * 3.2)) * 0.225 +
+                               (0.5 + 0.5 * sin(rP.x * 135.0 - rP.y * 125.0 + nMacro * 3.0)) * 0.225;
+                    vec3 gRaw = vec3(gC - gX, gC - gY, gC - gZ);
+                    vec3 gTan = gRaw - N * dot(gRaw, N);
+                    float grainGain = mix(0.30, 0.18, isHeadRegion) * (1.0 - dryPigmentMask * 0.65);
+                    microGrad += gTan * (bodyRealismMask * grainGain * closeR);
+                    skinMicroPorePattern = gC;
+                }
+
+                // v28.0 Bright Idea A (Facial Lip Micro-Creases & Moist Glaze) — normal relief & natural lip hydration
+                float facialLipCreaseAo = 1.0;
+                if (uBetaRealismFlags3.y > 0.5 && isHeadRegion > 0.5 && mucosa > 0.07) {
+                    float lipM = smoothstep(0.08, 0.28, mucosa);
+                    float lipLineWave = sin(vRestPos.x * 295.0 + vnoise3(vRestPos * 62.0) * 3.4);
+                    float lipLineDeriv = cos(vRestPos.x * 295.0 + vnoise3(vRestPos * 62.0) * 3.4);
+                    vec3 lipDir = vec3(1.0, 0.0, 0.0) - N * N.x;
+                    microGrad += lipDir * (lipLineDeriv * 0.055 * lipM * (1.0 - smoothstep(2.2, 4.2, camDist)));
+                    facialLipCreaseAo = 1.0 - (0.5 - 0.5 * lipLineWave) * 0.09 * lipM;
+                    // Soft hydrated catchlight pillow on the center lower lip (zero plastic gloss!)
+                    float lowerLipPillow = smoothstep(6.02, 6.10, vRestPos.y) * (1.0 - smoothstep(6.14, 6.20, vRestPos.y)) *
+                                           (1.0 - smoothstep(0.08, 0.20, abs(vRestPos.x))) * smoothstep(0.25, 0.72, N.z);
+                    wetness = clamp(wetness + lipM * (0.09 + lowerLipPillow * 0.18), 0.02, 0.92);
+                }
+
+                // v28.0 Bright Idea C (Areola Montgomery Tubercles & Radial Crinkle Micro-Relief)
+                float areolaTubercleHighlight = 0.0;
+                if (uBetaRealismFlags3.w > 0.5 && dryPigmentMask > 0.04) {
+                    vec3 aP2 = vRestPos;
+                    float aEps2 = 0.0020;
+                    float ringOnly = dryPigmentMask * (1.0 - nippleTipMask * 0.75);
+                    float tubC = smoothstep(0.66, 0.88, vnoise3(aP2 * 56.0 + vec3(1.3, -0.7, 2.1)));
+                    float tubX = smoothstep(0.66, 0.88, vnoise3((aP2 + vec3(aEps2, 0.0, 0.0)) * 56.0 + vec3(1.3, -0.7, 2.1)));
+                    float tubY = smoothstep(0.66, 0.88, vnoise3((aP2 + vec3(0.0, aEps2, 0.0)) * 56.0 + vec3(1.3, -0.7, 2.1)));
+                    float tubZ = smoothstep(0.66, 0.88, vnoise3((aP2 + vec3(0.0, 0.0, aEps2)) * 56.0 + vec3(1.3, -0.7, 2.1)));
+                    vec3 tubRaw = vec3(tubC - tubX, tubC - tubY, tubC - tubZ);
+                    vec3 tubTan = tubRaw - N * dot(tubRaw, N);
+                    microGrad += tubTan * (ringOnly * 0.46 + nippleTipMask * 0.22);
+                    areolaTubercleHighlight = tubC * ringOnly;
+                    wetness = clamp(wetness + nippleTipMask * 0.065 + ringOnly * 0.022, 0.02, 0.92);
+                }
+
+                // v27.0–v28.0 Feature 5: Dynamic Skin Creasing & Anatomical Landmarks (vertex-locked to moving legs!)
+                float dynamicLandmarkAo = 1.0;
+                if (uBetaRealismFlags2.x > 0.5 && bodyRealismMask > 0.02) {
+                    float axL = abs(vRestPos.x);
+                    float yL = vRestPos.y;
+                    float hTurn = uBetaRealismFlags2.y;
+
+                    // 1) Contralateral Sternocleidomastoid (SCM) neck tendon tension driven by live headTurn
+                    float neckZone = smoothstep(4.62, 4.92, yL) * (1.0 - smoothstep(5.68, 5.95, yL)) *
+                                     (1.0 - smoothstep(0.36, 0.60, axL)) * smoothstep(0.08, 0.55, N.z);
+                    if (neckZone > 0.01) {
+                        float tNeck = clamp((yL - 4.74) / 1.02, 0.0, 1.0);
+                        float scmCenterX = 0.055 + 0.24 * tNeck;
+                        float sideSignN = (vRestPos.x >= 0.0) ? 1.0 : -1.0;
+                        // Turning head right (+hTurn) tenses left SCM (-sideSignN); resting pose keeps delicate baseline relief
+                        float scmTension = clamp(0.28 + max(0.0, -sideSignN * hTurn) * 0.95, 0.15, 1.25);
+                        float dScm = (axL - scmCenterX) / 0.068;
+                        float scmRidge = exp(-dScm * dScm) * neckZone * scmTension;
+                        float scmSlope = (-2.0 * dScm) * scmRidge * sideSignN;
+                        vec3 scmDir = normalize(vec3(1.0, -0.24 * sideSignN, 0.0));
+                        microGrad += (scmDir - N * dot(scmDir, N)) * (scmSlope * 0.075);
+                        // Delicate suprasternal hollow right between both clavicular heads
+                        float notchHollow = exp(-sq(axL / 0.12) - sq((yL - 4.72) / 0.14)) * neckZone;
+                        dynamicLandmarkAo *= (1.0 - notchHollow * 0.14);
+                    }
+
+                    // 2) Clavicle hollow & subtle collar highlight contour
+                    float clavBand = smoothstep(4.36, 4.58, yL) * (1.0 - smoothstep(4.86, 5.08, yL)) *
+                                     smoothstep(0.10, 0.26, axL) * (1.0 - smoothstep(1.18, 1.52, axL)) *
+                                     smoothstep(0.15, 0.65, N.z);
+                    if (clavBand > 0.01) {
+                        float clavLineY = 4.68 + 0.11 * smoothstep(0.15, 1.25, axL);
+                        float dClav = (yL - clavLineY) / 0.085;
+                        float clavHollow = exp(-sq((yL - (clavLineY + 0.09)) / 0.08)) * clavBand;
+                        microGrad += vec3(0.0, -dClav * exp(-dClav * dClav) * clavBand * 0.065, 0.0);
+                        dynamicLandmarkAo *= (1.0 - clavHollow * 0.10);
+                    }
+
+                    // 3) Soft abdominal linea alba & lower costal rib-arch contour
+                    float abZone = smoothstep(0.95, 1.45, yL) * (1.0 - smoothstep(3.05, 3.50, yL)) *
+                                   (1.0 - smoothstep(0.75, 1.15, axL)) * smoothstep(0.25, 0.72, N.z);
+                    if (abZone > 0.01) {
+                        float lineaAlba = exp(-sq(axL / 0.075)) * smoothstep(1.15, 1.65, yL) * (1.0 - smoothstep(2.65, 3.15, yL));
+                        dynamicLandmarkAo *= (1.0 - lineaAlba * 0.065);
+                    }
+
+                    // 4) v28.0 FIXED: Vertex-locked inguinal / hip-flexion compression crease & patella contour!
+                    // Evaluated strictly in unposed bind-pose coordinates (bindPos from aBodyBindHole) on blossomBodyMesh
+                    // so thigh/hip creases & kneecap contours move 100% locked to her skin during leg spreads & HR slams!
+                    if (isBodyMeshBind) {
+                        float bAx = abs(bindPos.x);
+                        float bY = bindPos.y;
+                        float sideLegSpread = (bindPos.x < 0.0) ? uBetaRealismFlags2.z : uBetaRealismFlags2.w;
+                        float sideKneeShift = (bindPos.x < 0.0) ? uBetaRealismPose.y : uBetaRealismPose.z;
+
+                        float hipCreaseZone = smoothstep(-1.05, -0.68, bY) * (1.0 - smoothstep(0.22, 0.62, bY)) *
+                                              smoothstep(0.56, 0.80, bAx) * (1.0 - smoothstep(1.24, 1.54, bAx)) *
+                                              smoothstep(0.10, 0.55, N.z) * (1.0 - pelvicRegionMask * 0.85);
+                        if (hipCreaseZone > 0.01) {
+                            float squeezeW = clamp(0.42 + max(0.0, -sideLegSpread) * 0.78 + max(0.0, -sideKneeShift) * 0.38 - max(0.0, sideLegSpread) * 0.16, 0.20, 1.38);
+                            float creaseY = -0.62 + (bAx - 0.62) * 1.12;
+                            float dCrease = (bY - creaseY) / 0.092;
+                            float cVal = exp(-dCrease * dCrease) * hipCreaseZone * squeezeW;
+                            microGrad += vec3(0.0, dCrease * cVal * 0.070, 0.0);
+                            dynamicLandmarkAo *= (1.0 - cVal * 0.14);
+                        }
+
+                        // 5) Vertex-locked anatomical kneecap (patella) contour centered at true rest knee (1.80, -1.86, 1.78)
+                        float kneeDist = length(vec2((bAx - 1.80) / 0.26, (bY + 1.86) / 0.26));
+                        float patellaRing = exp(-sq((kneeDist - 0.86) / 0.30)) *
+                                            smoothstep(1.12, 1.54, bindPos.z) * smoothstep(0.18, 0.62, N.z);
+                        dynamicLandmarkAo *= (1.0 - patellaRing * 0.085);
+                    }
+
+                    // 6) Subtle inner-elbow flexion crease on resting arms (fades smoothly as selfSpreadPose bends arms)
+                    float elbowCrease = exp(-sq((abs(vWorldPos.x) - 1.98) / 0.28) - sq((vWorldPos.y - 2.38) / 0.075)) *
+                                        smoothstep(0.10, 0.60, N.z) * (1.0 - uBetaRealismPose.x * 0.65);
+                    dynamicLandmarkAo *= (1.0 - elbowCrease * 0.09);
+                }
+
                 N = normalize(N + microGrad);
 
                 // Subtle cavity micro-occlusion inside pores & delicate labial folds (softer on facial skin)
@@ -2467,11 +2941,28 @@ class VulvaGlTextureView(
                 // AND taper seamFShadeFade smoothly on the low-mucosa outer cutaneous skirt so it merges into
                 // blossomVulvaPatchMesh with zero outer brightness step!
                 float seamFOuterSkirtFade = mix(1.0, smoothstep(0.12, 0.34, mucosaColor), v3MedRootStr);
+                // Beta v3 Option 8 (v28.0 Clitoral Hood–Mons Skin Blend): suppress arch-only darkening on the
+                // dorsal & outer clitoral hood and blend its pigmentation seamlessly into natural mons pubis skin!
+                float hoodMonsStr = uBetaRealismFlags3.x * pelvicRegionMask;
+                float hoodMonsZone = 0.0;
+                if (hoodMonsStr > 0.001) {
+                    float hoodYBand = smoothstep(0.13, 0.26, vRestPos.y) * (1.0 - smoothstep(0.46, 0.62, vRestPos.y));
+                    float hoodXBand = 1.0 - smoothstep(0.075, 0.185, abs(vRestPos.x));
+                    // Strictly preserve glistening inner preputial edge & clitoral glans (high mucosaColor)
+                    float hoodDorsalGuard = 1.0 - smoothstep(0.38, 0.78, mucosaColor);
+                    hoodMonsZone = hoodYBand * hoodXBand * hoodDorsalGuard;
+                }
+                float hoodMonsW = hoodMonsZone * hoodMonsStr;
+        """
+
+        private const val FRAGMENT_SHADER_PART_3 = """
+
                 // Seam F (uBetaWarmTransitionZone): deepen the newly front-lit labiaHoodArchMesh by ~1 warm skin-tone
                 // shade (proportional across light and dark skin tones), fading cleanly to 0 along the outer Seam E skirt.
                 float seamFShadeFade = smoothstep(0.0, 0.55, archAlpha) * smoothstep(0.06, 0.28, mucosaColor + pigmentColor * 0.65);
                 seamFShadeFade *= seamFOuterSkirtFade;
                 seamFShadeFade *= (1.0 - vestBaseMask * max(v3BlendStr, v3MedRootStr) * 0.94);
+                seamFShadeFade *= (1.0 - hoodMonsW * 0.95);
                 vec3 seamFShadeTarget = mix(albedo * vec3(0.84, 0.77, 0.72), uSkinShadow * vec3(0.96, 0.90, 0.86), 0.24 * (1.0 - mucosaColor));
                 albedo = mix(albedo, seamFShadeTarget, uBetaWarmTransitionZone * seamFShadeFade);
                 // 3G (uBetaRefineInnerLabia): very faint natural warm rose-brown tissue tint on inner labia,
@@ -2480,6 +2971,7 @@ class VulvaGlTextureView(
                 float freeEdgeWeight = smoothstep(0.14, 0.56, pigmentColor) * smoothstep(0.06, 0.34, mucosaColor);
                 float roseBrownStrength = uBetaRefineInnerLabia * clamp(innerLabiaFade * 0.11 + freeEdgeWeight * 0.19, 0.0, 0.28);
                 roseBrownStrength *= (1.0 - vestBaseMask * max(v3BlendStr, v3MedRootStr) * 0.92);
+                roseBrownStrength *= (1.0 - hoodMonsW * 0.95);
                 vec3 warmRoseBrown = mix(uSkinShadow * vec3(0.84, 0.64, 0.56), uMucosaDeep * vec3(0.96, 0.78, 0.70), 0.38);
                 albedo = mix(albedo, warmRoseBrown, roseBrownStrength);
                 float junctionHarmonyStr = max(v3BlendStr, v3MedRootStr * 0.88);
@@ -2501,6 +2993,11 @@ class VulvaGlTextureView(
                     vec3 melaninDrift = mix(albedo * vec3(0.955, 0.935, 0.925), albedo * vec3(1.035, 1.015, 1.005), clamp(0.5 + v3OrgWarp * 1.15, 0.0, 1.0));
                     albedo = mix(albedo, melaninDrift, clamp(v3PigStr * (0.30 + 0.20 * pigmentColor), 0.0, 0.85));
                 }
+                // Apply Option #8 smooth dorsal clitoral hood harmonization directly into surrounding mons pubis skin tone
+                if (hoodMonsW > 0.001) {
+                    vec3 monsSkinTarget = mix(warmBlush, warmBlush * vec3(1.01, 0.985, 0.975), 0.25 + nMid * 0.20);
+                    albedo = mix(albedo, monsSkinTarget, clamp(hoodMonsW * (0.78 + 0.16 * uIsLabiaArchMesh), 0.0, 0.94));
+                }
                 // Beta v3 Option 6: variegated light/rosy pigmentation & delicate tonal mottling across tangled inner labial folds
                 if (v3FoldStr > 0.001 && innerLabiaFoldsMask > 0.005) {
                     float pigPatch = vnoise3(vRestPos * vec3(16.0, 21.0, 14.0) + vec3(-1.9, 2.6, 1.1));
@@ -2519,10 +3016,10 @@ class VulvaGlTextureView(
                 if (uBetaLifeWarmth > 0.001) {
                     float axW = abs(vRestPos.x);
                     float cheekFlush = isHeadRegion *
-                        exp(-pow((axW - 0.30) / 0.16, 2.0) - pow((vRestPos.y - 6.32) / 0.17, 2.0)) *
+                        exp(-sq((axW - 0.30) / 0.16) - sq((vRestPos.y - 6.32) / 0.17)) *
                         smoothstep(0.10, 0.55, N.z);
                     float earFlush = isHeadRegion *
-                        smoothstep(0.44, 0.62, axW) * exp(-pow((vRestPos.y - 6.34) / 0.22, 2.0)) * 0.45;
+                        smoothstep(0.44, 0.62, axW) * exp(-sq((vRestPos.y - 6.34) / 0.22)) * 0.45;
                     float chestFlush = smoothstep(3.45, 4.15, vRestPos.y) * (1.0 - smoothstep(4.78, 5.25, vRestPos.y)) *
                         (1.0 - smoothstep(0.75, 1.38, axW)) * smoothstep(0.15, 0.65, N.z) *
                         (1.0 - dryPigmentMask * 0.75) * 0.62;
@@ -2532,15 +3029,116 @@ class VulvaGlTextureView(
                     albedo = mix(albedo, capillaryTone, flushMix);
                 }
 
+                // v27.0 Feature 1 (Hairline Contact Shadow): soft warm hairline/temple occlusion beneath bangs & side locks
+                if (uBetaRealismFlags1.x > 0.5 && isHeadRegion > 0.01) {
+                    float axH = abs(vRestPos.x);
+                    float browArchLine = 6.72 - axH * axH * 0.52 - smoothstep(-0.35, 0.25, -vRestPos.x) * 0.08;
+                    float hairlineShadow = smoothstep(browArchLine - 0.16, browArchLine + 0.06, vRestPos.y) *
+                                           smoothstep(-0.08, 0.55, N.z) * (1.0 - mucosa);
+                    float templeShadow = smoothstep(0.40, 0.58, axH) *
+                                         smoothstep(6.05, 6.45, vRestPos.y) * (1.0 - smoothstep(6.78, 7.05, vRestPos.y)) *
+                                         smoothstep(-0.10, 0.50, N.z) * 0.65;
+                    float hairOcc = clamp(max(hairlineShadow, templeShadow), 0.0, 1.0) * 0.16;
+                    albedo *= mix(vec3(1.0), vec3(0.84, 0.76, 0.73), hairOcc);
+                }
+
+                // v27.0–v28.0 Feature 2 (Regional Skin Undertones & Visible Subsurface Depth — strictly outside vulvar mucosa!)
+                float realismThinSss = 0.0;
+                float realismVelvetBoost = 0.0;
+                if (uBetaRealismFlags1.y > 0.5 && bodyRealismMask > 0.02) {
+                    float axR = abs(vRestPos.x);
+                    float yR = vRestPos.y;
+                    float bAxR = abs(bindPos.x);
+                    float bYR = bindPos.y;
+                    // Subtle warm capillary peach-rose undertones over bony/vascular prominences:
+                    // cheekbones, nose tip, ear rims, shoulders, elbows, knuckles & vertex-locked kneecaps
+                    float noseTipR = isHeadRegion * exp(-sq(axR / 0.085) - sq((yR - 6.18) / 0.085)) * smoothstep(0.20, 0.72, N.z);
+                    float earRimR = isHeadRegion * smoothstep(0.45, 0.60, axR) * exp(-sq((yR - 6.32) / 0.20));
+                    float shoulderR = exp(-sq((axR - 1.48) / 0.36) - sq((yR - 4.42) / 0.34));
+                    float elbowR = exp(-sq((axR - 2.02) / 0.28) - sq((yR - 2.38) / 0.26));
+                    float kneeR = isBodyMeshBind
+                        ? exp(-sq((bAxR - 1.80) / 0.30) - sq((bYR + 1.86) / 0.30)) * smoothstep(1.05, 1.50, bindPos.z)
+                        : 0.0;
+                    float warmProminence = clamp((noseTipR * 0.75 + earRimR * 0.90 + shoulderR * 0.58 + elbowR * 0.55 + kneeR * 0.70) * bodyRealismMask, 0.0, 1.0);
+                    albedo = mix(albedo, albedo * vec3(1.048, 0.928, 0.912), warmProminence * 0.38);
+
+                    // Whisper-soft cool-olive undertone variation across vertex-locked inner thighs (natural chromatic complexity)
+                    float innerThighCool = isBodyMeshBind
+                        ? smoothstep(-2.45, -1.65, bYR) * (1.0 - smoothstep(-0.75, -0.35, bYR)) *
+                          smoothstep(0.42, 0.84, bAxR) * (1.0 - smoothstep(1.22, 1.62, bAxR)) * bodyRealismMask
+                        : 0.0;
+                    albedo = mix(albedo, albedo * vec3(0.982, 1.005, 1.010), innerThighCool * 0.30);
+
+                    // Strong thin-feature translucency map (ears, nose tip/wings, hands/fingers, clavicles & breast rims)
+                    float handThinR = smoothstep(0.05, 1.75, yR) * smoothstep(1.45, 2.25, axR) * 0.78;
+                    realismThinSss = clamp((earRimR * 1.05 + noseTipR * 0.72 + handThinR) * bodyRealismMask, 0.0, 1.0);
+                    realismVelvetBoost = bodyRealismMask * (1.0 - dryPigmentMask * 0.70) * 0.044;
+                }
+
+                // v28.0 Bright Idea A (Facial Micro-Detail): Sun-kissed nose/cheek freckles & warm lip-center bloom
+                if (uBetaRealismFlags3.y > 0.5 && isHeadRegion > 0.5) {
+                    float axF = abs(vRestPos.x);
+                    float yF = vRestPos.y;
+                    float freckleZone = (exp(-sq(axF / 0.34) - sq((yF - 6.28) / 0.14)) +
+                                         exp(-sq((axF - 0.25) / 0.15) - sq((yF - 6.26) / 0.12)) * 0.75) *
+                                        smoothstep(0.24, 0.72, N.z) * (1.0 - mucosa);
+                    float fDot1 = smoothstep(0.79, 0.93, vnoise3(vRestPos * 96.0 + vec3(2.3, -1.7, 0.9)));
+                    float fDot2 = smoothstep(0.82, 0.95, vnoise3(vRestPos * 148.0 + vec3(-4.1, 3.2, -1.4)));
+                    float freckleMask = clamp((fDot1 * 0.65 + fDot2 * 0.55) * freckleZone, 0.0, 1.0);
+                    vec3 freckleColor = mix(uSkinShadow * vec3(0.80, 0.64, 0.54), vec3(0.46, 0.28, 0.18), 0.26);
+                    albedo = mix(albedo, freckleColor, freckleMask * 0.36);
+
+                    // Subtle plump rose-vermilion inner lip tone & natural cheek warmth
+                    float cheekBloom = exp(-sq((axF - 0.28) / 0.15) - sq((yF - 6.29) / 0.14)) *
+                                       smoothstep(0.18, 0.68, N.z) * (1.0 - mucosa);
+                    albedo = mix(albedo, albedo * vec3(1.045, 0.925, 0.920), cheekBloom * 0.22);
+                    if (mucosa > 0.08) {
+                        float lipCenter = smoothstep(0.16, 0.52, mucosa) * (1.0 - smoothstep(0.12, 0.26, axF));
+                        albedo = mix(albedo, albedo * vec3(1.06, 0.90, 0.91), lipCenter * 0.26);
+                    }
+                }
+
+                // v28.0 Bright Idea C (Areola & Subtle Dermal Micro-Detail): Montgomery tubercle highlight + whisper sub-dermal vascularity
+                if (uBetaRealismFlags3.w > 0.5 && bodyRealismMask > 0.02) {
+                    if (areolaTubercleHighlight > 0.01) {
+                        albedo = mix(albedo, mix(albedo * 1.10, uSkinBase * 0.96, 0.30), areolaTubercleHighlight * 0.34);
+                    }
+                    // Whisper-soft sub-dermal cool-teal vein hints along thin skin (temples, upper chest, inner forearms & ankles)
+                    float axV = abs(vRestPos.x);
+                    float yV = vRestPos.y;
+                    float templeVein = isHeadRegion * smoothstep(0.38, 0.52, axV) * exp(-sq((yV - 6.46) / 0.14));
+                    float chestVein = smoothstep(3.40, 4.15, yV) * (1.0 - smoothstep(4.65, 5.00, yV)) *
+                                      smoothstep(0.35, 0.85, axV) * (1.0 - smoothstep(1.35, 1.75, axV)) * (1.0 - dryPigmentMask);
+                    float armVein = smoothstep(0.45, 2.25, yV) * smoothstep(1.55, 2.15, axV);
+                    float veinRegion = clamp((templeVein * 0.75 + chestVein * 0.65 + armVein * 0.70) * bodyRealismMask, 0.0, 1.0);
+                    if (veinRegion > 0.02) {
+                        float vWave = abs(vnoise3(vRestPos * vec3(18.0, 8.5, 18.0) + vec3(nMacro * 1.4)) - 0.5);
+                        float veinLine = (1.0 - smoothstep(0.015, 0.068, vWave)) * veinRegion;
+                        vec3 subDermalCool = mix(albedo, albedo * vec3(0.88, 0.96, 1.02), 0.55);
+                        albedo = mix(albedo, subDermalCool, veinLine * 0.24);
+                    }
+                }
+
                 // Hair-color-matched sculpted eyebrows (pigment ~0.18..0.56) & crisp dark eyelashes (pigment > 0.68) — zero stray dots!
                 // Fast-path guard: skip 3D brow hair noise on all non-facial/non-brow fragments (bit-for-bit identical result).
                 float browMaskFace = isHeadRegion * smoothstep(0.16, 0.52, pigment) * (1.0 - smoothstep(0.08, 0.18, mucosa));
                 float lashMaskFace = isHeadRegion * smoothstep(0.68, 0.90, pigment) * (1.0 - smoothstep(0.08, 0.18, mucosa));
                 if (browMaskFace > 0.001 || lashMaskFace > 0.001) {
                     float browMicroHair = smoothstep(0.28, 0.78, vnoise3(vRestPos * vec3(135.0, 210.0, 120.0)));
-                    vec3 browTone = mix(uHairBase * 0.92, uSkinShadow * 0.44, 0.24) * mix(0.86, 1.08, browMicroHair);
+                    float browMixGain = 0.72;
+                    if (uBetaRealismFlags3.y > 0.5 && browMaskFace > 0.001) {
+                        // v28.0 Feathered individual directional brow hairs sweeping outward along the natural brow arch
+                        float axB = abs(vRestPos.x);
+                        float archSlope = mix(0.32, 1.45, smoothstep(0.10, 0.36, axB));
+                        float browCoord = axB * 210.0 - vRestPos.y * (115.0 * archSlope) + vnoise3(vRestPos * 55.0) * 3.8;
+                        float hairStrands = 0.5 + 0.5 * sin(browCoord * 6.2831853 * 0.18);
+                        float hairFine = smoothstep(0.22, 0.82, vnoise3(vRestPos * vec3(240.0, 320.0, 140.0)));
+                        browMicroHair = clamp(hairStrands * 0.62 + hairFine * 0.38, 0.0, 1.0);
+                        browMixGain = mix(0.42, 0.86, smoothstep(0.24, 0.78, browMicroHair));
+                    }
+                    vec3 browTone = mix(uHairBase * 0.90, uSkinShadow * 0.42, 0.24) * mix(0.80, 1.12, browMicroHair);
                     vec3 lashTone = mix(uHairBase * 0.38, vec3(0.06, 0.045, 0.045), 0.56);
-                    albedo = mix(albedo, browTone, browMaskFace * 0.72);
+                    albedo = mix(albedo, browTone, browMaskFace * browMixGain);
                     albedo = mix(albedo, lashTone, lashMaskFace * 0.86);
                 }
 
@@ -2623,10 +3221,15 @@ class VulvaGlTextureView(
 
                 // TRUE RGB-WAVELENGTH PRE-INTEGRATED SUBSURFACE SCATTERING (SSS):
                 // Red (~650nm) wraps deepest through hemoglobin dermis; Green medium; Blue tightest!
+                // v28.0 Skin Detail & SSS upgrade: visibly deepens red-channel wrap & luminous shadow-terminator
+                // hemoglobin scattering across the full body (strictly outside vulvar mucosa via bodyRealismMask)!
+                float skinSssBoost = (uBetaRealismFlags1.y > 0.5) ? bodyRealismMask : 0.0;
                 vec3 sssWrapKey = mix(vec3(0.64, 0.30, 0.14), vec3(0.86, 0.46, 0.22), mucosa) +
-                                  vec3(0.24, 0.14, 0.08) * jointSss;
+                                  vec3(0.24, 0.14, 0.08) * jointSss +
+                                  vec3(0.36, 0.06, -0.05) * skinSssBoost;
                 vec3 sssWrapFill = mix(vec3(0.46, 0.24, 0.12), vec3(0.66, 0.36, 0.18), mucosa) +
-                                   vec3(0.18, 0.10, 0.06) * jointSss;
+                                   vec3(0.18, 0.10, 0.06) * jointSss +
+                                   vec3(0.22, 0.04, -0.03) * skinSssBoost;
                 vec3 diffKeyRGB = clamp((vec3(NdotL1) + sssWrapKey) / (vec3(1.0) + sssWrapKey), 0.0, 1.0);
                 vec3 diffFillRGB = clamp((vec3(NdotL2) + sssWrapFill) / (vec3(1.0) + sssWrapFill), 0.0, 1.0);
                 diffKeyRGB = pow(max(diffKeyRGB, vec3(0.0001)), vec3(0.90, 1.05, 1.22));
@@ -2637,6 +3240,8 @@ class VulvaGlTextureView(
                 vec3 sssDeep = vec3(0.86, 0.18, 0.20);
                 vec3 sssTint = mix(sssShallow, sssDeep, 0.36 + 0.54 * mucosa);
                 float terminator = exp(-abs(NdotL1 - 0.02) * 3.6) * (0.28 + 0.34 * mucosa + 0.14 * jointSss);
+                float v28SssBand = exp(-sq((NdotL1 + 0.06) / 0.38)) * skinSssBoost * 0.46;
+                vec3 v28HemoGlow = mix(uSkinBase * vec3(1.18, 0.50, 0.36), vec3(0.96, 0.30, 0.22), 0.40);
 
                 // Thin-tissue forward/back translucency (illuminates thin labia minora & hood margins!)
                 // Vulva Beta v2 Toggle 4: strictly pelvic-scoped satin-velvet finish reducing waxy rim/specular polish
@@ -2677,7 +3282,8 @@ class VulvaGlTextureView(
                 float pelvicMatteDamp = 1.0 - pelvicSkinZone * 0.42;
                 float areolaMatteDamp = 1.0 - dryPigmentMask * 0.56;
                 float oilBreakupBase = hairSpecDamp * jointSpecSoften * faceMatteDamp * pelvicMatteDamp * areolaMatteDamp;
-                float oilBreakup = mix(0.79, 1.19, nMicro * 0.65 + nMelanin * 0.35) * oilBreakupBase;
+                float poreBreakup = mix(1.0, mix(0.84, 1.18, skinMicroPorePattern), skinSssBoost * 0.65);
+                float oilBreakup = mix(0.79, 1.19, nMicro * 0.65 + nMelanin * 0.35) * oilBreakupBase * poreBreakup;
                 float labiaOilBreakup = mix(oilBreakup, 0.92 * oilBreakupBase, 0.65 * labiaInnerMask);
                 float microRough = mix(-3.0, 3.2, nMid * 0.55 + nMicro * 0.45);
                 // Beta v3 Toggle 4 (Regional Material Differentiation, scaled 3x: 0..3.0): separate dry matte-satin outer skin,
@@ -2709,7 +3315,8 @@ class VulvaGlTextureView(
                 float fresnel = pow(viewRim, 3.4);
                 float rimLight = fresnel * (0.26 + 0.24 * mucosa) * (0.45 + 0.55 * max(dot(N, Lrim), 0.0)) *
                     (1.0 - pelvicFinishMask * 0.42);
-                float velvetWrap = pow(viewRim, 2.2) * (1.0 - mucosa) * (1.0 - hairCoverage * 0.80) * (0.052 + 0.018 * v3ZoneOuter * v3MatBounded);
+                float velvetWrap = pow(viewRim, 2.2) * (1.0 - mucosa) * (1.0 - hairCoverage * 0.80) *
+                    (0.052 + 0.018 * v3ZoneOuter * v3MatBounded + realismVelvetBoost);
 
                 // Colored Hemoglobin AO Bounce: prevents crevices from looking muddy gray & softens hip/lip/body contrast
                 float featheredAo = mix(ringSoftAo, min(ringSoftAo, 0.87), submentalFeatherZone * 0.42);
@@ -2721,9 +3328,17 @@ class VulvaGlTextureView(
                 float tangleCreaseAo = (tangleActive > 0.004)
                     ? mix(1.0 - 0.26 * tangleActive, 1.04, clamp(tangleHeightC * 1.15, 0.0, 1.0))
                     : 1.0;
-                float fullAo = clamp(featheredAo * microAo * tangleCreaseAo, 0.06, 1.0);
+                // v27.0 Feature 4: Soft posterior skin contact occlusion where Blossom's body meets the exam cushion
+                float skinContactAo = 1.0;
+                if (uBetaRealismFlags1.w > 0.5) {
+                    float matClearance = vWorldPos.z - mattressZFrag(vWorldPos.y);
+                    float nearMattress = (1.0 - smoothstep(0.02, 0.28, matClearance)) * smoothstep(0.38, -0.35, N.z);
+                    skinContactAo = 1.0 - nearMattress * 0.34 * (1.0 - mucosa);
+                }
+                float fullAo = clamp(featheredAo * microAo * tangleCreaseAo * dynamicLandmarkAo * skinContactAo * facialLipCreaseAo, 0.06, 1.0);
                 vec3 aoExponents = mix(vec3(0.76, 1.00, 1.18), vec3(0.68, 0.90, 1.06), jointSss * 0.65);
                 aoExponents = mix(aoExponents, vec3(0.68, 0.96, 1.22), archWarmMask * 0.60);
+                aoExponents = mix(aoExponents, vec3(0.60, 1.04, 1.30), skinSssBoost * 0.58);
                 vec3 coloredAo = pow(vec3(fullAo), aoExponents);
 
                 // Balanced portrait illumination so Blossom's face matches her neck & chest brightness naturally
@@ -2738,12 +3353,45 @@ class VulvaGlTextureView(
                     0.42 * labiaInnerMask
                 );
 
+                // v28.0 Visible Thin-Tissue Backlit Translucency & Full-Body Rim SSS
+                float backScatterV28 = pow(clamp(dot(V, normalize(-Lkey + N * 0.35)), 0.0, 1.0), 2.0);
+                float thinSssExtra = realismThinSss * (pow(max(viewRim, 0.0001), 1.65) * 0.56 + backScatterV28 * 0.42) +
+                                     skinSssBoost * pow(max(viewRim, 0.0001), 2.2) * 0.22 * (0.45 + 0.55 * clamp(dot(N, Lrim) * 0.5 + 0.5, 0.0, 1.0));
+                vec3 v28SssContrib = v28HemoGlow * (v28SssBand * 0.56 + thinSssExtra * 0.72) * coloredAo;
+
+                // v28.0 Bright Idea B (3-Point Studio Rim & Warm Cushion Bounce Lighting)
+                vec3 studioExtraLit = vec3(0.0);
+                if (uBetaRealismFlags3.z > 0.5) {
+                    // 1) Warm cream-blush mattress bounce illuminating shadowed undersides of body, breasts, jaw & limbs
+                    float matClearB = max(vWorldPos.z - mattressZFrag(vWorldPos.y), 0.0);
+                    float matProxB = 1.0 - smoothstep(0.05, 1.65, matClearB);
+                    float undersideN = clamp((-N.z * 0.65 + 0.45) * (1.0 - NdotL1 * 0.35), 0.0, 1.0);
+                    vec3 cushionBounce = albedo * vec3(1.08, 0.95, 0.89) * (undersideN * matProxB * 0.24 * (0.45 + 0.55 * fullAo));
+
+                    // 2) Cool overhead studio softbox sky fill & subtle cool specular sheen (warm-key / cool-fill separation!)
+                    vec3 Lsky = normalize(vec3(-0.18, 0.62, 0.76));
+                    float skyDiff = clamp(dot(N, Lsky) * 0.5 + 0.5, 0.0, 1.0);
+                    vec3 Hsky = normalize(Lsky + V);
+                    float skySpec = pow(max(dot(N, Hsky), 0.0), 26.0) * 0.048 * (1.0 - hairCoverage * 0.75) * (1.0 - pelvicFinishMask * 0.40);
+                    vec3 coolSoftbox = albedo * vec3(0.84, 0.92, 1.06) * (skyDiff * 0.085 * coloredAo) +
+                                       vec3(0.88, 0.94, 1.04) * skySpec;
+
+                    // 3) Sculpting warm studio rim kicker tracing shoulders, collarbones, hips & limb silhouettes
+                    float kickerRim = pow(max(viewRim, 0.0001), 2.55) * (0.35 + 0.65 * clamp(dot(N, Lrim) * 0.5 + 0.5, 0.0, 1.0)) *
+                                      (1.0 - pelvicFinishMask * 0.55);
+                    vec3 rimKicker = mix(uSkinBase * vec3(1.12, 0.98, 0.90), vec3(1.05, 0.95, 0.86), 0.45) * (kickerRim * 0.26);
+
+                    studioExtraLit = cushionBounce + coolSoftbox + rimKicker;
+                }
+
                 vec3 lit = ambient * coloredAo +
                            albedo * (diffKeyRGB * 0.78 * keyColor + diffFillRGB * (0.22 + neckSkinBlend * 0.08) * fillColor) * (vec3(0.28) + 0.72 * coloredAo) +
                            sssTint * (terminator * 0.35 * faceSssTrim + grazingTrans * 0.19 + thinTransmit * (0.22 + 0.20 * uLightMode)) * coloredAo +
+                           v28SssContrib +
                            specColor * (broadSpec + wetSharpSpec) * (0.30 + 0.70 * fullAo) +
                            mix(uSkinBase, vec3(1.0, 0.96, 0.93), 0.28) * velvetWrap * (0.45 + 0.55 * fullAo) +
-                           mix(uSkinBase, sssTint, 0.46) * rimLight;
+                           mix(uSkinBase, sssTint, 0.46) * rimLight +
+                           studioExtraLit;
 
                 // Soft warm subsurface glow right under active fingertip touch
                 if (uTouchIntensity > 0.005) {
@@ -2756,7 +3404,7 @@ class VulvaGlTextureView(
                 vec3 mapped = lit / (lit + vec3(0.76));
                 mapped = pow(clamp(mapped * 1.32, 0.0, 1.0), vec3(1.01));
                 float mappedLuma = dot(mapped, vec3(0.299, 0.587, 0.114));
-                mapped = clamp(mix(vec3(mappedLuma), mapped, 1.03), 0.0, 1.0);
+                mapped = clamp(mix(vec3(mappedLuma), mapped, 1.03 + uBetaRealismFlags3.z * 0.04), 0.0, 1.0);
 
                 float outAlpha = (uArchAlphaPass > 1.5) ? archAlpha : 1.0;
                 gl_FragColor = vec4(mapped, outAlpha);

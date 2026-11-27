@@ -49,7 +49,7 @@ internal object BlossomUpperBodyBuilder {
         return floatArrayOf(sx, wy, wz)
     }
 
-    private fun headWorldToLocal(wx: Float, wy: Float, wz: Float): FloatArray {
+    internal fun headWorldToLocal(wx: Float, wy: Float, wz: Float): FloatArray {
         val dy = wy - HEAD_CENTER_Y
         val dz = wz - HEAD_CENTER_Z
         val sy = dy * COS_PITCH + dz * SIN_PITCH
@@ -1964,6 +1964,455 @@ internal object BlossomUpperBodyBuilder {
     }
 
     // -------------------------------------------------------------------------
+    // 5B. V28.0 BETA REALISM: SPECTACULAR MULTI-TIER LAYERED HAIR LOCK CARDS,
+    //     PARTED CROWN VOLUME, FEATHERED CURTAIN BANGS & SUNLIT FLYAWAYS
+    //     62 sculpted, S-waved alpha-feathered ribbons arranged across 5 depth
+    //     tiers to completely dissolve any helmet-like silhouette edge:
+    //       - Tier 1 (10): Part-line & crown root-lift dimensional locks
+    //       - Tier 2 (12): Feathered curtain bangs & delicate temple baby hairs
+    //       - Tier 3 (16): Staggered cheekbone/jaw face-framing curtain locks
+    //       - Tier 4 (16): Lush pillow-fanned cascading nape & back locks
+    //       - Tier 5 (8):  Airy backlit crown & outer-silhouette flyaway halo
+    //     vMat.w encodes tierType + seed: [0..1) = airy wisp/flyaway,
+    //     [1..2) = dense sculpted volumetric lock card with jagged needle tips.
+    // -------------------------------------------------------------------------
+    fun buildBlossomHairWispsMesh(): DynamicGlMesh {
+        data class WispSpec(
+            val p0: FloatArray,
+            val p1: FloatArray,
+            val p2: FloatArray,
+            val halfW: Float,
+            val archLoft: Float,
+            val waveAmp: Float,
+            val isVolumetricLock: Boolean,
+            val seed: Float
+        )
+
+        val wisps = listOf(
+            // --- Tier 1 (10): Part-line & Crown Root-Lift Volumetric Locks ---
+            WispSpec(floatArrayOf(0.20f, 0.99f, 0.16f), floatArrayOf(-0.18f, 0.97f, 0.48f), floatArrayOf(-0.56f, 0.56f, 0.50f), 0.105f, 0.024f, 0.012f, true, 0.07f),
+            WispSpec(floatArrayOf(0.18f, 1.02f, 0.04f), floatArrayOf(-0.28f, 0.95f, 0.34f), floatArrayOf(-0.66f, 0.44f, 0.36f), 0.112f, 0.025f, 0.014f, true, 0.19f),
+            WispSpec(floatArrayOf(0.16f, 1.04f, -0.08f), floatArrayOf(-0.34f, 0.92f, 0.14f), floatArrayOf(-0.74f, 0.34f, 0.16f), 0.116f, 0.024f, 0.013f, true, 0.31f),
+            WispSpec(floatArrayOf(0.12f, 1.05f, -0.18f), floatArrayOf(-0.38f, 0.90f, -0.06f), floatArrayOf(-0.76f, 0.30f, -0.10f), 0.114f, 0.022f, 0.012f, true, 0.44f),
+            WispSpec(floatArrayOf(0.24f, 0.98f, 0.16f), floatArrayOf(0.52f, 0.85f, 0.38f), floatArrayOf(0.74f, 0.38f, 0.32f), 0.104f, 0.024f, 0.012f, true, 0.56f),
+            WispSpec(floatArrayOf(0.24f, 1.01f, 0.02f), floatArrayOf(0.58f, 0.82f, 0.22f), floatArrayOf(0.79f, 0.28f, 0.18f), 0.110f, 0.024f, 0.014f, true, 0.68f),
+            WispSpec(floatArrayOf(0.20f, 1.04f, -0.10f), floatArrayOf(0.56f, 0.84f, 0.04f), floatArrayOf(0.80f, 0.26f, -0.02f), 0.114f, 0.023f, 0.013f, true, 0.79f),
+            WispSpec(floatArrayOf(0.14f, 1.06f, -0.22f), floatArrayOf(0.50f, 0.86f, -0.14f), floatArrayOf(0.78f, 0.28f, -0.18f), 0.112f, 0.022f, 0.012f, true, 0.88f),
+            WispSpec(floatArrayOf(-0.02f, 1.05f, 0.14f), floatArrayOf(-0.42f, 0.86f, 0.40f), floatArrayOf(-0.72f, 0.32f, 0.34f), 0.098f, 0.022f, 0.015f, true, 0.24f),
+            WispSpec(floatArrayOf(0.06f, 1.06f, 0.18f), floatArrayOf(0.38f, 0.90f, 0.44f), floatArrayOf(0.68f, 0.46f, 0.40f), 0.096f, 0.021f, 0.014f, true, 0.63f),
+
+            // --- Tier 2 (12): Feathered Side-Swept Curtain Bangs & Delicate Temple Baby Hairs ---
+            WispSpec(floatArrayOf(0.21f, 0.88f, 0.40f), floatArrayOf(-0.08f, 0.72f, 0.65f), floatArrayOf(-0.48f, 0.34f, 0.55f), 0.084f, 0.016f, 0.012f, true, 0.11f),
+            WispSpec(floatArrayOf(0.15f, 0.90f, 0.41f), floatArrayOf(-0.24f, 0.64f, 0.61f), floatArrayOf(-0.62f, 0.14f, 0.43f), 0.082f, 0.015f, 0.014f, true, 0.23f),
+            WispSpec(floatArrayOf(0.08f, 0.91f, 0.44f), floatArrayOf(-0.14f, 0.75f, 0.64f), floatArrayOf(-0.36f, 0.52f, 0.62f), 0.056f, 0.011f, 0.010f, false, 0.73f),
+            WispSpec(floatArrayOf(0.18f, 0.87f, 0.42f), floatArrayOf(0.02f, 0.74f, 0.66f), floatArrayOf(-0.24f, 0.58f, 0.65f), 0.048f, 0.009f, 0.008f, false, 0.42f),
+            WispSpec(floatArrayOf(-0.14f, 0.85f, 0.48f), floatArrayOf(-0.42f, 0.54f, 0.54f), floatArrayOf(-0.68f, 0.04f, 0.36f), 0.078f, 0.015f, 0.013f, true, 0.61f),
+            WispSpec(floatArrayOf(0.25f, 0.87f, 0.40f), floatArrayOf(0.47f, 0.62f, 0.54f), floatArrayOf(0.67f, 0.14f, 0.38f), 0.082f, 0.015f, 0.013f, true, 0.37f),
+            WispSpec(floatArrayOf(0.30f, 0.84f, 0.42f), floatArrayOf(0.56f, 0.50f, 0.48f), floatArrayOf(0.71f, -0.04f, 0.34f), 0.072f, 0.014f, 0.012f, true, 0.49f),
+            WispSpec(floatArrayOf(0.23f, 0.89f, 0.42f), floatArrayOf(0.40f, 0.68f, 0.58f), floatArrayOf(0.58f, 0.38f, 0.50f), 0.052f, 0.010f, 0.009f, false, 0.85f),
+            // Delicate baby hairs softening both temples & hairline in front of ears
+            WispSpec(floatArrayOf(-0.48f, 0.58f, 0.34f), floatArrayOf(-0.64f, 0.28f, 0.37f), floatArrayOf(-0.69f, -0.06f, 0.31f), 0.048f, 0.008f, 0.009f, false, 0.82f),
+            WispSpec(floatArrayOf(-0.44f, 0.66f, 0.38f), floatArrayOf(-0.60f, 0.38f, 0.42f), floatArrayOf(-0.67f, 0.08f, 0.37f), 0.042f, 0.007f, 0.008f, false, 0.28f),
+            WispSpec(floatArrayOf(0.48f, 0.58f, 0.34f), floatArrayOf(0.64f, 0.28f, 0.37f), floatArrayOf(0.69f, -0.06f, 0.31f), 0.048f, 0.008f, 0.009f, false, 0.91f),
+            WispSpec(floatArrayOf(0.44f, 0.66f, 0.38f), floatArrayOf(0.60f, 0.38f, 0.42f), floatArrayOf(0.67f, 0.08f, 0.37f), 0.042f, 0.007f, 0.008f, false, 0.52f),
+
+            // --- Tier 3 (16): Staggered Cheekbone, Jaw & Shoulder Face-Framing Curtain Locks ---
+            WispSpec(floatArrayOf(-0.36f, 0.77f, 0.33f), floatArrayOf(-0.74f, 0.16f, 0.35f), floatArrayOf(-0.70f, -0.92f, 0.23f), 0.096f, 0.020f, 0.017f, true, 0.15f),
+            WispSpec(floatArrayOf(-0.44f, 0.70f, 0.20f), floatArrayOf(-0.82f, -0.02f, 0.20f), floatArrayOf(-0.78f, -1.10f, 0.05f), 0.102f, 0.021f, 0.018f, true, 0.29f),
+            WispSpec(floatArrayOf(-0.30f, 0.82f, 0.27f), floatArrayOf(-0.76f, 0.26f, 0.27f), floatArrayOf(-0.74f, -0.78f, 0.19f), 0.088f, 0.018f, 0.016f, true, 0.43f),
+            WispSpec(floatArrayOf(-0.50f, 0.54f, 0.08f), floatArrayOf(-0.85f, -0.20f, 0.04f), floatArrayOf(-0.86f, -1.20f, -0.14f), 0.104f, 0.020f, 0.016f, true, 0.57f),
+            WispSpec(floatArrayOf(-0.38f, 0.72f, 0.36f), floatArrayOf(-0.72f, 0.04f, 0.38f), floatArrayOf(-0.66f, -0.68f, 0.30f), 0.068f, 0.014f, 0.015f, false, 0.71f),
+            WispSpec(floatArrayOf(-0.48f, 0.64f, 0.12f), floatArrayOf(-0.84f, -0.10f, 0.12f), floatArrayOf(-0.84f, -1.04f, -0.04f), 0.092f, 0.019f, 0.018f, true, 0.84f),
+            WispSpec(floatArrayOf(-0.56f, 0.44f, 0.00f), floatArrayOf(-0.88f, -0.32f, -0.04f), floatArrayOf(-0.92f, -1.26f, -0.18f), 0.098f, 0.019f, 0.015f, true, 0.35f),
+            WispSpec(floatArrayOf(-0.42f, 0.66f, 0.26f), floatArrayOf(-0.78f, -0.16f, 0.24f), floatArrayOf(-0.74f, -1.16f, 0.12f), 0.064f, 0.013f, 0.016f, false, 0.94f),
+
+            WispSpec(floatArrayOf(0.35f, 0.77f, 0.33f), floatArrayOf(0.74f, 0.16f, 0.35f), floatArrayOf(0.70f, -0.94f, 0.23f), 0.096f, 0.020f, 0.017f, true, 0.19f),
+            WispSpec(floatArrayOf(0.43f, 0.70f, 0.20f), floatArrayOf(0.82f, -0.02f, 0.20f), floatArrayOf(0.78f, -1.12f, 0.05f), 0.102f, 0.021f, 0.018f, true, 0.33f),
+            WispSpec(floatArrayOf(0.31f, 0.81f, 0.29f), floatArrayOf(0.76f, 0.26f, 0.28f), floatArrayOf(0.74f, -0.80f, 0.20f), 0.088f, 0.018f, 0.016f, true, 0.47f),
+            WispSpec(floatArrayOf(0.50f, 0.54f, 0.08f), floatArrayOf(0.85f, -0.20f, 0.04f), floatArrayOf(0.86f, -1.22f, -0.14f), 0.104f, 0.020f, 0.016f, true, 0.63f),
+            WispSpec(floatArrayOf(0.37f, 0.72f, 0.36f), floatArrayOf(0.72f, 0.04f, 0.38f), floatArrayOf(0.66f, -0.70f, 0.30f), 0.068f, 0.014f, 0.015f, false, 0.76f),
+            WispSpec(floatArrayOf(0.48f, 0.64f, 0.12f), floatArrayOf(0.84f, -0.10f, 0.12f), floatArrayOf(0.84f, -1.06f, -0.04f), 0.092f, 0.019f, 0.018f, true, 0.89f),
+            WispSpec(floatArrayOf(0.56f, 0.44f, 0.00f), floatArrayOf(0.88f, -0.32f, -0.04f), floatArrayOf(0.92f, -1.28f, -0.18f), 0.098f, 0.019f, 0.015f, true, 0.41f),
+            WispSpec(floatArrayOf(0.42f, 0.66f, 0.26f), floatArrayOf(0.78f, -0.16f, 0.24f), floatArrayOf(0.74f, -1.18f, 0.12f), 0.064f, 0.013f, 0.016f, false, 0.06f),
+
+            // --- Tier 4 (16): Lush Pillow-Fanned Volumetric Nape & Back Cascading Locks ---
+            WispSpec(floatArrayOf(-0.56f, 0.24f, -0.14f), floatArrayOf(-0.92f, -0.46f, -0.22f), floatArrayOf(-1.05f, -1.36f, -0.30f), 0.118f, 0.021f, 0.018f, true, 0.14f),
+            WispSpec(floatArrayOf(-0.48f, 0.10f, -0.30f), floatArrayOf(-0.86f, -0.64f, -0.38f), floatArrayOf(-1.08f, -1.46f, -0.44f), 0.124f, 0.020f, 0.017f, true, 0.38f),
+            WispSpec(floatArrayOf(-0.62f, 0.02f, 0.02f), floatArrayOf(-0.88f, -0.60f, 0.02f), floatArrayOf(-0.95f, -1.34f, -0.10f), 0.106f, 0.019f, 0.016f, true, 0.72f),
+            WispSpec(floatArrayOf(-0.36f, -0.02f, -0.44f), floatArrayOf(-0.74f, -0.74f, -0.50f), floatArrayOf(-0.96f, -1.52f, -0.52f), 0.122f, 0.018f, 0.016f, true, 0.22f),
+            WispSpec(floatArrayOf(-0.52f, 0.38f, -0.06f), floatArrayOf(-0.90f, -0.30f, -0.14f), floatArrayOf(-1.02f, -1.28f, -0.24f), 0.110f, 0.020f, 0.017f, true, 0.55f),
+            WispSpec(floatArrayOf(-0.60f, -0.16f, -0.16f), floatArrayOf(-0.96f, -0.82f, -0.26f), floatArrayOf(-1.14f, -1.48f, -0.34f), 0.094f, 0.016f, 0.015f, false, 0.87f),
+            WispSpec(floatArrayOf(-0.42f, -0.12f, -0.38f), floatArrayOf(-0.80f, -0.86f, -0.46f), floatArrayOf(-1.04f, -1.58f, -0.48f), 0.098f, 0.015f, 0.014f, false, 0.65f),
+            WispSpec(floatArrayOf(-0.24f, -0.08f, -0.50f), floatArrayOf(-0.56f, -0.84f, -0.56f), floatArrayOf(-0.78f, -1.50f, -0.56f), 0.114f, 0.016f, 0.014f, true, 0.09f),
+
+            WispSpec(floatArrayOf(0.56f, 0.24f, -0.14f), floatArrayOf(0.92f, -0.46f, -0.22f), floatArrayOf(1.05f, -1.38f, -0.30f), 0.118f, 0.021f, 0.018f, true, 0.21f),
+            WispSpec(floatArrayOf(0.48f, 0.10f, -0.30f), floatArrayOf(0.86f, -0.64f, -0.38f), floatArrayOf(1.08f, -1.48f, -0.44f), 0.124f, 0.020f, 0.017f, true, 0.54f),
+            WispSpec(floatArrayOf(0.62f, 0.02f, 0.02f), floatArrayOf(0.88f, -0.60f, 0.02f), floatArrayOf(0.95f, -1.36f, -0.10f), 0.106f, 0.019f, 0.016f, true, 0.79f),
+            WispSpec(floatArrayOf(0.36f, -0.02f, -0.44f), floatArrayOf(0.74f, -0.74f, -0.50f), floatArrayOf(0.96f, -1.54f, -0.52f), 0.122f, 0.018f, 0.016f, true, 0.30f),
+            WispSpec(floatArrayOf(0.52f, 0.38f, -0.06f), floatArrayOf(0.90f, -0.30f, -0.14f), floatArrayOf(1.02f, -1.30f, -0.24f), 0.110f, 0.020f, 0.017f, true, 0.62f),
+            WispSpec(floatArrayOf(0.60f, -0.16f, -0.16f), floatArrayOf(0.96f, -0.82f, -0.26f), floatArrayOf(1.14f, -1.50f, -0.34f), 0.094f, 0.016f, 0.015f, false, 0.93f),
+            WispSpec(floatArrayOf(0.42f, -0.12f, -0.38f), floatArrayOf(0.80f, -0.86f, -0.46f), floatArrayOf(1.04f, -1.60f, -0.48f), 0.098f, 0.015f, 0.014f, false, 0.48f),
+            WispSpec(floatArrayOf(0.24f, -0.08f, -0.50f), floatArrayOf(0.56f, -0.84f, -0.56f), floatArrayOf(0.78f, -1.52f, -0.56f), 0.114f, 0.016f, 0.014f, true, 0.17f),
+
+            // --- Tier 5 (8): Airy Sunlit Backlit Flyaway Halo Strands ---
+            WispSpec(floatArrayOf(0.16f, 1.07f, 0.15f), floatArrayOf(-0.26f, 1.02f, 0.44f), floatArrayOf(-0.66f, 0.58f, 0.46f), 0.062f, 0.014f, 0.013f, false, 0.26f),
+            WispSpec(floatArrayOf(0.22f, 1.06f, 0.06f), floatArrayOf(0.60f, 0.86f, 0.30f), floatArrayOf(0.83f, 0.34f, 0.24f), 0.062f, 0.014f, 0.013f, false, 0.41f),
+            WispSpec(floatArrayOf(-0.06f, 1.08f, -0.06f), floatArrayOf(-0.56f, 0.86f, 0.18f), floatArrayOf(-0.84f, 0.24f, 0.14f), 0.060f, 0.014f, 0.012f, false, 0.68f),
+            WispSpec(floatArrayOf(0.08f, 1.09f, -0.10f), floatArrayOf(0.48f, 0.94f, 0.04f), floatArrayOf(0.82f, 0.40f, -0.04f), 0.060f, 0.013f, 0.012f, false, 0.86f),
+            WispSpec(floatArrayOf(-0.54f, 0.62f, 0.22f), floatArrayOf(-0.88f, -0.02f, 0.18f), floatArrayOf(-0.92f, -0.96f, 0.04f), 0.056f, 0.012f, 0.016f, false, 0.12f),
+            WispSpec(floatArrayOf(0.54f, 0.62f, 0.22f), floatArrayOf(0.88f, -0.02f, 0.18f), floatArrayOf(0.92f, -0.96f, 0.04f), 0.056f, 0.012f, 0.016f, false, 0.59f),
+            WispSpec(floatArrayOf(-0.62f, 0.12f, -0.08f), floatArrayOf(-0.98f, -0.56f, -0.16f), floatArrayOf(-1.12f, -1.32f, -0.26f), 0.064f, 0.012f, 0.016f, false, 0.34f),
+            WispSpec(floatArrayOf(0.62f, 0.12f, -0.08f), floatArrayOf(0.98f, -0.56f, -0.16f), floatArrayOf(1.12f, -1.32f, -0.26f), 0.064f, 0.012f, 0.016f, false, 0.77f)
+        )
+
+        val wispCols = 7
+        val wispRows = 16
+        val vertsPerWisp = wispCols * wispRows
+        val trisPerWisp = (wispCols - 1) * (wispRows - 1) * 6
+
+        val mesh = DynamicGlMesh(wisps.size * vertsPerWisp, wisps.size * trisPerWisp)
+        val indices = ShortArray(wisps.size * trisPerWisp)
+        val data = mesh.vertexData
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        var idxOut = 0
+
+        for ((wispIdx, wisp) in wisps.withIndex()) {
+            val baseVert = wispIdx * vertsPerWisp
+            for (r in 0 until wispRows - 1) {
+                for (c in 0 until wispCols - 1) {
+                    val i0 = (baseVert + r * wispCols + c).toShort()
+                    val i1 = (baseVert + r * wispCols + c + 1).toShort()
+                    val i2 = (baseVert + (r + 1) * wispCols + c).toShort()
+                    val i3 = (baseVert + (r + 1) * wispCols + c + 1).toShort()
+                    // B = T x O => d/dc(B) x d/dr(T) = B x T = +O (OUTWARD CCW!)
+                    indices[idxOut++] = i0; indices[idxOut++] = i1; indices[idxOut++] = i2
+                    indices[idxOut++] = i1; indices[idxOut++] = i3; indices[idxOut++] = i2
+                }
+            }
+
+            val wavePhase = wisp.seed * 6.2831853f + wispIdx * 0.73f
+            val encodedSeed = (if (wisp.isVolumetricLock) 1.0f else 0.0f) + wisp.seed.coerceIn(0.02f, 0.96f)
+
+            for (r in 0 until wispRows) {
+                val t = r.toFloat() / (wispRows - 1)
+                val omt = 1f - t
+                val cx = omt * omt * wisp.p0[0] + 2f * omt * t * wisp.p1[0] + t * t * wisp.p2[0]
+                val cy = omt * omt * wisp.p0[1] + 2f * omt * t * wisp.p1[1] + t * t * wisp.p2[1]
+                val cz = omt * omt * wisp.p0[2] + 2f * omt * t * wisp.p1[2] + t * t * wisp.p2[2]
+
+                var tx = 2f * omt * (wisp.p1[0] - wisp.p0[0]) + 2f * t * (wisp.p2[0] - wisp.p1[0])
+                var ty = 2f * omt * (wisp.p1[1] - wisp.p0[1]) + 2f * t * (wisp.p2[1] - wisp.p1[1])
+                var tz = 2f * omt * (wisp.p1[2] - wisp.p0[2]) + 2f * t * (wisp.p2[2] - wisp.p1[2])
+                val tLen = sqrt(tx * tx + ty * ty + tz * tz).coerceAtLeast(1e-5f)
+                tx /= tLen; ty /= tLen; tz /= tLen
+
+                val drapeW = smoothStep(-0.15f, -0.85f, cy)
+                var ox = cx * (1f - 0.45f * drapeW)
+                var oy = (cy - 0.10f) * (1f - drapeW) + 0.08f * drapeW
+                var oz = cz * (1f - drapeW) + 0.92f * drapeW
+                val oDotT = ox * tx + oy * ty + oz * tz
+                ox -= tx * oDotT; oy -= ty * oDotT; oz -= tz * oDotT
+                val oLen = sqrt(ox * ox + oy * oy + oz * oz).coerceAtLeast(1e-5f)
+                ox /= oLen; oy /= oLen; oz /= oLen
+
+                val bx = ty * oz - tz * oy
+                val by = tz * ox - tx * oz
+                val bz = tx * oy - ty * ox
+
+                // Natural gentle S-wave drape along each lock without ever inverting outward CCW winding
+                val sWaveEnv = sin(t * PI.toFloat())
+                val sWaveOffset = wisp.waveAmp * sin(t * 5.2f + wavePhase) * sWaveEnv
+                val sWaveLoft = wisp.waveAmp * 0.35f * cos(t * 4.4f + wavePhase * 1.3f) * sWaveEnv
+
+                // Sculpted silhouette taper: grounded root, lush mid-shaft volume, feathery tapered tips
+                val rootEnv = (if (wisp.isVolumetricLock) 0.64f else 0.52f) +
+                    (if (wisp.isVolumetricLock) 0.36f else 0.48f) * smoothStep(0.0f, 0.20f, t)
+                val tipEnv = 1f - (if (wisp.isVolumetricLock) 0.72f else 0.84f) * smoothStep(0.64f, 1.0f, t)
+                val curW = wisp.halfW * rootEnv * (0.86f + 0.18f * sWaveEnv) * tipEnv
+                val curLoft = wisp.archLoft * sWaveEnv.coerceAtLeast(0.14f)
+
+                for (c in 0 until wispCols) {
+                    val u01 = c.toFloat() / (wispCols - 1)
+                    val u = u01 * 2f - 1f
+                    val arch = cos(u * (PI.toFloat() * 0.5f))
+
+                    val bPos = u * curW + sWaveOffset
+                    val oPos = arch * curLoft + sWaveLoft
+                    val lx = cx + bx * bPos + ox * oPos
+                    val ly = cy + by * bPos + oy * oPos
+                    val lz = cz + bz * bPos + oz * oPos
+
+                    val lnx = ox * (0.86f * arch + 0.14f) + bx * (u * 0.46f)
+                    val lny = oy * (0.86f * arch + 0.14f) + by * (u * 0.46f)
+                    val lnz = oz * (0.86f * arch + 0.14f) + bz * (u * 0.46f)
+
+                    val wPt = headLocalToWorld(lx, ly, lz)
+                    val minWispZ = BlossomBodyBuilder.mattressSurfaceZ(wPt[1]) + 0.036f
+                    if (wPt[2] < minWispZ) wPt[2] = minWispZ
+                    val wN = headNormalToWorld(lnx, lny, lnz)
+
+                    val idx = (baseVert + r * wispCols + c) * stride
+                    data[idx] = wPt[0]; data[idx + 1] = wPt[1]; data[idx + 2] = wPt[2]
+                    data[idx + 3] = wN[0]; data[idx + 4] = wN[1]; data[idx + 5] = wN[2]
+                    data[idx + 6] = t
+                    data[idx + 7] = u01
+                    data[idx + 8] = ((if (wisp.isVolumetricLock) 0.70f else 0.78f) + 0.26f * arch - 0.06f * (1f - t)).coerceIn(0.58f, 1f)
+                    data[idx + 9] = encodedSeed
+                }
+            }
+        }
+
+        mesh.setIndices(indices)
+        mesh.commitVertices()
+        return mesh
+    }
+
+    // -------------------------------------------------------------------------
+    // 5C. V27.0 BETA REALISM: 3D CURVED UPPER & LOWER EYELASH FANS
+    //     Anchored flush onto the sculpted upper & lower eyelid margins of
+    //     blossomHeadMesh; animated cleanly across blink & gaze-tracking states.
+    // -------------------------------------------------------------------------
+    private const val LASH_COLS = 28
+    private const val LASH_ROWS = 6
+
+    private fun evaluateLashPointLocal(
+        side: Float,
+        isUpper: Boolean,
+        eyeU: Float,
+        t: Float,
+        rootLz: Float,
+        closedPose: Boolean
+    ): FloatArray {
+        val eyeCenterX = side * 0.256f
+        val eyeCenterY = 0.038f
+        val eyeCenterZ = 0.528f
+        val eyeWrapR = 0.136f + 0.024f
+
+        val clampedU = eyeU.coerceIn(-0.98f, 0.98f)
+        val eyeSpan = (1f - clampedU * clampedU).coerceAtLeast(0f)
+        val upperLidY = 0.036f + (0.056f + 0.008f * clampedU) * sqrt(eyeSpan)
+        val lowerLidY = 0.036f - (0.036f - 0.006f * clampedU) * sqrt(eyeSpan)
+        val seamY = lowerLidY + 0.002f
+
+        val baseLx = side * (0.256f + clampedU * 0.126f)
+        val baseLy = if (isUpper) {
+            if (closedPose) seamY + 0.001f else upperLidY + 0.0025f
+        } else {
+            lowerLidY - 0.0022f
+        }
+
+        // Ensure root stays flush with the eyelid skin and safely outside the cornea sphere when closed
+        var baseLz = rootLz
+        if (closedPose) {
+            val dxE = baseLx - eyeCenterX
+            val dyE = baseLy - eyeCenterY
+            val rad2 = dxE * dxE + dyE * dyE
+            val wrapR = eyeWrapR + if (isUpper) 0.003f else 0.0015f
+            if (rad2 < wrapR * wrapR) {
+                val sphZ = eyeCenterZ + sqrt(wrapR * wrapR - rad2)
+                baseLz = max(baseLz, sphZ)
+            }
+        }
+
+        // Natural feminine eyelash length distribution: delicate inner corner, lush outer-middle sweep
+        val edgeEnv = smoothStep(-0.92f, -0.38f, clampedU) * (1f - smoothStep(0.72f, 1.00f, clampedU))
+        val outerFlare = 0.72f + 0.34f * smoothStep(-0.25f, 0.55f, clampedU)
+        val lashLen = if (isUpper) {
+            (0.015f + 0.036f * edgeEnv * outerFlare)
+        } else {
+            (0.007f + 0.014f * edgeEnv * (0.80f + 0.20f * smoothStep(-0.15f, 0.50f, clampedU)))
+        }
+
+        // Graceful 3D curl: forward projection + upward curl (open upper) or soft downward sweep (closed upper / lower)
+        val splayX = side * (0.14f + 0.26f * clampedU) * lashLen * t * (0.65f + 0.35f * t)
+        val curlY: Float
+        val projZ: Float
+        if (isUpper) {
+            if (!closedPose) {
+                // Sweep gently forward then curl gracefully upward toward the tip
+                projZ = lashLen * (0.94f * t - 0.16f * t * t)
+                curlY = lashLen * (0.16f * t + 0.56f * t * t)
+            } else {
+                // Closed eyelid: lashes rest forward and gently downward over the lower lid margin
+                projZ = lashLen * (0.92f * t - 0.10f * t * t)
+                curlY = -lashLen * (0.26f * t + 0.32f * t * t)
+            }
+        } else {
+            // Fine lower lash fringe pointing forward and softly downward
+            projZ = lashLen * (0.86f * t - 0.10f * t * t)
+            curlY = -lashLen * (0.42f * t + 0.24f * t * t)
+        }
+
+        return floatArrayOf(baseLx + splayX, baseLy + curlY, baseLz + projZ)
+    }
+
+    fun buildBlossomEyelashesMesh(headMesh: DynamicGlMesh): DynamicGlMesh {
+        val vertsPerStrip = LASH_COLS * LASH_ROWS
+        val trisPerStrip = (LASH_COLS - 1) * (LASH_ROWS - 1) * 6
+        val stripCount = 4
+        val mesh = DynamicGlMesh(stripCount * vertsPerStrip, stripCount * trisPerStrip)
+        val indices = ShortArray(stripCount * trisPerStrip)
+        val data = mesh.vertexData
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+
+        // Collect anterior head-local eye-area vertices once so each lash root anchors flush on the eyelid rim
+        val headData = headMesh.vertexData
+        val headLocalPts = ArrayList<FloatArray>(640)
+        for (i in 0 until headMesh.vertexCount) {
+            val s = i * stride
+            val lp = headWorldToLocal(headData[s], headData[s + 1], headData[s + 2])
+            if (lp[2] > 0.42f && abs(lp[0]) in 0.08f..0.46f && lp[1] in -0.10f..0.22f) {
+                headLocalPts.add(lp)
+            }
+        }
+
+        fun sampleLidSurfaceZ(lx: Float, ly: Float, side: Float): Float {
+            var bestZ = 0f
+            var bestD2 = Float.MAX_VALUE
+            var sumW = 0f
+            var sumZ = 0f
+            for (k in headLocalPts.indices) {
+                val p = headLocalPts[k]
+                val dx = p[0] - lx
+                val dy = p[1] - ly
+                val d2 = dx * dx + dy * dy
+                if (d2 < bestD2) {
+                    bestD2 = d2
+                    bestZ = p[2]
+                }
+                if (d2 < 0.0012f) {
+                    val w = 1f / (d2 + 0.00004f)
+                    sumW += w
+                    sumZ += p[2] * w
+                }
+            }
+            val sampled = if (sumW > 0f) sumZ / sumW else bestZ
+            // Keep safely outside the eyeball cornea sphere
+            val dxE = lx - side * 0.256f
+            val dyE = ly - 0.038f
+            val minWrapR = 0.136f + 0.014f
+            val rad2 = dxE * dxE + dyE * dyE
+            val floorZ = if (rad2 < minWrapR * minWrapR) {
+                0.528f + sqrt(minWrapR * minWrapR - rad2)
+            } else {
+                0.55f
+            }
+            return max(sampled - 0.0018f, floorZ)
+        }
+
+        data class LashStripCfg(val side: Float, val isUpper: Boolean)
+        val strips = listOf(
+            LashStripCfg(side = -1f, isUpper = true),
+            LashStripCfg(side = 1f, isUpper = true),
+            LashStripCfg(side = -1f, isUpper = false),
+            LashStripCfg(side = 1f, isUpper = false)
+        )
+
+        var idxOut = 0
+        for ((stripIdx, cfg) in strips.withIndex()) {
+            val baseVert = stripIdx * vertsPerStrip
+            val uMin = if (cfg.isUpper) -0.84f else -0.74f
+            val uMax = if (cfg.isUpper) 0.96f else 0.88f
+            val localGrid = Array(LASH_ROWS) { Array(LASH_COLS) { FloatArray(3) } }
+
+            for (c in 0 until LASH_COLS) {
+                val u01 = c.toFloat() / (LASH_COLS - 1)
+                val eyeU = uMin + (uMax - uMin) * u01
+                val eyeSpan = (1f - eyeU * eyeU).coerceAtLeast(0f)
+                val lidY = if (cfg.isUpper) {
+                    0.036f + (0.056f + 0.008f * eyeU) * sqrt(eyeSpan) + 0.0025f
+                } else {
+                    0.036f - (0.036f - 0.006f * eyeU) * sqrt(eyeSpan) - 0.0022f
+                }
+                val rootLx = cfg.side * (0.256f + eyeU * 0.126f)
+                val rootLz = sampleLidSurfaceZ(rootLx, lidY, cfg.side)
+
+                for (r in 0 until LASH_ROWS) {
+                    val t = r.toFloat() / (LASH_ROWS - 1)
+                    val pt = evaluateLashPointLocal(
+                        side = cfg.side,
+                        isUpper = cfg.isUpper,
+                        eyeU = eyeU,
+                        t = t,
+                        rootLz = rootLz,
+                        closedPose = false
+                    )
+                    localGrid[r][c] = pt
+                }
+            }
+
+            // Determine consistent CCW winding so geometric face normals strictly align with outward anterior normals (+Z)
+            val p00 = localGrid[0][LASH_COLS / 2]
+            val p10 = localGrid[0][LASH_COLS / 2 + 1]
+            val p01 = localGrid[1][LASH_COLS / 2]
+            val eCx = p10[0] - p00[0]; val eCy = p10[1] - p00[1]; val eCz = p10[2] - p00[2]
+            val eRx = p01[0] - p00[0]; val eRy = p01[1] - p00[1]; val eRz = p01[2] - p00[2]
+            val crossX = eCy * eRz - eCz * eRy
+            val crossY = eCz * eRx - eCx * eRz
+            val crossZ = eCx * eRy - eCy * eRx
+            val desiredOutY = if (cfg.isUpper) 0.55f else -0.55f
+            val flipWinding = (crossZ * 0.85f + crossY * desiredOutY) < 0f
+
+            for (r in 0 until LASH_ROWS - 1) {
+                for (c in 0 until LASH_COLS - 1) {
+                    val i0 = (baseVert + r * LASH_COLS + c).toShort()
+                    val i1 = (baseVert + r * LASH_COLS + c + 1).toShort()
+                    val i2 = (baseVert + (r + 1) * LASH_COLS + c).toShort()
+                    val i3 = (baseVert + (r + 1) * LASH_COLS + c + 1).toShort()
+                    if (!flipWinding) {
+                        indices[idxOut++] = i0; indices[idxOut++] = i1; indices[idxOut++] = i2
+                        indices[idxOut++] = i1; indices[idxOut++] = i3; indices[idxOut++] = i2
+                    } else {
+                        indices[idxOut++] = i0; indices[idxOut++] = i2; indices[idxOut++] = i1
+                        indices[idxOut++] = i1; indices[idxOut++] = i2; indices[idxOut++] = i3
+                    }
+                }
+            }
+
+            for (r in 0 until LASH_ROWS) {
+                val t = r.toFloat() / (LASH_ROWS - 1)
+                val rPrev = (r - 1).coerceAtLeast(0)
+                val rNext = (r + 1).coerceAtMost(LASH_ROWS - 1)
+                for (c in 0 until LASH_COLS) {
+                    val u01 = c.toFloat() / (LASH_COLS - 1)
+                    val cPrev = (c - 1).coerceAtLeast(0)
+                    val cNext = (c + 1).coerceAtMost(LASH_COLS - 1)
+
+                    val pL = localGrid[r][cPrev]
+                    val pR = localGrid[r][cNext]
+                    val pD = localGrid[rPrev][c]
+                    val pU = localGrid[rNext][c]
+                    val dcx = pR[0] - pL[0]; val dcy = pR[1] - pL[1]; val dcz = pR[2] - pL[2]
+                    val drx = pU[0] - pD[0]; val dry = pU[1] - pD[1]; val drz = pU[2] - pD[2]
+                    var nx = dcy * drz - dcz * dry
+                    var ny = dcz * drx - dcx * drz
+                    var nz = dcx * dry - dcy * drx
+                    if (flipWinding) {
+                        nx = -nx; ny = -ny; nz = -nz
+                    }
+                    val nLen = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-5f)
+                    nx /= nLen; ny /= nLen; nz /= nLen
+
+                    val pt = localGrid[r][c]
+                    val wPt = headLocalToWorld(pt[0], pt[1], pt[2])
+                    val wN = headNormalToWorld(nx, ny, nz)
+                    val idx = (baseVert + r * LASH_COLS + c) * stride
+                    data[idx] = wPt[0]; data[idx + 1] = wPt[1]; data[idx + 2] = wPt[2]
+                    data[idx + 3] = wN[0]; data[idx + 4] = wN[1]; data[idx + 5] = wN[2]
+                    data[idx + 6] = t
+                    data[idx + 7] = u01
+                    data[idx + 8] = (0.72f + 0.28f * t).coerceIn(0.65f, 1f)
+                    data[idx + 9] = if (cfg.isUpper) 1.0f else 0.0f
+                }
+            }
+        }
+
+        mesh.setIndices(indices)
+        mesh.commitVertices()
+        return mesh
+    }
+
+    // -------------------------------------------------------------------------
     // 6. PERSISTENT HEAD TURN + SUBTLE DOWNWARD NOD + NATURAL EYELID BLINK RIG
     //    Disjoint from ArmSkinCache (ax >= 1.12) & LegSkinCache (y <= 0.44)!
     // -------------------------------------------------------------------------
@@ -1996,14 +2445,21 @@ internal object BlossomUpperBodyBuilder {
         val mouthOpenIndices: IntArray,
         val mouthOpenDeltaPosNorm: FloatArray,
         val mouthOpenBaseMat: FloatArray,
-        val mouthOpenTargetMat: FloatArray
+        val mouthOpenTargetMat: FloatArray,
+        val hairWispsRestPosNorm: FloatArray = FloatArray(0),
+        val lashRestPosNorm: FloatArray = FloatArray(0),
+        val lashClosedPosNorm: FloatArray = FloatArray(0),
+        val lashVertIsRight: BooleanArray = BooleanArray(0),
+        val lashVertIsUpper: BooleanArray = BooleanArray(0)
     )
 
     fun buildHeadRigCache(
         bodyMesh: DynamicGlMesh,
         headMesh: DynamicGlMesh,
         eyesMesh: DynamicGlMesh,
-        hairMesh: DynamicGlMesh
+        hairMesh: DynamicGlMesh,
+        hairWispsMesh: DynamicGlMesh? = null,
+        eyelashesMesh: DynamicGlMesh? = null
     ): HeadRigCache {
         val stride = DynamicGlMesh.FLOATS_PER_VERTEX
         fun copyPosNorm(mesh: DynamicGlMesh): FloatArray {
@@ -2402,6 +2858,82 @@ internal object BlossomUpperBodyBuilder {
             }
         }
 
+        // Precompute v27.0 layered hair wisps & blink-synchronized 3D eyelash open/closed rig caches
+        val hairWispsRest = if (hairWispsMesh != null) copyPosNorm(hairWispsMesh) else FloatArray(0)
+        val lashRest = if (eyelashesMesh != null) copyPosNorm(eyelashesMesh) else FloatArray(0)
+        val lashClosed = FloatArray(lashRest.size)
+        val lashIsRight = BooleanArray(eyelashesMesh?.vertexCount ?: 0)
+        val lashIsUpper = BooleanArray(eyelashesMesh?.vertexCount ?: 0)
+        if (eyelashesMesh != null && eyelashesMesh.vertexCount > 0) {
+            val lData = eyelashesMesh.vertexData
+            val vertsPerStrip = LASH_COLS * LASH_ROWS
+            for (stripIdx in 0 until 4) {
+                val baseVert = stripIdx * vertsPerStrip
+                if (baseVert + vertsPerStrip > eyelashesMesh.vertexCount) break
+                val side = if (stripIdx == 1 || stripIdx == 3) 1f else -1f
+                val isUpper = stripIdx < 2
+                val uMin = if (isUpper) -0.84f else -0.74f
+                val uMax = if (isUpper) 0.96f else 0.88f
+                val closedGrid = Array(LASH_ROWS) { Array(LASH_COLS) { FloatArray(3) } }
+
+                for (c in 0 until LASH_COLS) {
+                    val u01 = c.toFloat() / (LASH_COLS - 1)
+                    val eyeU = uMin + (uMax - uMin) * u01
+                    val rootVert = baseVert + c
+                    val rs = rootVert * 6
+                    val rootLocal = headWorldToLocal(lashRest[rs], lashRest[rs + 1], lashRest[rs + 2])
+                    for (r in 0 until LASH_ROWS) {
+                        val t = r.toFloat() / (LASH_ROWS - 1)
+                        closedGrid[r][c] = evaluateLashPointLocal(
+                            side = side,
+                            isUpper = isUpper,
+                            eyeU = eyeU,
+                            t = t,
+                            rootLz = rootLocal[2],
+                            closedPose = true
+                        )
+                    }
+                }
+
+                // Match the strip's exact fixed index-buffer triangle winding so vertex normals always align with CCW faces
+                val idxBuf = eyelashesMesh.indexBuffer
+                val stripFirstIdx = stripIdx * (LASH_ROWS - 1) * (LASH_COLS - 1) * 6
+                val secondVert = idxBuf.get(stripFirstIdx + 1).toInt() and 0xFFFF
+                val stripFlipWinding = secondVert != (baseVert + 1)
+
+                for (r in 0 until LASH_ROWS) {
+                    val rPrev = (r - 1).coerceAtLeast(0)
+                    val rNext = (r + 1).coerceAtMost(LASH_ROWS - 1)
+                    for (c in 0 until LASH_COLS) {
+                        val cPrev = (c - 1).coerceAtLeast(0)
+                        val cNext = (c + 1).coerceAtMost(LASH_COLS - 1)
+                        val pL = closedGrid[r][cPrev]; val pR = closedGrid[r][cNext]
+                        val pD = closedGrid[rPrev][c]; val pU = closedGrid[rNext][c]
+                        val dcx = pR[0] - pL[0]; val dcy = pR[1] - pL[1]; val dcz = pR[2] - pL[2]
+                        val drx = pU[0] - pD[0]; val dry = pU[1] - pD[1]; val drz = pU[2] - pD[2]
+                        var nx = dcy * drz - dcz * dry
+                        var ny = dcz * drx - dcx * drz
+                        var nz = dcx * dry - dcy * drx
+                        if (stripFlipWinding) {
+                            nx = -nx; ny = -ny; nz = -nz
+                        }
+                        val nLen = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-5f)
+                        nx /= nLen; ny /= nLen; nz /= nLen
+
+                        val vIdx = baseVert + r * LASH_COLS + c
+                        val pt = closedGrid[r][c]
+                        val wPt = headLocalToWorld(pt[0], pt[1], pt[2])
+                        val wN = headNormalToWorld(nx, ny, nz)
+                        val d = vIdx * 6
+                        lashClosed[d] = wPt[0]; lashClosed[d + 1] = wPt[1]; lashClosed[d + 2] = wPt[2]
+                        lashClosed[d + 3] = wN[0]; lashClosed[d + 4] = wN[1]; lashClosed[d + 5] = wN[2]
+                        lashIsRight[vIdx] = side > 0f
+                        lashIsUpper[vIdx] = lData[vIdx * stride + 9] > 0.5f
+                    }
+                }
+            }
+        }
+
         return HeadRigCache(
             headRestPosNorm = headRest,
             eyesRestPosNorm = copyPosNorm(eyesMesh),
@@ -2431,7 +2963,12 @@ internal object BlossomUpperBodyBuilder {
             mouthOpenIndices = mouthOpenIdxBuf.copyOf(mouthOpenCount),
             mouthOpenDeltaPosNorm = mouthOpenDeltaBuf.copyOf(mouthOpenCount * 6),
             mouthOpenBaseMat = mouthOpenBaseMatBuf.copyOf(mouthOpenCount * 3),
-            mouthOpenTargetMat = mouthOpenTargetMatBuf.copyOf(mouthOpenCount * 3)
+            mouthOpenTargetMat = mouthOpenTargetMatBuf.copyOf(mouthOpenCount * 3),
+            hairWispsRestPosNorm = hairWispsRest,
+            lashRestPosNorm = lashRest,
+            lashClosedPosNorm = lashClosed,
+            lashVertIsRight = lashIsRight,
+            lashVertIsUpper = lashIsUpper
         )
     }
 
@@ -2460,7 +2997,9 @@ internal object BlossomUpperBodyBuilder {
         eyelidGazeTrack: Float = 0f,
         swallowPhase: Float = 0f,
         nostrilBreath: Float = 0f,
-        mouthOpen: Float = 0f
+        mouthOpen: Float = 0f,
+        hairWispsMesh: DynamicGlMesh? = null,
+        eyelashesMesh: DynamicGlMesh? = null
     ) {
         val turn = headTurn.coerceIn(-1f, 1f)
         val pitch = headPitch.coerceIn(-1f, 1f)
@@ -2678,6 +3217,44 @@ internal object BlossomUpperBodyBuilder {
             cache.eyesRestPosNorm
         }
 
+        // Build rest-space 3D eyelash buffer synchronized with blink & upward-gaze lid lift (zero drift!)
+        val hasLashes = eyelashesMesh != null && cache.lashRestPosNorm.isNotEmpty()
+        val lashWork = if (hasLashes && (hasBlink || hasLidLift)) {
+            val src = cache.lashRestPosNorm
+            val closed = cache.lashClosedPosNorm
+            val buf = src.copyOf()
+            val vCount = eyelashesMesh.vertexCount
+            val liftSy = 0.0080f * HEAD_SCALE
+            val liftSz = -0.0022f * HEAD_SCALE
+            val liftWy = liftSy * COS_PITCH - liftSz * SIN_PITCH
+            val liftWz = liftSy * SIN_PITCH + liftSz * COS_PITCH
+            for (i in 0 until vCount) {
+                val sideBlink = if (cache.lashVertIsRight[i]) effBlinkR else effBlinkL
+                val isUpper = cache.lashVertIsUpper[i]
+                val s = i * 6
+                if (isUpper && upTrackLift > 1e-4f) {
+                    val liftW = upTrackLift * (1f - sideBlink)
+                    buf[s + 1] += liftWy * liftW
+                    buf[s + 2] += liftWz * liftW
+                }
+                if (sideBlink > 1e-4f) {
+                    buf[s] = buf[s] + (closed[s] - buf[s]) * sideBlink
+                    buf[s + 1] = buf[s + 1] + (closed[s + 1] - buf[s + 1]) * sideBlink
+                    buf[s + 2] = buf[s + 2] + (closed[s + 2] - buf[s + 2]) * sideBlink
+                    var nx = buf[s + 3] + (closed[s + 3] - buf[s + 3]) * sideBlink
+                    var ny = buf[s + 4] + (closed[s + 4] - buf[s + 4]) * sideBlink
+                    var nz = buf[s + 5] + (closed[s + 5] - buf[s + 5]) * sideBlink
+                    val nLen = sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-5f)
+                    buf[s + 3] = nx / nLen
+                    buf[s + 4] = ny / nLen
+                    buf[s + 5] = nz / nLen
+                }
+            }
+            buf
+        } else {
+            cache.lashRestPosNorm
+        }
+
         fun restoreMesh(mesh: DynamicGlMesh, rest: FloatArray) {
             val dst = mesh.vertexData
             for (i in 0 until mesh.vertexCount) {
@@ -2693,6 +3270,12 @@ internal object BlossomUpperBodyBuilder {
             restoreMesh(headMesh, headWork)
             restoreMesh(eyesMesh, eyesWork)
             restoreMesh(hairMesh, cache.hairRestPosNorm)
+            if (hairWispsMesh != null && cache.hairWispsRestPosNorm.isNotEmpty()) {
+                restoreMesh(hairWispsMesh, cache.hairWispsRestPosNorm)
+            }
+            if (eyelashesMesh != null && lashWork.isNotEmpty()) {
+                restoreMesh(eyelashesMesh, lashWork)
+            }
             val bData = bodyMesh.vertexData
             for (k in cache.neckBodyIndices.indices) {
                 val s = k * 6
@@ -2782,29 +3365,37 @@ internal object BlossomUpperBodyBuilder {
 
         applyRigid(headMesh, headWork)
         applyRigid(eyesMesh, eyesWork)
-
-        // Hair follows full head turn & nod on crown/face-framing locks and softens gently on lower pillow-resting tips
-        val hDst = hairMesh.vertexData
-        val hRest = cache.hairRestPosNorm
-        for (i in 0 until hairMesh.vertexCount) {
-            val s = i * 6
-            val d = i * stride
-            val restY = hRest[s + 1]
-            val hairW = 0.52f + 0.48f * smoothStep(5.05f, 5.85f, restY)
-            rotatePointAndNormal(
-                hRest[s], restY, hRest[s + 2],
-                hRest[s + 3], hRest[s + 4], hRest[s + 5],
-                fullPitch * hairW, fullYaw * hairW, fullRoll * hairW, tmp
-            )
-            val minHairZ = BlossomBodyBuilder.mattressSurfaceZ(tmp[1]) + 0.03f
-            hDst[d] = tmp[0]
-            hDst[d + 1] = tmp[1]
-            hDst[d + 2] = if (tmp[2] < minHairZ) minHairZ else tmp[2]
-            hDst[d + 3] = tmp[3]
-            hDst[d + 4] = tmp[4]
-            hDst[d + 5] = tmp[5]
+        if (eyelashesMesh != null && lashWork.isNotEmpty()) {
+            applyRigid(eyelashesMesh, lashWork)
         }
-        hairMesh.commitVertices()
+
+        // Hair (and v27.0 layered wisps) follow full head turn & nod on crown/face-framing locks and soften on pillow tips
+        fun applyHairFlow(mesh: DynamicGlMesh, rest: FloatArray, floorOffset: Float) {
+            val hDst = mesh.vertexData
+            for (i in 0 until mesh.vertexCount) {
+                val s = i * 6
+                val d = i * stride
+                val restY = rest[s + 1]
+                val hairW = 0.52f + 0.48f * smoothStep(5.05f, 5.85f, restY)
+                rotatePointAndNormal(
+                    rest[s], restY, rest[s + 2],
+                    rest[s + 3], rest[s + 4], rest[s + 5],
+                    fullPitch * hairW, fullYaw * hairW, fullRoll * hairW, tmp
+                )
+                val minHairZ = BlossomBodyBuilder.mattressSurfaceZ(tmp[1]) + floorOffset
+                hDst[d] = tmp[0]
+                hDst[d + 1] = tmp[1]
+                hDst[d + 2] = if (tmp[2] < minHairZ) minHairZ else tmp[2]
+                hDst[d + 3] = tmp[3]
+                hDst[d + 4] = tmp[4]
+                hDst[d + 5] = tmp[5]
+            }
+            mesh.commitVertices()
+        }
+        applyHairFlow(hairMesh, cache.hairRestPosNorm, floorOffset = 0.03f)
+        if (hairWispsMesh != null && cache.hairWispsRestPosNorm.isNotEmpty()) {
+            applyHairFlow(hairWispsMesh, cache.hairWispsRestPosNorm, floorOffset = 0.036f)
+        }
 
         // Smooth cervical twist & nod across upper neck vertices in blossomBodyMesh
         val bData = bodyMesh.vertexData

@@ -1,5 +1,42 @@
 # Bloom Atlas — Version History
 
+## Version 28.0 (`versionCode = 28`)
+**Date:** 2026-11-26
+
+- **Fixed Leg-Locked Dynamic Thigh/Hip Creases & Kneecaps (`VulvaGlRenderer.kt`)**
+  - Fixed a confirmed coordinate-space issue in `betaRealismDynamicCreases`: because `BlossomSdfBodyBuilder.applyLegSpread()` writes already-posed thigh coordinates into `blossomBodyMesh`, evaluating inguinal/hip-flexion creases and patella landmarks in `vRestPos` left them stationary in world space while Blossom's legs swept and squeezed during the HR peak animation.
+  - Bound `bodyBindHoleVboId` (`aBodyBindHole`) unconditionally for `blossomBodyMesh` (while keeping Seam D pelvic hole discard strictly gated by `uBetaSmoothBodyHole`) and reconstructed true unposed bind-pose coordinates `bindPos` in Pass A so hip-flexion creases, kneecap (patella) contours (centered at true rest knee `(1.80, -1.86, 1.78)`), and leg skin undertones now track 100% locked to her moving thighs and knees.
+- **New Vulva Beta Option #8 — Clitoral Hood–Mons Skin Blend (`VulvaGeometryBuilder.kt`, `VulvaGlRenderer.kt`, `BlossomViewportSessionState.kt`, `InteractiveVulva3DCanvas.kt`)**
+  - Added an independent **OFF-by-default** toggle + strength slider (`betaV3HoodMonsBlend` / `betaV3HoodMonsStrength`, remembers `75%` default) directly visible in Tab 0 (`Vulva`) even when *"Show Extra Beta Options"* is unchecked.
+  - Smoothly harmonizes dorsal/outer clitoral hood pigmentation, mucosal tint, and Seam F shade darkening into surrounding natural mons pubis skin across all skin-tone presets, while guarding the glistening inner preputial edge, lower inner labia, and clitoral glans.
+- **Significantly Upgraded Subsurface Scattering (`betaRealismSkinDetail`) & Spectacular Layered Hair (`betaRealismLayeredHair`)**
+  - **Subsurface Scattering (`VulvaGlRenderer.kt`)**: Replaced the overly subtle v27.0 SSS nudge with visibly stronger red-channel RGB wrap, skin-adaptive coral-hemoglobin shadow-terminator scattering, backlit + grazing thin-tissue translucency (ears, nose tip, hands/fingers, curved body rims), warmer cavity AO bounce exponents, and subtle pore specular breakup — strictly masked outside the vulva via `bodyRealismMask`.
+  - **Spectacular Layered Hair (`BlossomUpperBodyBuilder.kt`, `VulvaGlRenderer.kt`)**: Expanded `blossomHairWispsMesh` from 26 sparse ribbons to **62 sculpted, S-waved multi-tier volumetric lock cards & backlit flyaway strands** (`6,944` verts across crown root-lift, curtain bangs/baby hairs, staggered cheekbone/jaw face-framing locks, pillow-fanned nape locks, and airy sunlit flyaway halos; verified outward CCW winding & mattress floor clamp), added a natural right-of-center **scalp part line** with root shadow and deep macro lock-clump valleys on `blossomHairMesh`, and upgraded both Pass D and Pass F to **Kajiya-Kay dual-lobe anisotropic specular (`sin(T, H)`)** with a sharp root-shifted neutral-gold primary R-lobe, a glowing pigment-tinted tip-shifted TRT secondary lobe, and staggered needle-tapered strand tips.
+- **3 New Photorealistic Visual Realism Beta Toggles in `Life+` (All OFF by Default, Packed in `uBetaRealismFlags3`)**
+  1. **Lip, Brow & Freckle Detail (`betaRealismFacialMicro`)** — Fine vertical lip micro-creases with hydrated lower-lip pillow sheen, feathered directional arched eyebrow hairs, and delicate nose-bridge/cheekbone sun-kissed freckles & cheek bloom.
+  2. **Studio Rim & Cushion Bounce Lighting (`betaRealismStudioLighting`)** — Warm linen mattress-to-skin upward bounce illumination on shadowed undersides, cool overhead studio softbox fill/sheen, sculpting warm rim kicker on skin and hair, and gentle filmic vibrancy lift.
+  3. **Areola, Nail & Subtle Dermal Detail (`betaRealismSurfaceMicro`)** — Soft areolar Montgomery-tubercle relief bumps, whisper-soft sub-dermal cool-teal vein hints on temples/upper chest/inner forearms, and Pass E longitudinal keratin nail micro-ridges with brighter lunula and crisp hydrated crown sheen.
+- **Unit Tests & Architecture Docs (`BlossomGeometryUnitTest.kt`, `README.md`, `docs/3D_RENDERING_ARCHITECTURE.md`)**
+  - Added 3 unit tests covering the 62-lock upgraded hair wisps mesh (6,944 verts, volumetric/airy encoding, outward CCW winding, floor clamp, head-turn tracking), Option #8 dorsal hood–mons blending (preserving glans and lower inner labia + bit-identical revert), and v28.0 OFF-by-default toggle & slider memory invariants.
+
+---
+
+## Version 27.0 (`versionCode = 27`)
+**Date:** 2026-11-26
+
+- **5 New Photorealistic Visual Realism Upgrades (All Behind Independent Beta Toggles in `Life+`, OFF by Default)**
+  - All 5 new upgrades default **OFF** in both `BlossomViewportSessionState` and `VulvaDeformationState()` (preserving v26.0 visuals until opted in) and appear directly in the `Life+` Beta Lab tab (above *"Show heart rate (BPM)"*, even when *"Show Extra Beta Options"* is unchecked) so each can be enabled and A/B tested independently:
+  1. **Layered Hair Wisps & Flyaway Strands (`betaRealismLayeredHair`)** — Added `blossomHairWispsMesh` (`BlossomUpperBodyBuilder.buildBlossomHairWispsMesh`, 26 curved alpha-feathered ribbons covering forehead/temple baby hairs, cheekbone/jawline face-framing wisps, crown backlit flyaway halo arches, and pillow-fanned nape tips) rendered in **Pass F** (`uMaterialType = 5.0`), paired with Marschner-inspired secondary transmittance sheen on `blossomHairMesh` and a soft warm forehead/temple hairline contact shadow on skin. Synchronized with cervical head turn/pitch and clamped cleanly above `mattressSurfaceZ`.
+  2. **Regional Skin Micro-Texture & Subsurface Depth (`betaRealismSkinDetail`)** — Added distance-faded close-up dermal micro-grain (velvety facial pores vs. fine body micro-lines), subtle regional capillary undertones over bony/vascular prominences (nose tip, ear rims, shoulders, elbows, kneecaps) plus cool-olive inner-thigh complexity, and enhanced thin-tissue ear/nose/hand rim SSS + velvet peach-fuzz graze. Strictly masked out of vulvar mucosa and pelvic interior (`bodyRealismMask`) so the perfected vulva appearance remains untouched.
+  3. **3D Curved Eyelashes, Wet Tear Line & Deep Iris Caustics (`betaRealismEyesAndLashes`)** — Added `blossomEyelashesMesh` (`BlossomUpperBodyBuilder.buildBlossomEyelashesMesh`, 4 upper/lower lash fans anchored flush to `blossomHeadMesh`'s sculpted eyelid margins and rendered in **Pass G** `uMaterialType = 6.0`), precomputed open/closed blink targets in `HeadRigCache` (tracking asymmetric blinking, upward-gaze lid lift, and head rotation without eyeball penetration), plus collarette ring, radial crypt contrast, opposite-side refracted corneal iris caustics, inner-canthus caruncle warmth, and a crisp lower-lid wet tear-line meniscus in **Pass C**.
+  4. **Soft Contact Shadows & Cushion Weight Grounding (`betaRealismContactShadows`)** — Added pose-aware soft grounding shadows across **Pass B** (`examCushionMesh`) beneath the head, hair, shoulders, back, glutes, resting arms (fading smoothly as `selfSpreadPose` lifts Blossom's hands), and moving calves/heels (tracking `leftLegSpread`/`rightLegSpread`), plus subtle radial weight-tension linen micro-creases and warm posterior body-to-mattress clearance AO (`mattressZFrag`) on downward-facing skin.
+  5. **Dynamic Skin Creasing & Anatomical Landmarks (`betaRealismDynamicCreases`)** — Added live contralateral sternocleidomastoid (SCM) neck tendon tension driven by `headTurn`, dynamic inguinal/hip-flexion compression creases driven by `leftLegSpread`/`rightLegSpread` and `leftKneeShift`/`rightKneeShift`, and delicate suprasternal notch, clavicle hollow, abdominal linea alba, kneecap (patella) contour rim, and inner-elbow crease shading.
+- **Shader & Test Hardening (`VulvaGlRenderer.kt`, `BlossomGeometryUnitTest.kt`, `README.md`, `docs/3D_RENDERING_ARCHITECTURE.md`)**
+  - Packed all v27.0 shader flags and pose scalars into 3 compact `vec4` uniforms (`uBetaRealismFlags1`, `uBetaRealismFlags2`, `uBetaRealismPose`) and used a GLSL ES 1.00–safe `sq()` helper across all Gaussian terms to avoid negative-base `pow()` UB on mobile GPUs.
+  - Added 3 unit tests covering layered hair wisp & 3D eyelash mesh validity, outward CCW winding, mattress floor clamping, blink/head-turn synchronization without eyeball penetration, and toggle defaults.
+
+---
+
 ## Version 26.0 (`versionCode = 26`)
 **Date:** 2026-11-26
 

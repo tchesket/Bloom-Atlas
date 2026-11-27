@@ -32,8 +32,10 @@ The full body is **not** one single mesh. Several procedural meshes overlap inte
 | 6 | `blossomBreastsMesh` | `BlossomSdfBodyBuilder.kt` | **Pass A** (`0.0`) | Elastic breasts + areola/nipple pigmentation (sized by `breastSize`) |
 | 7 | `blossomHeadMesh` + `blossomArmMeshes` | `BlossomUpperBodyBuilder.kt` | **Pass A** (`0.0`) | Sculpted head/face/lips/eyelids + posed IK arms and hands |
 | 8 | `blossomNailMeshes` | `BlossomUpperBodyBuilder.kt` | **Pass E** (`4.0`) | Translucent pink keratin fingernails & toenails (drawn with `glPolygonOffset(-2, -2)`) |
-| 9 | `blossomEyeMeshes` | `BlossomUpperBodyBuilder.kt` | **Pass C** (`2.0`) | Sclera, slate-blue iris, pupil, and corneal catchlight |
-| 10 | `blossomHairMesh` | `BlossomUpperBodyBuilder.kt` | **Pass D** (`3.0`) | Layered bob hairstyle (with strand normal detail & tapered tips) |
+| 9 | `blossomEyeMeshes` | `BlossomUpperBodyBuilder.kt` | **Pass C** (`2.0`) | Sclera, slate-blue iris, pupil, refracted iris caustics, wet tear-line meniscus & corneal catchlight |
+| 10 | `blossomEyelashMeshes` *(v27.0)* | `BlossomUpperBodyBuilder.kt` (`buildBlossomEyelashesMesh`) | **Pass G** (`6.0`) | Alpha-feathered, blink- & head-turn-synchronized 3D upper & lower eyelash fans (`GL_BLEND`, `glDepthMask(false)`, toggled by `betaRealismEyesAndLashes`) |
+| 11 | `blossomHairMesh` | `BlossomUpperBodyBuilder.kt` | **Pass D** (`3.0`) | Layered bob hairstyle (with strand normal detail, v28.0 right-of-center scalp part line, macro lock clump valleys & dual-lobe Kajiya-Kay R+TRT sheen) |
+| 12 | `blossomHairWispMeshes` *(v27.0–v28.0)* | `BlossomUpperBodyBuilder.kt` (`buildBlossomHairWispsMesh`) | **Pass F** (`5.0`) | 62 sculpted multi-tier volumetric lock cards & backlit flyaway strands (`6,944` verts, jagged needle tips, Kajiya-Kay R+TRT specular, `GL_BLEND`, `glDepthMask(false)`, toggled by `betaRealismLayeredHair`) |
 
 > **Key insight:** If you look head-on at the vulva, the outer mons, labia majora, central vestibule floor, and perineum come from **`blossomVulvaPatchMesh`**, whereas the raised inner labia folds and clitoral hood arch come from **`labiaHoodArchMesh`**. Editing `evaluateVulvaDetail()` changes the patch; editing `updateContinuousLabiaHoodArch()` changes the inner labia & hood!
 
@@ -52,8 +54,9 @@ Every `DynamicGlMesh` uses an interleaved **10-float (40-byte)** stride (`Dynami
 | `8` | `aMat.z` | `ao` (`0.06..1.0`) | Baked ambient occlusion (crevices, cleft, under-hood, under-chin, anus) |
 | `9` | `aMat.w` | `pigment` (`0..1`) | Multi-purpose melanin/pigmentation mask: labial rim & majora warmth in pelvis, areola/nipple on chest (`y ≈ 2.65..5.4`), eyebrows/eyelashes on head (`y > 5.4`) |
 
-**Auxiliary per-vertex attribute:**
+**Auxiliary per-vertex attributes:**
 - `aArchAlpha` (`labiaHoodArchAlphaBuffer`, 1 float/vertex): Used exclusively by `labiaHoodArchMesh` to feather the outer ~20% skirt alpha from `1.0` (core) down to `0.0` (perimeter).
+- `aBodyBindHole` (`blossomBodyBindHoleBuffer`, 4 floats/vertex, v25.0–v28.0): Static unposed bind-pose coordinates `(bindX / 0.64, (bindY + 0.06) / 1.02, bindZ, bindNz)` bound unconditionally for `blossomBodyMesh`. Serves two purposes: (1) keeps Seam D's pelvic oval discard strictly anchored to the unposed pelvis during strong inward thigh squeezes, and (2) lets v28.0 Pass A reconstruct `bindPos` so dynamic thigh/hip-flexion creases, kneecaps, and leg skin undertones move 100% locked to the posed thighs.
 
 ---
 
@@ -67,11 +70,14 @@ All rendering goes through one unified GLSL ES 2.0 shader program branched by `u
   - **Multi-scale 3D procedural skin detail** (`skinDetailHeight` in `vRestPos`): pores, fine labial striae, close-up areola creping (`dryPigmentMask`), and close-up pelvic dermal relief (`pelvicSkinZone`).
   - **Colored Hemoglobin AO Bounce** (`coloredAo`): powers AO with `(0.76, 1.00, 1.18)` so crevices warm toward blood-red rather than turning muddy gray.
   - **Procedural eyebrows, eyelashes & pubic hair**: guarded by fast-path branch checks so non-hair fragments skip all 3D noise evaluations.
+  - **v28.0 Packed Realism Uniform `uBetaRealismFlags3`**: `x` = Option #8 dorsal clitoral hood–mons skin blend (`betaV3HoodMonsBlend * betaV3HoodMonsStrength`), `y` = facial micro-detail (vertical lip creases/pillow sheen, feathered brows, subtle freckles), `z` = 3-point studio rim & warm cushion bounce lighting, `w` = areola relief, sub-dermal vein hints, and Pass E longitudinal keratin nail ridges + lunula.
   - **Filmic Reinhard tone mapper**: `lit / (lit + 0.76)` with gentle saturation preservation.
-- **Pass B (`uMaterialType > 0.5`)** — Matte clinical linen weave (`blossomDrapeMeshes`).
-- **Pass C (`uMaterialType > 1.5`)** — Anatomical eyes with radial iris fibers, limbal ring, and corneal bulge specular (`blossomEyeMeshes`).
-- **Pass D (`uMaterialType > 2.5`)** — Anisotropic silk layered bob hair with tangent-shifted dual sheen (`blossomHairMesh`).
-- **Pass E (`uMaterialType > 3.5`)** — Translucent rosy-pink keratin fingernails & toenails (`blossomNailMeshes`).
+- **Pass B (`uMaterialType > 0.5`)** — Matte clinical linen weave (`blossomDrapeMeshes`), plus v27.0 pose-aware body/arm/leg contact shadows and weight-tension ripples (`uBetaRealismFlags1.w`).
+- **Pass C (`uMaterialType > 1.5`)** — Anatomical eyes with radial iris fibers, limbal ring, corneal bulge specular (`blossomEyeMeshes`), plus v27.0 collarette ring, refracted opposite-side iris caustic, caruncle warmth, and wet tear-line meniscus (`uBetaRealismFlags1.z`).
+- **Pass D (`uMaterialType > 2.5`)** — Anisotropic layered bob hair (`blossomHairMesh`) with v28.0 scalp part line, macro clump valleys, and dual-lobe Kajiya-Kay (primary R + pigment-tinted TRT) sheen (`uBetaRealismFlags1.x`).
+- **Pass E (`uMaterialType > 3.5`)** — Translucent rosy-pink keratin fingernails & toenails (`blossomNailMeshes`), enhanced in v28.0 with longitudinal keratin micro-ridges, brighter lunula, and crisp hydrated crown sheen (`uBetaRealismFlags3.w`).
+- **Pass F (`uMaterialType > 4.5`, v27.0–v28.0)** — 62 alpha-feathered volumetric lock cards & sunlit flyaway halo ribbons with staggered jagged tips and Kajiya-Kay R+TRT specular (`blossomHairWispMeshes`, gated by `betaRealismLayeredHair`).
+- **Pass G (`uMaterialType > 5.5`, v27.0)** — Alpha-feathered 3D upper & lower eyelash fans synchronized with blinks and head turns (`blossomEyelashMeshes`, gated by `betaRealismEyesAndLashes`).
 
 ---
 

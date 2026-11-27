@@ -4489,6 +4489,320 @@ class BlossomGeometryUnitTest {
         assertTrue("Peak amplitudes must stay in 248..255, got $minOnAmp..$maxOnAmp", minOnAmp >= 248 && maxOnAmp == 255)
     }
 
+    @Test
+    fun v27VisualRealismLayeredHairWispsAnd3DEyelashesGeometryAndWindingValid() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+
+        assertValidMesh(scene.blossomHairWispsMesh)
+        assertValidMesh(scene.blossomEyelashesMesh)
+        assertOutwardWindingMatchesNormals("blossomHairWispsMesh", scene.blossomHairWispsMesh)
+        assertOutwardWindingMatchesNormals("blossomEyelashesMesh", scene.blossomEyelashesMesh)
+        assertTrue("blossomHairWispsMesh should contain 26 ribbons (>2000 verts)", scene.blossomHairWispsMesh.vertexCount > 2000)
+        assertTrue("blossomEyelashesMesh should contain 4 strips (672 verts)", scene.blossomEyelashesMesh.vertexCount == 672)
+
+        val restWisps = scene.blossomHairWispsMesh.vertexData.copyOf()
+        val restLashes = scene.blossomEyelashesMesh.vertexData.copyOf()
+
+        // Verify mattress floor clamp & valid normals across extreme head turn + pitch combinations
+        for ((turn, pitch) in listOf(Pair(1f, 0f), Pair(-1f, 0f), Pair(0.6f, -0.9f), Pair(-0.7f, 0.8f))) {
+            scene.update(
+                VulvaDeformationState(headTurn = turn, headPitch = pitch, eyeBlink = 0.5f),
+                includeLithotomyBody = true
+            )
+            assertValidMesh(scene.blossomHairWispsMesh)
+            assertValidMesh(scene.blossomEyelashesMesh)
+
+            val wData = scene.blossomHairWispsMesh.vertexData
+            for (i in 0 until scene.blossomHairWispsMesh.vertexCount) {
+                val b = i * stride
+                val wy = wData[b + 1]
+                val wz = wData[b + 2]
+                val floorZ = BlossomBodyBuilder.mattressSurfaceZ(wy) + 0.03f
+                assertTrue(
+                    "Hair wisp vert $i at turn=$turn pitch=$pitch must stay above mattress (z=$wz >= $floorZ)",
+                    wz >= floorZ - 1e-4f
+                )
+            }
+        }
+
+        // Verify exact bit-identical restoration when returning to neutral head pose
+        scene.update(VulvaDeformationState(), includeLithotomyBody = true)
+        var maxWispDiff = 0f
+        for (i in restWisps.indices) {
+            val d = abs(scene.blossomHairWispsMesh.vertexData[i] - restWisps[i])
+            if (d > maxWispDiff) maxWispDiff = d
+        }
+        var maxLashDiff = 0f
+        for (i in restLashes.indices) {
+            val d = abs(scene.blossomEyelashesMesh.vertexData[i] - restLashes[i])
+            if (d > maxLashDiff) maxLashDiff = d
+        }
+        assertTrue("Hair wisps must restore bit-identically at neutral pose (<1e-5), got $maxWispDiff", maxWispDiff < 1e-5f)
+        assertTrue("3D eyelashes must restore bit-identically at neutral pose (<1e-5), got $maxLashDiff", maxLashDiff < 1e-5f)
+    }
+
+    @Test
+    fun v27EyelashesTrackBlinkAndHeadTurnWithoutEyeballPenetration() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val openData = scene.blossomEyelashesMesh.vertexData.copyOf()
+
+        // Full blink closure: upper lashes must sweep downward cleanly & every lash vertex must stay outside both eyeballs
+        scene.update(VulvaDeformationState(eyeBlink = 1.0f), includeLithotomyBody = true)
+        assertValidMesh(scene.blossomEyelashesMesh)
+        assertOutwardWindingMatchesNormals("blossomEyelashesMesh(closed)", scene.blossomEyelashesMesh)
+
+        val closedData = scene.blossomEyelashesMesh.vertexData.copyOf()
+        val eyeRadius = 0.136f
+        val eyeCenterY = 0.038f
+        val eyeCenterZ = 0.528f
+        var upperDropSum = 0f
+        var upperCount = 0
+
+        for (i in 0 until scene.blossomEyelashesMesh.vertexCount) {
+            val b = i * stride
+            val isUpper = closedData[b + 9] > 0.5f
+            if (isUpper) {
+                upperDropSum += (closedData[b + 1] - openData[b + 1])
+                upperCount++
+            }
+            val local = BlossomUpperBodyBuilder.headWorldToLocal(closedData[b], closedData[b + 1], closedData[b + 2])
+            val side = if (local[0] >= 0f) 1f else -1f
+            val dx = local[0] - side * 0.256f
+            val dy = local[1] - eyeCenterY
+            val dz = local[2] - eyeCenterZ
+            val dist = sqrt(dx * dx + dy * dy + dz * dz)
+            assertTrue(
+                "Closed eyelash vert $i must stay outside eyeball sphere (dist=$dist > $eyeRadius)",
+                dist > eyeRadius + 0.008f
+            )
+        }
+        val avgUpperDrop = upperDropSum / upperCount
+        assertTrue("Upper lashes must sweep downward during full blink (avgDeltaY < -0.02), got $avgUpperDrop", avgUpperDrop < -0.02f)
+
+        // Head turn rigidity check: average distance between eyelashes and eyes remains invariant under cervical rotation
+        scene.update(VulvaDeformationState(eyeBlink = 0f, headTurn = 0f, headPitch = 0f), includeLithotomyBody = true)
+        fun centroid(mesh: DynamicGlMesh): FloatArray {
+            var sx = 0f; var sy = 0f; var sz = 0f
+            val d = mesh.vertexData
+            for (i in 0 until mesh.vertexCount) {
+                val b = i * stride
+                sx += d[b]; sy += d[b + 1]; sz += d[b + 2]
+            }
+            val inv = 1f / mesh.vertexCount
+            return floatArrayOf(sx * inv, sy * inv, sz * inv)
+        }
+        val cEye0 = centroid(scene.blossomEyesMesh)
+        val cLash0 = centroid(scene.blossomEyelashesMesh)
+        val dist0 = sqrt(
+            (cLash0[0] - cEye0[0]).let { it * it } +
+                (cLash0[1] - cEye0[1]).let { it * it } +
+                (cLash0[2] - cEye0[2]).let { it * it }
+        )
+        scene.update(VulvaDeformationState(eyeBlink = 0f, headTurn = 0.85f, headPitch = -0.55f), includeLithotomyBody = true)
+        val cEye1 = centroid(scene.blossomEyesMesh)
+        val cLash1 = centroid(scene.blossomEyelashesMesh)
+        val dist1 = sqrt(
+            (cLash1[0] - cEye1[0]).let { it * it } +
+                (cLash1[1] - cEye1[1]).let { it * it } +
+                (cLash1[2] - cEye1[2]).let { it * it }
+        )
+        assertTrue(
+            "3D eyelashes must rotate rigidly with head/eyes (|dist1 - dist0| < 1e-3), got ${abs(dist1 - dist0)}",
+            abs(dist1 - dist0) < 1e-3f
+        )
+    }
+
+    @Test
+    fun v27VisualRealismToggleDefaultsAndSessionStateMemory() {
+        // Baseline VulvaDeformationState keeps all 5 v27.0 toggles OFF by default for test compatibility
+        val baseline = VulvaDeformationState()
+        assertFalse(baseline.betaRealismLayeredHair)
+        assertFalse(baseline.betaRealismSkinDetail)
+        assertFalse(baseline.betaRealismEyesAndLashes)
+        assertFalse(baseline.betaRealismContactShadows)
+        assertFalse(baseline.betaRealismDynamicCreases)
+
+        // Interactive BlossomViewportSessionState keeps all 5 v27.0 visual realism upgrades OFF by default
+        val session = com.example.ui.components.BlossomViewportSessionState()
+        assertFalse(session.betaRealismLayeredHair)
+        assertFalse(session.betaRealismSkinDetail)
+        assertFalse(session.betaRealismEyesAndLashes)
+        assertFalse(session.betaRealismContactShadows)
+        assertFalse(session.betaRealismDynamicCreases)
+
+        // Enabling each toggle and calling disableAllBetaToggles() cleanly disables all 5 v27.0 toggles
+        session.betaRealismLayeredHair = true
+        session.betaRealismSkinDetail = true
+        session.betaRealismEyesAndLashes = true
+        session.betaRealismContactShadows = true
+        session.betaRealismDynamicCreases = true
+        session.disableAllBetaToggles()
+        assertFalse(session.betaRealismLayeredHair)
+        assertFalse(session.betaRealismSkinDetail)
+        assertFalse(session.betaRealismEyesAndLashes)
+        assertFalse(session.betaRealismContactShadows)
+        assertFalse(session.betaRealismDynamicCreases)
+    }
+
+    @Test
+    fun v28Upgraded62LockLayeredHairWispsGeometryWindingFloorAndRigidityValid() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val wisps = scene.blossomHairWispsMesh
+
+        // 62 sculpted multi-tier hair-lock & flyaway cards, 7 x 16 verts each = 6,944 verts
+        assertEquals("Upgraded v28 hair wisps mesh must have 62 * 7 * 16 = 6944 verts", 62 * 7 * 16, wisps.vertexCount)
+        assertValidMesh(wisps)
+        assertOutwardWindingMatchesNormals("blossomHairWispsMesh(v28)", wisps)
+
+        // Verify both volumetric lock cards (vMat.w >= 1.0) and airy flyaway strands (vMat.w < 1.0) are encoded
+        var volLockVerts = 0
+        var airyWispVerts = 0
+        for (i in 0 until wisps.vertexCount) {
+            val matW = wisps.vertexData[i * stride + 9]
+            if (matW >= 1.0f) volLockVerts++ else airyWispVerts++
+        }
+        assertTrue("Upgraded hair wisps must include dense volumetric lock cards", volLockVerts > 3000)
+        assertTrue("Upgraded hair wisps must include airy flyaway/wisp strands", airyWispVerts > 1500)
+
+        // Verify head-turn rigidity & mattress clearance across extreme head turns
+        fun centroid(mesh: DynamicGlMesh): FloatArray {
+            var sx = 0f; var sy = 0f; var sz = 0f
+            val d = mesh.vertexData
+            for (i in 0 until mesh.vertexCount) {
+                val b = i * stride
+                sx += d[b]; sy += d[b + 1]; sz += d[b + 2]
+            }
+            val inv = 1f / mesh.vertexCount
+            return floatArrayOf(sx * inv, sy * inv, sz * inv)
+        }
+        val c0 = centroid(wisps)
+        scene.update(VulvaDeformationState(headTurn = 0.9f, headPitch = -0.5f), includeLithotomyBody = true)
+        assertValidMesh(wisps)
+        assertOutwardWindingMatchesNormals("blossomHairWispsMesh(v28_turned)", wisps)
+        val c1 = centroid(wisps)
+        val shift = sqrt(
+            (c1[0] - c0[0]).let { it * it } +
+                (c1[1] - c0[1]).let { it * it } +
+                (c1[2] - c0[2]).let { it * it }
+        )
+        assertTrue("Upgraded hair wisps must follow head turn visibly (shift > 0.05), got $shift", shift > 0.05f)
+        for (i in 0 until wisps.vertexCount) {
+            val b = i * stride
+            val wy = wisps.vertexData[b + 1]
+            val wz = wisps.vertexData[b + 2]
+            val floorZ = BlossomBodyBuilder.mattressSurfaceZ(wy) + 0.032f
+            assertTrue("Hair card vert $i must stay above mattress ($wz >= $floorZ)", wz >= floorZ - 1e-4f)
+        }
+    }
+
+    @Test
+    fun v28Option8ClitoralHoodMonsBlendSoftensHoodWithoutAlteringGlansOrInnerLabia() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+
+        val baseState = VulvaDeformationState(
+            betaV3HoodMonsBlend = false,
+            betaV3HoodMonsStrength = 0.85f
+        )
+        scene.update(baseState, includeLithotomyBody = true)
+        val baseArch = scene.labiaHoodArchMesh.vertexData.copyOf()
+        val baseGlans = scene.glansMesh.vertexData.copyOf()
+
+        val blendedState = baseState.copy(betaV3HoodMonsBlend = true, betaV3HoodMonsStrength = 0.85f)
+        scene.update(blendedState, includeLithotomyBody = true)
+        assertValidMesh(scene.labiaHoodArchMesh)
+        assertValidMesh(scene.blossomVulvaPatchMesh)
+        assertValidMesh(scene.glansMesh)
+
+        // Clitoral glans must remain bit-identical
+        assertTrue(
+            "Option #8 hood–mons blend must leave clitoral glans bit-identical",
+            baseGlans.contentEquals(scene.glansMesh.vertexData)
+        )
+
+        // Dorsal clitoral hood crest (midRow, u ~ 0.20..0.48) should have markedly lower mucosa & pigment and lifted AO
+        val cols = scene.archCols
+        val midRow = scene.archRows / 2
+        var hoodMucosaDropSum = 0f
+        var hoodPigmentDropSum = 0f
+        var hoodAoSum = 0f
+        var hoodSamples = 0
+        for (c in (cols * 20 / 100)..(cols * 48 / 100)) {
+            val b = (midRow * cols + c) * stride
+            hoodMucosaDropSum += (baseArch[b + 6] - scene.labiaHoodArchMesh.vertexData[b + 6])
+            hoodAoSum += scene.labiaHoodArchMesh.vertexData[b + 8]
+            hoodPigmentDropSum += (baseArch[b + 9] - scene.labiaHoodArchMesh.vertexData[b + 9])
+            hoodSamples++
+        }
+        assertTrue(
+            "Option #8 must reduce dorsal clitoral hood mucosa toward natural mons skin (avg drop > 0.08), got ${hoodMucosaDropSum / hoodSamples}",
+            hoodMucosaDropSum / hoodSamples > 0.08f
+        )
+        assertTrue(
+            "Option #8 must lighten dorsal clitoral hood pigment toward natural mons skin (avg drop > 0.06), got ${hoodPigmentDropSum / hoodSamples}",
+            hoodPigmentDropSum / hoodSamples > 0.06f
+        )
+        assertTrue(
+            "Option #8 must keep dorsal clitoral hood AO bright & harmonized with mons skin (avg >= 0.90), got ${hoodAoSum / hoodSamples}",
+            hoodAoSum / hoodSamples >= 0.90f
+        )
+
+        // Lower inner labia rows (far from dorsal hood) should stay essentially untouched
+        val lowerRow = scene.archRows / 6
+        var maxLowerLabiaMatDiff = 0f
+        for (c in 0 until cols) {
+            val b = (lowerRow * cols + c) * stride
+            for (m in 6..9) {
+                val d = abs(scene.labiaHoodArchMesh.vertexData[b + m] - baseArch[b + m])
+                if (d > maxLowerLabiaMatDiff) maxLowerLabiaMatDiff = d
+            }
+        }
+        assertTrue(
+            "Option #8 must preserve lower inner labia coloration (< 0.01 diff), got $maxLowerLabiaMatDiff",
+            maxLowerLabiaMatDiff < 0.01f
+        )
+
+        // Reverting Option #8 back OFF restores exact baseline arch vertices
+        scene.update(baseState, includeLithotomyBody = true)
+        assertTrue(
+            "Turning Option #8 back OFF must restore exact baseline arch mesh",
+            baseArch.contentEquals(scene.labiaHoodArchMesh.vertexData)
+        )
+    }
+
+    @Test
+    fun v28NewBetaTogglesDefaultOffAndPreserveSliderMemory() {
+        val baseline = VulvaDeformationState()
+        assertFalse(baseline.betaV3HoodMonsBlend)
+        assertEquals(0.75f, baseline.betaV3HoodMonsStrength, 1e-6f)
+        assertFalse(baseline.betaRealismFacialMicro)
+        assertFalse(baseline.betaRealismStudioLighting)
+        assertFalse(baseline.betaRealismSurfaceMicro)
+
+        val session = com.example.ui.components.BlossomViewportSessionState()
+        assertFalse(session.betaV3HoodMonsBlend)
+        assertEquals(0.75f, session.betaV3HoodMonsStrength, 1e-6f)
+        assertFalse(session.betaRealismFacialMicro)
+        assertFalse(session.betaRealismStudioLighting)
+        assertFalse(session.betaRealismSurfaceMicro)
+
+        session.betaV3HoodMonsBlend = true
+        session.betaV3HoodMonsStrength = 0.42f
+        session.betaRealismFacialMicro = true
+        session.betaRealismStudioLighting = true
+        session.betaRealismSurfaceMicro = true
+
+        session.disableAllBetaToggles()
+        assertFalse(session.betaV3HoodMonsBlend)
+        assertEquals("Option #8 slider must preserve last value across disableAllBetaToggles", 0.42f, session.betaV3HoodMonsStrength, 1e-6f)
+        assertFalse(session.betaRealismFacialMicro)
+        assertFalse(session.betaRealismStudioLighting)
+        assertFalse(session.betaRealismSurfaceMicro)
+    }
+
     /**
      * Guards against reversed OpenGL triangle winding (which triggers `!gl_FrontFacing` normal flip
      * in the fragment shader and turns meshes dark/inverted). Verifies that > 95% of non-degenerate
