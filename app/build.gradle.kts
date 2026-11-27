@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.bloomatlas.vrmqtx"
     minSdk = 24
     targetSdk = 36
-    versionCode = 32
-    versionName = "32.0"
+    versionCode = 34
+    versionName = "34.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

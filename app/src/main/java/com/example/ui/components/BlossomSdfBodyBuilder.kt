@@ -2672,6 +2672,10 @@ internal object BlossomSdfBodyBuilder {
         val bodyHipSwingWeights: FloatArray,
         val bodyHipSwingKneeShiftWeights: FloatArray,
         val bodyHipSwingKneeNormalTilt: FloatArray,
+        val bodyIkHipW: FloatArray,
+        val bodyIkShinW: FloatArray,
+        val bodyIkFootW: FloatArray,
+        val bodyIkHFem: FloatArray,
         val toesBasePosNorm: FloatArray,
         val toesSides: FloatArray,
         val toeNailStartVert: Int,
@@ -2696,6 +2700,10 @@ internal object BlossomSdfBodyBuilder {
         val hipSwingWeightBuf = FloatArray(bodyMesh.vertexCount)
         val hipSwingKneeWeightBuf = FloatArray(bodyMesh.vertexCount)
         val hipSwingKneeTiltBuf = FloatArray(bodyMesh.vertexCount)
+        val ikHipWBuf = FloatArray(bodyMesh.vertexCount)
+        val ikShinWBuf = FloatArray(bodyMesh.vertexCount)
+        val ikFootWBuf = FloatArray(bodyMesh.vertexCount)
+        val ikHFemBuf = FloatArray(bodyMesh.vertexCount)
         var count = 0
 
         // Femur bone vector in +X half-space (Hip -> Knee)
@@ -2703,6 +2711,22 @@ internal object BlossomSdfBodyBuilder {
         val fdy = -1.86f - HIP_PIVOT_Y
         val fdz = 1.74f - HIP_PIVOT_Z
         val fLen2 = fdx * fdx + fdy * fdy + fdz * fdz
+
+        // Tibia bone vector in +X half-space (Knee -> Ankle) for 2-bone IK ankle/foot transition
+        val tdx = 1.68f - 1.80f
+        val tdy = -4.24f - (-1.86f)
+        val tdz = -0.94f - 1.74f
+        val tLen2 = tdx * tdx + tdy * tdy + tdz * tdz
+
+        // Hip -> Ankle unit chord separates the entire femur (dot < 0) from the entire tibia (dot > 0)
+        // cleanly across both the anterior patella and posterior popliteal knee crease
+        val hadx = 1.68f - HIP_PIVOT_AX
+        val hady = -4.24f - HIP_PIVOT_Y
+        val hadz = -0.94f - HIP_PIVOT_Z
+        val haLen = sqrt(hadx * hadx + hady * hady + hadz * hadz).coerceAtLeast(1e-5f)
+        val sepDirX = hadx / haLen
+        val sepDirY = hady / haLen
+        val sepDirZ = hadz / haLen
 
         for (i in 0 until bodyMesh.vertexCount) {
             val base = i * stride
@@ -2734,19 +2758,30 @@ internal object BlossomSdfBodyBuilder {
             val lowerLimbFull = smoothStep(-1.05f, -1.65f, y)
             val w = max(femRamp * groinYGuard, lowerLimbFull) * patchGuard
 
-            // v30.0 Beta ("Hip-anchored thigh swing"): distributes both spread rotation and planted-knee
-            // lateral travel linearly along the femur from the authored hip pivot (hFem=0) to the knee
-            // (hFem=1) with a soft pelvis attachment, eliminating the apparent low mid-thigh hinge while
-            // keeping the exact same knee travel (w=1, kw=1 at knee), planted feet, 3D pelvic collar guard,
-            // and blending smoothly across |x| = 0.76..1.44 (bounded d(kw)/dx << 0.80 to prevent any
-            // horizontal foldover) from proven fold-free medial groin weights to full hip-anchored swing.
+            // v30.0–v33.0 Beta ("Hip-anchored thigh swing" + 2-bone IK): preserves exact 3D pelvic collar
+            // guard (collarDist3d <= 1.05 pinned) while smoothly distributing hip-joint skinning from the
+            // authored hip pivot along the femur, transitioning cleanly across the knee plane into the shin
+            // and across the malleoli into the cushion-grounded foot frame.
             val lateralFemurFactor = smoothStep(0.76f, 1.44f, ax)
             val hipSwingPelvisGuard = smoothStep(0.42f, -0.14f, y)
             val hipSwingFemRamp = smoothStep(-0.04f, 0.34f, hFem)
             val wHipSwingFull = max(hipSwingFemRamp * hipSwingPelvisGuard, lowerLimbFull) * patchGuard
             val wHipSwing = w + (wHipSwingFull - w) * lateralFemurFactor
 
-            if (w > 0.001f || wHipSwing > 0.001f) {
+            // v33.0 Two-bone IK hip-socket weight: single unified C1-smooth field (zero lateral X-cliff!)
+            // that keeps Seam D / pelvic collar (collarDist3d <= 1.05) strictly pinned, compensates for
+            // collarDzNorm's 1/0.30 Z-compression above collarSurfaceZ, and uses a low-peak-slope ramp
+            // so the 3D hip-rotation Jacobian stays strictly positive (0/0 inner-thigh foldover even at
+            // max squeeze -0.84/-1.12) while driving clean linear hip-anchored swing across the thigh.
+            val collarExcess = (collarDist3d - 1.05f).coerceAtLeast(0f)
+            val zDamp = 1f / (1f + 0.17f * collarDzNorm)
+            val ikGuardT = (collarExcess * zDamp / 1.98f).coerceIn(0f, 1f)
+            val ikPatchGuard = 0.45f * ikGuardT + 0.55f * (ikGuardT * ikGuardT * (3f - 2f * ikGuardT))
+            val ikPelvisYGuard = smoothStep(0.42f, -0.24f, y)
+            val ikFemRamp = smoothStep(-0.04f, 0.42f, hFem)
+            val wIkHip = max(ikFemRamp * ikPelvisYGuard, lowerLimbFull) * ikPatchGuard
+
+            if (w > 0.001f || wHipSwing > 0.001f || wIkHip > 0.001f) {
                 // Planted-foot knee/upper-leg shift weight: 0 at pelvis & vulva, rises smoothly to 1.0 at knee,
                 // and tapers cleanly back to 0.0 above ankle/foot (y <= -3.85) so feet stay 100% planted!
                 val ankleAnchor = smoothStep(-3.86f, -2.02f, y)
@@ -2762,6 +2797,14 @@ internal object BlossomSdfBodyBuilder {
                 } else 0f
                 val tiltDirHipSwing = (smoothStep(-2.12f, -1.58f, y) * 2f - 1f) * kwHipSwing
 
+                // v33.0 Two-bone IK knee & foot transition weights:
+                // - wIkShin: smooth knee transition centered on authored knee plane
+                // - wIkFoot: smooth malleoli/heel-to-instep transition (captures posterior heel at y=-4.06!)
+                val kneePlaneProj = (ax - 1.80f) * sepDirX + (y - (-1.86f)) * sepDirY + (z - 1.74f) * sepDirZ
+                val wIkShin = smoothStep(-0.36f, 0.36f, kneePlaneProj)
+                val hTib = ((ax - 1.80f) * tdx + (y - (-1.86f)) * tdy + (z - 1.74f) * tdz) / tLen2
+                val wIkFoot = max(smoothStep(0.87f, 1.02f, hTib), smoothStep(-4.18f, -4.34f, y))
+
                 idxBuf[count] = i
                 weightBuf[count] = if (w > 0.001f) w.coerceIn(0f, 1f) else 0f
                 sideBuf[count] = if (x >= 0f) 1f else -1f
@@ -2770,6 +2813,10 @@ internal object BlossomSdfBodyBuilder {
                 hipSwingWeightBuf[count] = if (wHipSwing > 0.001f) wHipSwing.coerceIn(0f, 1f) else 0f
                 hipSwingKneeWeightBuf[count] = kwHipSwing
                 hipSwingKneeTiltBuf[count] = tiltDirHipSwing
+                ikHipWBuf[count] = if (wIkHip > 0.001f) wIkHip.coerceIn(0f, 1f) else 0f
+                ikShinWBuf[count] = wIkShin
+                ikFootWBuf[count] = wIkFoot
+                ikHFemBuf[count] = hFem
                 count++
             }
         }
@@ -2782,6 +2829,10 @@ internal object BlossomSdfBodyBuilder {
         val bodyHipSwingWeights = hipSwingWeightBuf.copyOf(count)
         val bodyHipSwingKneeWeights = hipSwingKneeWeightBuf.copyOf(count)
         val bodyHipSwingKneeTilt = hipSwingKneeTiltBuf.copyOf(count)
+        val bodyIkHipW = ikHipWBuf.copyOf(count)
+        val bodyIkShinW = ikShinWBuf.copyOf(count)
+        val bodyIkFootW = ikFootWBuf.copyOf(count)
+        val bodyIkHFem = ikHFemBuf.copyOf(count)
         val bodyBase = FloatArray(count * 6)
         for (k in 0 until count) {
             val src = bodyIndices[k] * stride
@@ -2823,6 +2874,10 @@ internal object BlossomSdfBodyBuilder {
             bodyHipSwingWeights = bodyHipSwingWeights,
             bodyHipSwingKneeShiftWeights = bodyHipSwingKneeWeights,
             bodyHipSwingKneeNormalTilt = bodyHipSwingKneeTilt,
+            bodyIkHipW = bodyIkHipW,
+            bodyIkShinW = bodyIkShinW,
+            bodyIkFootW = bodyIkFootW,
+            bodyIkHFem = bodyIkHFem,
             toesBasePosNorm = toesBase,
             toesSides = toesSides,
             toeNailStartVert = toeNailStartVert,
@@ -2861,8 +2916,39 @@ internal object BlossomSdfBodyBuilder {
         rightKneeShift: Float = 0f,
         leftToeWiggle: Float = 0f,
         rightToeWiggle: Float = 0f,
-        useHipAnchoredThighSwing: Boolean = false
+        useHipAnchoredThighSwing: Boolean = false,
+        leftLegTremor: Float = 0f,
+        rightLegTremor: Float = 0f,
+        leftFootPlanted: Boolean = false,
+        rightFootPlanted: Boolean = false,
+        heelTracker: BlossomLegIkRig.PlantedHeelTracker? = null
     ) {
+        if (useHipAnchoredThighSwing) {
+            val pairSol = BlossomLegIkRig.solveLegPairIk(
+                leftSpread = leftLegSpread,
+                rightSpread = rightLegSpread,
+                leftKneeShift = leftKneeShift,
+                rightKneeShift = rightKneeShift,
+                leftTremor = leftLegTremor,
+                rightTremor = rightLegTremor,
+                leftFootPlanted = leftFootPlanted,
+                rightFootPlanted = rightFootPlanted,
+                heelTracker = heelTracker
+            )
+            BlossomLegIkRig.applyTwoBoneIkLegPose(
+                bodyMesh = bodyMesh,
+                toesMesh = toesMesh,
+                nailsMesh = nailsMesh,
+                cache = cache,
+                pairSol = pairSol,
+                includeToesAndNails = includeToesAndNails,
+                commitBody = commitBody,
+                leftToeWiggle = leftToeWiggle,
+                rightToeWiggle = rightToeWiggle
+            )
+            return
+        }
+
         val stride = DynamicGlMesh.FLOATS_PER_VERTEX
         val leftS = leftLegSpread.coerceIn(PEAK_MIN_LEG_SPREAD, 1.0f)
         val rightS = rightLegSpread.coerceIn(PEAK_MIN_LEG_SPREAD, 1.0f)
@@ -2876,10 +2962,10 @@ internal object BlossomSdfBodyBuilder {
         val bData = bodyMesh.vertexData
         val bIdx = cache.bodyVertIndices
         val bBase = cache.bodyBasePosNorm
-        val bWeights = if (useHipAnchoredThighSwing) cache.bodyHipSwingWeights else cache.bodyWeights
+        val bWeights = cache.bodyWeights
         val bSides = cache.bodySides
-        val bKneeW = if (useHipAnchoredThighSwing) cache.bodyHipSwingKneeShiftWeights else cache.bodyKneeShiftWeights
-        val bKneeTilt = if (useHipAnchoredThighSwing) cache.bodyHipSwingKneeNormalTilt else cache.bodyKneeNormalTilt
+        val bKneeW = cache.bodyKneeShiftWeights
+        val bKneeTilt = cache.bodyKneeNormalTilt
         for (k in bIdx.indices) {
             val side = bSides[k]
             val spread = if (side < 0f) leftS else rightS

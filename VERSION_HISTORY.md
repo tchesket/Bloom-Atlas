@@ -1,5 +1,25 @@
 # Bloom Atlas — Version History
 
+## Version 33.0 (`versionCode = 33`)
+**Date:** 2026-11-27
+
+- **All Established Beta Toggles Enabled by Default (Except Heart Rate HUD) (`BlossomViewportSessionState.kt`)**
+  - Enabled all existing v27–v32 Beta Lab realism, physiological, and vulva blend toggles by default in `BlossomViewportSessionState`, keeping `betaLife2ShowHeartRate` (`Heart rate`) OFF by default and initializing the two new v33.0 Vulva Beta sliders at `0%`.
+- **Post-Climax Deep Heavy Recovery Sighs (`VulvaGlRenderer.kt`, `InteractiveVulva3DCanvas.kt`)**
+  - Extended post-peak recovery into 3–4 slow, heavy sighs (`~0.135–0.175 Hz`) while Blossom's heart rate drops from `152 BPM` toward baseline, with deeper ribcage expansion/release synchronized with soft shoulder heave/drop and gentle parted-lip exhales.
+- **Dynamic Arousal Wetness Across the Peak Event (`BlossomViewportSessionState.kt`, `InteractiveVulva3DCanvas.kt`, `VulvaGlRenderer.kt`)**
+  - Added `computeArousalWetness()` driving localized mucosal hydration steadily from baseline to maximum (`1.0`) during the 8s pre-event, holding maximum throughout the 16s main event, and smoothly decaying back to baseline over **~30 seconds** (`30_000 ms`) afterward.
+  - Strictly localized to moist vulvar mucosa (`blossomVulvaPatchMesh` vestibule/introitus/labia minora and inward-facing `labiaHoodArchMesh`), leaving surrounding pubic/thigh skin, outer labia majora, and the hood–mons blend untouched.
+- **Two New Independent Vulva Beta Sliders (0–100%, Default 0%) (`VulvaGeometryBuilder.kt`, `VulvaGlRenderer.kt`, `BlossomViewportSessionState.kt`, `InteractiveVulva3DCanvas.kt`)**
+  - **Inner tissue sheen (`betaV3InnerTissueSheenStrength`)**: Bit-identical at `0%`; above `0%`, lifts and broadens soft moist specular reflection strictly on vestibule mucosa (`blossomVulvaPatchMesh`) and inward-facing `labiaHoodArchMesh` with fold-height/AO modulation and highlight-shoulder compression, excluding `glansMesh`, outer skin, and the hood–mons blend.
+  - **Vaginal opening rim prominence (`betaV3IntroitusRimProminence`)**: Bit-identical at `0%`; builds gently asymmetric fleshy caruncle lobes along the lower and lower-lateral introitus margin (`coronaRing`), strictly below the urethral meatus (`dMeatus = 0.000000`) and outside the recessed vaginal canal (`dCanal = 0.000000`), stable across relaxed and spread poses.
+- **Length-Preserving 2-Bone IK Leg Rig, Planted-Heel Contact & Opposite-Leg Soft-Tissue Contact (`BlossomLegIkRig.kt`, `BlossomSdfBodyBuilder.kt`, `VulvaGeometryBuilder.kt`, `InteractiveVulva3DCanvas.kt`)**
+  - Upgraded *"Hip-anchored thigh swing"* (`betaRealismHipThighSwing`) to an analytical 2-bone IK leg solver preserving exact authored femur (`2.9662`) and shin (`3.5863`) lengths (`±0.0000` error across all poses), Rodrigues minimal-twist femur transport, stable `+Z` knee bend plane, and unified C1-smooth hip-socket weighting preserving Seam D (`0.000000` pelvic collar drift, `0/0` inner-thigh foldover, `0/4288` inverted outer-thigh triangles).
+  - Added stateful `PlantedHeelTracker` locking cushion-space heels and feet cleanly during planted pulses (`0.0003` surface heel drift / `0.000000` analytical anchor drift under tremor vs `0.0929 / 0.0819` legacy OFF) with zero-snap handoff (`releaseSnap = 0.00000`) into whole-leg sweeps, and fixed `includeToesAndNails = legsChanged` so toes and toenails stay in exact lockstep with the solved foot frame.
+  - Added 5-station tapered opposite-leg contact proxies along posed femurs with smooth approach deceleration, asymmetric lead/trail sharing, tremor routed into knee targets before contact constraints, and localized inner-thigh soft-tissue compression (`+0.0544` proxy / `+0.0185` mesh separation at max squeeze `-0.84 / -1.12`).
+
+---
+
 ## Version 32.0 (`versionCode = 32`)
 **Date:** 2026-11-27
 

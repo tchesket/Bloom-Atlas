@@ -227,6 +227,7 @@ class VulvaGlTextureView(
     private var uBetaRealismFlags3Loc = -1
     private var uInvHeadMatrixLoc = -1
     private var uIsGlansMeshLoc = -1
+    private var uBetaV3SheenWetnessLoc = -1
 
     private var surfaceWidth = 1
     private var surfaceHeight = 1
@@ -257,6 +258,7 @@ class VulvaGlTextureView(
     private var peakCycleDepthMul = 1.48f
     private var lastHandledPostPeakSighToken = 0
     private var pendingPostPeakSighs = 0
+    private var totalPostPeakSighs = 3
     private var inPostPeakSigh = false
 
     private val breathTicker = Runnable {
@@ -588,6 +590,7 @@ class VulvaGlTextureView(
         uBetaRealismFlags3Loc = GLES20.glGetUniformLocation(program, "uBetaRealismFlags3")
         uInvHeadMatrixLoc = GLES20.glGetUniformLocation(program, "uInvHeadMatrix")
         uIsGlansMeshLoc = GLES20.glGetUniformLocation(program, "uIsGlansMesh")
+        uBetaV3SheenWetnessLoc = GLES20.glGetUniformLocation(program, "uBetaV3SheenWetness")
 
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glDepthFunc(GLES20.GL_LEQUAL)
@@ -698,18 +701,21 @@ class VulvaGlTextureView(
         if (sighTokenNow != lastHandledPostPeakSighToken) {
             lastHandledPostPeakSighToken = sighTokenNow
             if (legsMode && !peakActiveNow) {
-                pendingPostPeakSighs = postPeakSighCount.coerceIn(2, 3)
+                val count = postPeakSighCount.coerceIn(3, 4)
+                totalPostPeakSighs = count
+                pendingPostPeakSighs = count
                 inPostPeakSigh = true
                 breathPhase = 0f
                 breathCycleIsSigh = true
-                breathCycleFreqMul = 0.48f + breathRng.nextFloat() * 0.08f
-                breathCycleDepthMul = 1.82f + breathRng.nextFloat() * 0.18f
+                // First recovery sigh after climax is deepest & slowest, then gently tapers across 3–4 sighs
+                breathCycleFreqMul = 0.44f + breathRng.nextFloat() * 0.08f
+                breathCycleDepthMul = 2.26f + breathRng.nextFloat() * 0.14f
             }
         }
         if (legsMode) {
             when {
                 peakActiveNow -> {
-                    // Peak 12s exertion episode: dramatic, fast, heavily irregular breath speed & fullness
+                    // Peak 16s exertion episode: dramatic, fast, heavily irregular breath speed & fullness
                     val nextPhase = breathPhase + dtSec * peakCycleFreqHz
                     if (nextPhase >= 1.0f) {
                         breathPhase = nextPhase % 1.0f
@@ -720,16 +726,20 @@ class VulvaGlTextureView(
                     }
                 }
                 inPostPeakSigh -> {
-                    // Post-peak afterglow: 2 or 3 powerful, slow recovery sighs (~0.18–0.22 Hz each)
-                    val sighFreqHz = (0.205f * (0.88f + 0.24f * (breathCycleFreqMul - 0.48f) / 0.08f)).coerceIn(0.16f, 0.24f)
+                    // Post-climax recovery: 3 or 4 deep, slow, heavy recovery sighs (~0.135–0.175 Hz each)
+                    // while heart rate drops from 152 BPM back down toward baseline
+                    val sighFreqHz = (0.152f * (0.89f + 0.24f * (breathCycleFreqMul - 0.44f) / 0.08f)).coerceIn(0.135f, 0.175f)
                     val nextPhase = breathPhase + dtSec * sighFreqHz
                     if (nextPhase >= 1.0f) {
                         breathPhase = nextPhase % 1.0f
                         pendingPostPeakSighs--
                         if (pendingPostPeakSighs > 0) {
+                            val progress = ((totalPostPeakSighs - pendingPostPeakSighs).toFloat() /
+                                (totalPostPeakSighs.coerceAtLeast(1)).toFloat()).coerceIn(0f, 1f)
                             breathCycleIsSigh = true
-                            breathCycleFreqMul = 0.48f + breathRng.nextFloat() * 0.08f
-                            breathCycleDepthMul = 1.78f + breathRng.nextFloat() * 0.22f
+                            breathCycleFreqMul = 0.44f + breathRng.nextFloat() * 0.08f
+                            // Taper progressively from heavy (~2.28) to deeply settling (~1.88) across the 3–4 sighs
+                            breathCycleDepthMul = (2.28f - 0.40f * progress) + breathRng.nextFloat() * 0.12f
                         } else {
                             inPostPeakSigh = false
                             breathCycleIsSigh = false
@@ -863,6 +873,14 @@ class VulvaGlTextureView(
             if (legsMode && currentDeform.betaRealismFacialMicro) 1.0f else 0.0f,
             currentDeform.hoodRetract.coerceIn(0f, 1f),
             if (legsMode && currentDeform.betaRealismSurfaceMicro) 1.0f else 0.0f
+        )
+        // v33.0 packed uniform: x=Inner tissue sheen slider (0..1), y=dynamic physiological arousal wetness (0..1)
+        GLES20.glUniform4f(
+            uBetaV3SheenWetnessLoc,
+            currentDeform.betaV3InnerTissueSheenStrength.coerceIn(0f, 1f),
+            currentDeform.arousalWetness.coerceIn(0f, 1f),
+            0.0f,
+            0.0f
         )
 
         GLES20.glEnableVertexAttribArray(aPosLoc)
@@ -1550,7 +1568,7 @@ class VulvaGlTextureView(
             depthMultiplier: Float
         ): Pair<Float, Float> {
             val s = stimulus.coerceIn(0f, 1f)
-            val depthScale = (1.0f + 0.24f * s) * depthMultiplier.coerceIn(0.75f, 2.0f)
+            val depthScale = (1.0f + 0.24f * s) * depthMultiplier.coerceIn(0.75f, 2.45f)
             val abdomenWave = evaluateSighBreathWave(phaseCycles, isSighCycle)
             val chestLag = if (isSighCycle) 0.028f else 0.04f
             val chestWave = evaluateSighBreathWave(phaseCycles - chestLag, isSighCycle)
@@ -1682,14 +1700,14 @@ class VulvaGlTextureView(
                 }
             }
             val s = stimulus.coerceIn(0f, 1f)
-            val baseMul = depthMultiplier.coerceIn(0.75f, 2.05f)
+            val baseMul = depthMultiplier.coerceIn(0.75f, 2.45f)
             val effCycleMul = if (peakMode || forcePowerfulSigh) {
                 baseMul
             } else {
                 1f + (baseMul - 1f) * (1f - 0.65f * hrNorm)
             }
             val exertionDepth = when {
-                forcePowerfulSigh -> (1.0f + 0.16f * hrNorm) * effCycleMul
+                forcePowerfulSigh -> (1.0f + 0.18f * hrNorm) * effCycleMul
                 peakMode -> (1.0f + 0.72f * kotlin.math.max(hrNorm, 0.90f)) * effCycleMul
                 else -> kotlin.math.max(1.0f + 0.24f * s, 1.0f + 0.78f * hrNorm) * effCycleMul
             }
@@ -1707,7 +1725,7 @@ class VulvaGlTextureView(
             }
             // High heart rate recruits stronger upper-thoracic (chest) breathing effort
             val chestBoost = when {
-                forcePowerfulSigh -> 1.24f
+                forcePowerfulSigh -> 1.28f
                 peakMode -> 1.32f
                 else -> (if (isSighCycle) 1.12f else 1.0f) * (1.0f + 0.28f * hrNorm)
             }
@@ -1953,7 +1971,7 @@ class VulvaGlTextureView(
          *  - Dual-lobe wet mucosal specular BRDF for glistening vestibule & clitoral glans
          *  - Dedicated matte charcoal-plum woven clinical linen pass for Blossom's exam cushion
          */
-        private val FRAGMENT_SHADER: String by lazy {
+        internal val FRAGMENT_SHADER: String by lazy {
             buildString(FRAGMENT_SHADER_PART_1.length + FRAGMENT_SHADER_PART_2.length + FRAGMENT_SHADER_PART_3.length) {
                 append(FRAGMENT_SHADER_PART_1)
                 append(FRAGMENT_SHADER_PART_2)
@@ -2007,6 +2025,7 @@ class VulvaGlTextureView(
             uniform vec4 uBetaRealismFlags2; // x=dynamicCreases, y=headTurn, z=leftLegSpread, w=rightLegSpread
             uniform vec4 uBetaRealismPose;   // x=selfSpreadPose, y=leftKneeShift, z=rightKneeShift, w=eyeBlink
             uniform vec4 uBetaRealismFlags3; // x=hoodMonsBlend, y=facialMicro, z=hoodRetract, w=surfaceMicro
+            uniform vec4 uBetaV3SheenWetness; // x=innerTissueSheen (0..1), y=arousalWetness (0..1)
 
             float sq(float x) {
                 return x * x;
@@ -3289,21 +3308,72 @@ class VulvaGlTextureView(
                 float v3HydrationVar = mix(0.86, 1.18, nMid * 0.55 + nHemo * 0.45);
                 float v3MucosaSheen = 1.0 + v3ZoneMucosa * v3MatBounded * (0.28 * v3HydrationVar);
                 float v3GlansPearl = 1.0 + v3ZoneGlans * v3MatBounded * 0.24;
+                // v33.0 Dynamic physiological arousal wetness (ramps in 8s pre-event, holds max in 16s peak,
+                // decays back to baseline over ~30s). Strictly localized to moist vulvar mucosa (vestibule,
+                // introitus, inward labia minora, frenulum, glans); dry outer skin & hood-mons blend untouched!
+                float arousalWet = clamp(uBetaV3SheenWetness.y, 0.0, 1.0);
+                float arousalWetW = 0.0;
+                if (arousalWet > 0.001) {
+                    float arousalMucosaMask = pelvicRegionMask * pelvicBindZGuard *
+                        smoothstep(0.18, 0.62, mucosa) * (1.0 - hoodAnyW * 0.88);
+                    float introWetFocus = exp(-(sq(vRestPos.x / 0.16) + sq((vRestPos.y + 0.18) / 0.24)));
+                    arousalWetW = arousalWet * arousalMucosaMask * (0.68 + 0.32 * introWetFocus);
+                    wetness = clamp(wetness + arousalWetW * (0.42 - 0.18 * wetness), 0.0, 0.98);
+                    // Physically subtle optical darkening of richly hydrated mucosal surface film
+                    albedo *= mix(1.0, 0.91, arousalWetW * 0.85);
+                }
+
+                // v33.0 Independent Vulva Beta Slider ("Inner tissue sheen", 0..1, 0.0 == bit-identical):
+                // Strictly localized to vestibule mucosa (blossomVulvaPatchMesh) and inward-facing surfaces
+                // of labiaHoodArchMesh with soft falloff to dry outer skin. Explicitly excludes glansMesh,
+                // outer labia majora, mons pubis, and hood-mons color blend (hoodAnyW).
+                float innerSheenStr = clamp(uBetaV3SheenWetness.x, 0.0, 1.0);
+                float innerSheenW = 0.0;
+                if (innerSheenStr > 0.001 && uIsGlansMesh < 0.5) {
+                    float vestSheenMask = (1.0 - uIsLabiaArchMesh) * pelvicRegionMask * pelvicBindZGuard *
+                        smoothstep(0.28, 0.72, mucosa) * (1.0 - hoodAnyW);
+                    float archMedialFacing = smoothstep(-0.28, 0.42, -sign(vRestPos.x) * N.x + N.z * 0.42);
+                    float archInnerSheenMask = uIsLabiaArchMesh * pelvicRegionMask *
+                        smoothstep(0.24, 0.68, mucosa) * archMedialFacing * smoothstep(0.18, 0.65, archAlpha) *
+                        (1.0 - hoodAnyW);
+                    float innerTissueSheenMask = clamp(vestSheenMask + archInnerSheenMask, 0.0, 1.0);
+                    innerSheenW = innerSheenStr * innerTissueSheenMask;
+                }
+                float sheenFoldMod = mix(0.68, 1.22, clamp(tangleHeightC * 0.58 + ringSoftAo * 0.42, 0.0, 1.0));
+
                 float broadExp = max(8.0, mix(18.0, 29.0, clamp(wetness + naturalSheen * 0.22, 0.0, 1.0)) +
                     microRough * (1.0 - mucosa) + 22.0 * labiaInnerMask - 3.0 * pelvicCutaneousFinish -
-                    3.6 * v3ZoneOuter * v3MatBounded + 5.5 * v3ZoneTrans * v3MatBounded);
+                    3.6 * v3ZoneOuter * v3MatBounded + 5.5 * v3ZoneTrans * v3MatBounded -
+                    innerSheenW * (12.0 * labiaInnerMask + 4.0 * (1.0 - labiaInnerMask)) -
+                    arousalWetW * 5.0);
                 float pelvicBroadTrim = (1.0 - pelvicCutaneousFinish * 0.28) * (1.0 - nonArchPelvicMucosa * 0.26) * (1.0 - pelvicFinishMask * labiaInnerMask * 0.12);
-                float broadAmp = mix(0.070, 0.148, wetness) * (0.88 + 0.24 * naturalSheen) * (1.0 - 0.56 * labiaInnerMask) * pelvicBroadTrim * v3OuterMatte * v3TransSatin;
+                float sheenBroadLift = 1.0 + innerSheenW * (0.95 * labiaInnerMask + 0.72 * (1.0 - labiaInnerMask)) * sheenFoldMod +
+                    arousalWetW * 0.48 * sheenFoldMod;
+                float broadAmp = mix(0.070, 0.148, wetness) * (0.88 + 0.24 * naturalSheen) * (1.0 - 0.56 * labiaInnerMask) * pelvicBroadTrim * v3OuterMatte * v3TransSatin * sheenBroadLift;
                 float broadSpec = pow(NdotH1, broadExp) * broadAmp * labiaOilBreakup;
                 // Secondary tight crisp highlight strictly reserved for naturally moist inner mucosa & clitoral glans
                 float moistMask = smoothstep(0.075, 0.18, wetness);
-                float wetKeyExp = mix(78.0, 162.0, wetness) + 86.0 * labiaInnerMask + 32.0 * nonArchPelvicMucosa +
-                    22.0 * v3ZoneMucosa * v3MatBounded + 32.0 * v3ZoneGlans * v3MatBounded;
-                float wetFillExp = 92.0 + 74.0 * labiaInnerMask + 24.0 * nonArchPelvicMucosa;
+                float wetKeyExp = max(42.0, mix(78.0, 162.0, wetness) + 86.0 * labiaInnerMask + 32.0 * nonArchPelvicMucosa +
+                    22.0 * v3ZoneMucosa * v3MatBounded + 32.0 * v3ZoneGlans * v3MatBounded -
+                    innerSheenW * (96.0 * labiaInnerMask + 64.0 * (1.0 - labiaInnerMask)) -
+                    arousalWetW * 24.0);
+                float wetFillExp = max(36.0, 92.0 + 74.0 * labiaInnerMask + 24.0 * nonArchPelvicMucosa -
+                    innerSheenW * (76.0 * labiaInnerMask + 42.0 * (1.0 - labiaInnerMask)) -
+                    arousalWetW * 18.0);
+                float sheenWetGainLift = 1.0 + innerSheenW * (1.55 * labiaInnerMask + 1.18 * (1.0 - labiaInnerMask)) * sheenFoldMod +
+                    arousalWetW * (0.85 + 0.45 * labiaInnerMask) * sheenFoldMod;
                 float wetSpecGain = (1.0 - 0.56 * labiaInnerMask) * (1.0 - nonArchPelvicMucosa * 0.34) * (1.0 - pelvicFinishMask * labiaInnerMask * 0.12) *
-                    clamp(1.0 - v3ZoneTrans * v3MatBounded * 0.24, 0.25, 1.0) * v3MucosaSheen * v3GlansPearl;
+                    clamp(1.0 - v3ZoneTrans * v3MatBounded * 0.24, 0.25, 1.0) * v3MucosaSheen * v3GlansPearl * sheenWetGainLift;
                 float wetSharpSpec = (pow(NdotH1, wetKeyExp) * wetness * 0.54 +
                                       pow(NdotH2, wetFillExp) * wetness * 0.15) * wetSpecGain * moistMask * faceMatteDamp * areolaMatteDamp;
+                // Soft highlight shoulder when sheen or arousal wetness is active so folds & color never wash into a white sheet
+                float activeMoistBoost = clamp(innerSheenW + arousalWetW, 0.0, 1.0);
+                if (activeMoistBoost > 0.001) {
+                    float compressedWet = wetSharpSpec / (1.0 + wetSharpSpec * 0.46);
+                    wetSharpSpec = mix(wetSharpSpec, compressedWet, activeMoistBoost);
+                    float compressedBroad = broadSpec / (1.0 + broadSpec * 0.55);
+                    broadSpec = mix(broadSpec, compressedBroad, activeMoistBoost);
+                }
 
                 // Soft studio rim light + subtle matte-velvet peach-fuzz Fresnel wrap across dry skin silhouettes
                 float viewRim = clamp(1.0 - max(dot(N, V), 0.0), 0.0, 1.0);
@@ -3312,6 +3382,9 @@ class VulvaGlTextureView(
                     (1.0 - pelvicFinishMask * 0.42);
                 float velvetWrap = pow(viewRim, 2.2) * (1.0 - mucosa) * (1.0 - hairCoverage * 0.80) *
                     (0.052 + 0.018 * v3ZoneOuter * v3MatBounded);
+                // Delicate grazing liquid-film reflection strictly on moist inner mucosa when sheen/arousal wetness active
+                float moistGrazingSheen = pow(viewRim, 2.9) * (innerSheenW * 0.085 + arousalWetW * 0.095) * sheenFoldMod *
+                    (0.45 + 0.55 * max(NdotL1, 0.0));
 
                 // Colored Hemoglobin AO Bounce: prevents crevices from looking muddy gray & softens hip/lip/body contrast
                 float featheredAo = mix(ringSoftAo, min(ringSoftAo, 0.87), submentalFeatherZone * 0.42);
@@ -3344,13 +3417,13 @@ class VulvaGlTextureView(
                 vec3 specColor = mix(
                     vec3(1.0, 0.96, 0.94),
                     mix(albedo * 1.35 + vec3(0.18, 0.13, 0.12), vec3(1.0, 0.91, 0.87), 0.52),
-                    0.42 * labiaInnerMask
+                    max(0.42 * labiaInnerMask, 0.32 * innerSheenW)
                 );
 
                 vec3 lit = ambient * coloredAo +
                            albedo * (diffKeyRGB * 0.78 * keyColor + diffFillRGB * (0.22 + neckSkinBlend * 0.08) * fillColor) * (vec3(0.28) + 0.72 * coloredAo) +
                            sssTint * (terminator * 0.35 * faceSssTrim + grazingTrans * 0.19 + thinTransmit * (0.22 + 0.20 * uLightMode)) * coloredAo +
-                           specColor * (broadSpec + wetSharpSpec) * (0.30 + 0.70 * fullAo) +
+                           specColor * (broadSpec + wetSharpSpec + moistGrazingSheen) * (0.30 + 0.70 * fullAo) +
                            mix(uSkinBase, vec3(1.0, 0.96, 0.93), 0.28) * velvetWrap * (0.45 + 0.55 * fullAo) +
                            mix(uSkinBase, sssTint, 0.46) * rimLight;
 

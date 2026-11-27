@@ -131,8 +131,21 @@ class BlossomViewportSessionState {
     internal val postPeakSighTokenState = mutableIntStateOf(0)
     var postPeakSighToken: Int by postPeakSighTokenState
 
-    internal val postPeakSighCountState = mutableIntStateOf(2)
+    internal val postPeakSighCountState = mutableIntStateOf(3)
     var postPeakSighCount: Int by postPeakSighCountState
+
+    // v33.0 Dynamic physiological arousal wetness (0..1: ramps up in 8s pre-event, stays 1.0 in 16s peak,
+    // gradually decays back to baseline 0.0 over ~30s after the main event ends)
+    internal val arousalWetnessState = mutableFloatStateOf(0f)
+    var arousalWetness: Float by arousalWetnessState
+    var peakWetnessPreStart: Float = 0f
+    var peakWetnessDecayStartMs: Long = 0L
+
+    // v33.0 Planted-heel contact state for 2-bone analytical leg IK
+    internal val leftFootPlantedState = mutableStateOf(false)
+    var leftFootPlanted: Boolean by leftFootPlantedState
+    internal val rightFootPlantedState = mutableStateOf(false)
+    var rightFootPlanted: Boolean by rightFootPlantedState
 
     var peakHeadPitch: Float = 0f
     var peakHeadTurn: Float = 0f
@@ -195,7 +208,7 @@ class BlossomViewportSessionState {
     internal val betaMenuTabState = mutableIntStateOf(0) // 0 = Vulva, 1 = Life, 2 = Life+
     var betaMenuTab: Int by betaMenuTabState
 
-    // --- Tab 0 (Vulva): v19.0 Pre-Graduation Milestone defaults (all enabled with tuned strengths) ---
+    // --- Tab 0 (Vulva): v33.0 promotes all current toggles ON by default; new independent sliders start at 0% ---
     // Each slider value is preserved when its toggle is turned OFF and restored when turned back ON.
     internal val betaV3OrganicContinuityState = mutableStateOf(true)
     var betaV3OrganicContinuity: Boolean by betaV3OrganicContinuityState
@@ -233,17 +246,24 @@ class BlossomViewportSessionState {
     internal val betaV3MedialRootStrengthState = mutableFloatStateOf(0.75f)
     var betaV3MedialRootStrength: Float by betaV3MedialRootStrengthState
 
-    // Beta Option #8 (v28.0): Clitoral Hood–Mons Skin Blend — OFF by default (remembers 75% strength)
-    internal val betaV3HoodMonsBlendState = mutableStateOf(false)
+    // Beta Option #8 (v28.0->v33.0): Clitoral Hood–Mons Skin Blend — ON by default (75% strength)
+    internal val betaV3HoodMonsBlendState = mutableStateOf(true)
     var betaV3HoodMonsBlend: Boolean by betaV3HoodMonsBlendState
     internal val betaV3HoodMonsStrengthState = mutableFloatStateOf(0.75f)
     var betaV3HoodMonsStrength: Float by betaV3HoodMonsStrengthState
 
-    // Beta Option #9 (v29.0): Upper Hood–Mons Color Blend — OFF by default (remembers 75% strength)
-    internal val betaV3HoodMonsUpperBlendState = mutableStateOf(false)
+    // Beta Option #9 (v29.0->v33.0): Upper Hood–Mons Color Blend — ON by default (75% strength)
+    internal val betaV3HoodMonsUpperBlendState = mutableStateOf(true)
     var betaV3HoodMonsUpperBlend: Boolean by betaV3HoodMonsUpperBlendState
     internal val betaV3HoodMonsUpperStrengthState = mutableFloatStateOf(0.75f)
     var betaV3HoodMonsUpperStrength: Float by betaV3HoodMonsUpperStrengthState
+
+    // v33.0 Independent Vulva Beta Sliders (0..100%, default 0% == exact baseline look)
+    internal val betaV3InnerTissueSheenStrengthState = mutableFloatStateOf(0f)
+    var betaV3InnerTissueSheenStrength: Float by betaV3InnerTissueSheenStrengthState
+
+    internal val betaV3IntroitusRimProminenceState = mutableFloatStateOf(0f)
+    var betaV3IntroitusRimProminence: Float by betaV3IntroitusRimProminenceState
 
     internal val betaVulvaElasticityEnabledState = mutableStateOf(true)
     var betaVulvaElasticityEnabled: Boolean by betaVulvaElasticityEnabledState
@@ -274,7 +294,7 @@ class BlossomViewportSessionState {
     internal val betaLifeFacialExpressionsState = mutableStateOf(true)
     var betaLifeFacialExpressions: Boolean by betaLifeFacialExpressionsState
 
-    // --- Tab 2 (Life+): v19.0 promotes all 7 realism features ON by default; Heart Rate HUD stays OFF ---
+    // --- Tab 2 (Life+): all realism features promoted ON by default in v33.0; Heart Rate HUD stays OFF ---
     internal val betaLife2EyelidTrackingState = mutableStateOf(true)
     var betaLife2EyelidTracking: Boolean by betaLife2EyelidTrackingState
 
@@ -299,26 +319,26 @@ class BlossomViewportSessionState {
     internal val betaLife2ShowHeartRateState = mutableStateOf(false)
     var betaLife2ShowHeartRate: Boolean by betaLife2ShowHeartRateState
 
-    // --- Tab 2 (Life+) v27.0–v29.0 Photorealistic Visual Realism Beta toggles (all OFF by default) ---
-    internal val betaRealismLayeredHairState = mutableStateOf(false)
+    // --- Tab 2 (Life+) v27.0–v33.0 Photorealistic Visual Realism & 2-Bone Leg IK toggles (ON by default in v33.0) ---
+    internal val betaRealismLayeredHairState = mutableStateOf(true)
     var betaRealismLayeredHair: Boolean by betaRealismLayeredHairState
 
-    internal val betaRealismEyesAndLashesState = mutableStateOf(false)
+    internal val betaRealismEyesAndLashesState = mutableStateOf(true)
     var betaRealismEyesAndLashes: Boolean by betaRealismEyesAndLashesState
 
-    internal val betaRealismContactShadowsState = mutableStateOf(false)
+    internal val betaRealismContactShadowsState = mutableStateOf(true)
     var betaRealismContactShadows: Boolean by betaRealismContactShadowsState
 
-    internal val betaRealismDynamicCreasesState = mutableStateOf(false)
+    internal val betaRealismDynamicCreasesState = mutableStateOf(true)
     var betaRealismDynamicCreases: Boolean by betaRealismDynamicCreasesState
 
-    internal val betaRealismFacialMicroState = mutableStateOf(false)
+    internal val betaRealismFacialMicroState = mutableStateOf(true)
     var betaRealismFacialMicro: Boolean by betaRealismFacialMicroState
 
-    internal val betaRealismSurfaceMicroState = mutableStateOf(false)
+    internal val betaRealismSurfaceMicroState = mutableStateOf(true)
     var betaRealismSurfaceMicro: Boolean by betaRealismSurfaceMicroState
 
-    internal val betaRealismHipThighSwingState = mutableStateOf(false)
+    internal val betaRealismHipThighSwingState = mutableStateOf(true)
     var betaRealismHipThighSwing: Boolean by betaRealismHipThighSwingState
 
     /** Effective vulva elastic resistance (0f when toggled OFF while preserving last slider value). */
@@ -338,8 +358,9 @@ class BlossomViewportSessionState {
         }
 
     /**
-     * Turns OFF every Beta Lab toggle across all 3 tabs while intentionally preserving each
-     * slider's last configured value so re-enabling any toggle restores the user's prior tuning.
+     * Turns OFF every Beta Lab toggle across all 3 tabs and resets standalone 0–100% sliders
+     * (Inner tissue sheen, Vaginal opening rim prominence) back to 0%, while preserving toggle-gated
+     * strength slider values so re-enabling any toggle restores the user's prior tuning.
      */
     fun disableAllBetaToggles() {
         betaV3OrganicContinuity = false
@@ -351,6 +372,8 @@ class BlossomViewportSessionState {
         betaV3MedialRootContinuity = false
         betaV3HoodMonsBlend = false
         betaV3HoodMonsUpperBlend = false
+        betaV3InnerTissueSheenStrength = 0f
+        betaV3IntroitusRimProminence = 0f
         betaVulvaElasticityEnabled = false
         betaBreastSizeBoostEnabled = false
         betaLifeEyeMicrosaccades = false

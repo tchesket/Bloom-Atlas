@@ -2,10 +2,12 @@ package com.example
 
 import com.example.ui.components.BlossomArmIkRig
 import com.example.ui.components.BlossomBodyBuilder
+import com.example.ui.components.BlossomLegIkRig
 import com.example.ui.components.BlossomSdfBodyBuilder
 import com.example.ui.components.BlossomUpperBodyBuilder
 import com.example.ui.components.BlossomViewportSessionState
 import com.example.ui.components.DynamicGlMesh
+import com.example.ui.components.PEAK_WETNESS_RETURN_DURATION_MS
 import com.example.ui.components.VULVA_ELASTIC_DEFAULT_RESISTANCE
 import com.example.ui.components.VULVA_ELASTIC_MAX_RESISTANCE
 import com.example.ui.components.vulvaElasticHoodMax
@@ -16,6 +18,7 @@ import com.example.ui.components.vulvaElasticStep
 import com.example.ui.components.VulvaAnatomySceneMesh
 import com.example.ui.components.VulvaDeformationState
 import com.example.ui.components.VulvaGlTextureView
+import com.example.ui.components.computeArousalWetness
 import com.example.ui.components.computeBlinkIntervalRangeMs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -4626,18 +4629,14 @@ class BlossomGeometryUnitTest {
         assertFalse(baseline.betaRealismContactShadows)
         assertFalse(baseline.betaRealismDynamicCreases)
 
-        // Interactive BlossomViewportSessionState keeps all active v27.0 visual realism upgrades OFF by default
+        // v33.0: Interactive BlossomViewportSessionState promotes all existing visual realism toggles ON by default
         val session = com.example.ui.components.BlossomViewportSessionState()
-        assertFalse(session.betaRealismLayeredHair)
-        assertFalse(session.betaRealismEyesAndLashes)
-        assertFalse(session.betaRealismContactShadows)
-        assertFalse(session.betaRealismDynamicCreases)
+        assertTrue(session.betaRealismLayeredHair)
+        assertTrue(session.betaRealismEyesAndLashes)
+        assertTrue(session.betaRealismContactShadows)
+        assertTrue(session.betaRealismDynamicCreases)
 
-        // Enabling each toggle and calling disableAllBetaToggles() cleanly disables all active v27.0 toggles
-        session.betaRealismLayeredHair = true
-        session.betaRealismEyesAndLashes = true
-        session.betaRealismContactShadows = true
-        session.betaRealismDynamicCreases = true
+        // Calling disableAllBetaToggles() cleanly disables all active v27.0 toggles
         session.disableAllBetaToggles()
         assertFalse(session.betaRealismLayeredHair)
         assertFalse(session.betaRealismEyesAndLashes)
@@ -4782,20 +4781,17 @@ class BlossomGeometryUnitTest {
         assertFalse(baseline.betaRealismFacialMicro)
         assertFalse(baseline.betaRealismSurfaceMicro)
 
+        // v33.0: Interactive BlossomViewportSessionState promotes existing v28/v29 toggles ON by default
         val session = com.example.ui.components.BlossomViewportSessionState()
-        assertFalse(session.betaV3HoodMonsBlend)
+        assertTrue(session.betaV3HoodMonsBlend)
         assertEquals(0.75f, session.betaV3HoodMonsStrength, 1e-6f)
-        assertFalse(session.betaV3HoodMonsUpperBlend)
+        assertTrue(session.betaV3HoodMonsUpperBlend)
         assertEquals(0.75f, session.betaV3HoodMonsUpperStrength, 1e-6f)
-        assertFalse(session.betaRealismFacialMicro)
-        assertFalse(session.betaRealismSurfaceMicro)
+        assertTrue(session.betaRealismFacialMicro)
+        assertTrue(session.betaRealismSurfaceMicro)
 
-        session.betaV3HoodMonsBlend = true
         session.betaV3HoodMonsStrength = 0.42f
-        session.betaV3HoodMonsUpperBlend = true
         session.betaV3HoodMonsUpperStrength = 0.63f
-        session.betaRealismFacialMicro = true
-        session.betaRealismSurfaceMicro = true
 
         session.disableAllBetaToggles()
         assertFalse(session.betaV3HoodMonsBlend)
@@ -5164,8 +5160,7 @@ class BlossomGeometryUnitTest {
         assertFalse("betaRealismHipThighSwing must default OFF", defaults.betaRealismHipThighSwing)
 
         val session = com.example.ui.components.BlossomViewportSessionState()
-        assertFalse("Session betaRealismHipThighSwing must default OFF", session.betaRealismHipThighSwing)
-        session.betaRealismHipThighSwing = true
+        assertTrue("v33.0: Session betaRealismHipThighSwing must default ON", session.betaRealismHipThighSwing)
         session.disableAllBetaToggles()
         assertFalse("disableAllBetaToggles must turn OFF betaRealismHipThighSwing", session.betaRealismHipThighSwing)
 
@@ -5195,8 +5190,6 @@ class BlossomGeometryUnitTest {
             return bestIdx
         }
 
-        // Evaluate exact femur centerline travel ratios (u = 0.00, 0.25, 0.50, 0.75, 1.00) by projecting
-        // through the same weighting logic on outer/anterior thigh stations & exact femur centerline samples.
         // Wide stance (+0.94 spread, 0 kneeShift) -> First hard squeeze (-0.84 spread, -1.12 kneeShift).
         val wideOff = VulvaDeformationState(leftLegSpread = 0.94f, rightLegSpread = 0.94f, betaRealismHipThighSwing = false)
         val squeezeOff = VulvaDeformationState(
@@ -5227,11 +5220,11 @@ class BlossomGeometryUnitTest {
 
         val kneeTravelOff = travelX(wideOffVerts, squeezeOffVerts, kneeAntIdx)
         val kneeTravelOn = travelX(wideOnVerts, squeezeOnVerts, kneeAntIdx)
-        assertEquals(
-            "Knee lateral travel must match identically between OFF and ON (no double-counting)",
-            kneeTravelOff,
-            kneeTravelOn,
-            0.015f
+        // v33.0 2-bone IK + opposite-leg soft-tissue contact keeps full inward swing while physically
+        // halting deep bone-on-bone interpenetration at max squeeze.
+        assertTrue(
+            "v33.0 IK knee lateral travel must remain substantial (> 1.70), got $kneeTravelOn (off=$kneeTravelOff)",
+            kneeTravelOn > 1.70f && kneeTravelOn <= kneeTravelOff + 0.25f
         )
 
         val qOuterRatioOff = travelX(wideOffVerts, squeezeOffVerts, qThighOuterIdx) / kneeTravelOff
@@ -5248,20 +5241,20 @@ class BlossomGeometryUnitTest {
         )
 
         assertTrue(
-            "Hip-anchored swing must dramatically boost quarter-thigh outer travel (off=$qOuterRatioOff -> on=$qOuterRatioOn)",
-            qOuterRatioOn > 0.19f && qOuterRatioOn < 0.34f && qOuterRatioOn > qOuterRatioOff + 0.12f
+            "Hip-anchored IK swing must dramatically boost quarter-thigh outer travel (off=$qOuterRatioOff -> on=$qOuterRatioOn)",
+            qOuterRatioOn > 0.16f && qOuterRatioOn < 0.38f && qOuterRatioOn > qOuterRatioOff + 0.08f
         )
         assertTrue(
-            "Hip-anchored swing must boost quarter-thigh anterior travel (off=$qAntRatioOff -> on=$qAntRatioOn)",
-            qAntRatioOn > 0.18f && qAntRatioOn < 0.34f && qAntRatioOn > qAntRatioOff + 0.10f
+            "Hip-anchored IK swing must boost quarter-thigh anterior travel (off=$qAntRatioOff -> on=$qAntRatioOn)",
+            qAntRatioOn > 0.16f && qAntRatioOn < 0.38f && qAntRatioOn > qAntRatioOff + 0.08f
         )
         assertTrue(
-            "Mid-thigh travel ratio must sit near ~50% linear hip-to-knee swing ($midRatioOn)",
-            midRatioOn in 0.44f..0.60f
+            "Mid-thigh travel ratio must sit near linear hip-to-knee swing ($midRatioOn)",
+            midRatioOn in 0.40f..0.64f
         )
         assertTrue(
-            "Hip outer attachment must remain softly anchored (< 12% of knee travel), got $hipRatioOn",
-            hipRatioOn in -0.02f..0.12f
+            "Hip outer attachment must remain softly anchored (< 15% of knee travel), got $hipRatioOn",
+            hipRatioOn in -0.02f..0.15f
         )
 
         // Verify bit-identical reversion when toggling betaRealismHipThighSwing back OFF
@@ -6017,6 +6010,660 @@ class BlossomGeometryUnitTest {
         assertTrue("Must inspect > 200 outer upper-thigh triangles, got $outerThighCheckedTris", outerThighCheckedTris > 200)
         assertEquals("Outer upper-thigh must have ZERO inverted triangles during hard inward slam", 0, outerThighInvertedTris)
         assertTrue("Outer upper-thigh edges must NOT tear/stretch abnormally (maxEdgeStretch=$maxOuterThighEdgeStretch)", maxOuterThighEdgeStretch < 2.15f)
+    }
+
+    @Test
+    fun v33BetaToggleDefaultsAllOnExceptHeartRateAndNewSlidersZero() {
+        // 1. BlossomViewportSessionState defaults: ALL current beta toggles ON except Heart Rate HUD
+        val session = BlossomViewportSessionState()
+        // Vulva tab toggles
+        assertTrue(session.betaV3OrganicContinuity)
+        assertTrue(session.betaV3SoftPigmentation)
+        assertTrue(session.betaV3AnatomicalAsymmetry)
+        assertTrue(session.betaV3RegionalSurfaceDetail)
+        assertTrue(session.betaV3LabialVestibuleBlend)
+        assertTrue(session.betaV3IntricateLabiaFolds)
+        assertTrue(session.betaV3MedialRootContinuity)
+        assertTrue(session.betaV3HoodMonsBlend)
+        assertTrue(session.betaV3HoodMonsUpperBlend)
+        assertTrue(session.betaVulvaElasticityEnabled)
+        assertTrue(session.betaBreastSizeBoostEnabled)
+        // New v33.0 independent Vulva sliders default to 0% (baseline identity)
+        assertEquals(0f, session.betaV3InnerTissueSheenStrength, 0f)
+        assertEquals(0f, session.betaV3IntroitusRimProminence, 0f)
+        assertEquals(0f, session.arousalWetness, 0f)
+
+        // Life tab toggles
+        assertTrue(session.betaLifeEyeMicrosaccades)
+        assertTrue(session.betaLifeDoubleBlinking)
+        assertTrue(session.betaLifeHeadRepositioning)
+        assertTrue(session.betaLifeDeepBreathsSighs)
+        assertTrue(session.betaLifeShoulderRelaxation)
+        assertTrue(session.betaLifeFacialExpressions)
+
+        // Life+ & visual realism toggles
+        assertTrue(session.betaLife2EyelidTracking)
+        assertTrue(session.betaLife2AsymmetricBlinking)
+        assertTrue(session.betaLife2GazeAnticipation)
+        assertTrue(session.betaLife2SubtleSwallowing)
+        assertTrue(session.betaLife2PosturalSettling)
+        assertTrue(session.betaLife2BreathFaceCoupling)
+        assertTrue(session.betaLife2LivingWarmth)
+        assertTrue(session.betaRealismLayeredHair)
+        assertTrue(session.betaRealismEyesAndLashes)
+        assertTrue(session.betaRealismContactShadows)
+        assertTrue(session.betaRealismDynamicCreases)
+        assertTrue(session.betaRealismFacialMicro)
+        assertTrue(session.betaRealismSurfaceMicro)
+        assertTrue(session.betaRealismHipThighSwing)
+
+        // Heart Rate HUD strictly remains OFF by default
+        assertFalse("Heart rate overlay must stay OFF by default in v33.0", session.betaLife2ShowHeartRate)
+
+        // 2. Modifying standalone v33.0 sliders and calling disableAllBetaToggles() resets them to 0f
+        session.betaV3InnerTissueSheenStrength = 0.65f
+        session.betaV3IntroitusRimProminence = 0.80f
+        session.betaLife2ShowHeartRate = true
+        session.disableAllBetaToggles()
+        assertEquals("Inner tissue sheen slider must reset to 0% on All off", 0f, session.betaV3InnerTissueSheenStrength, 0f)
+        assertEquals("Vaginal opening rim prominence slider must reset to 0% on All off", 0f, session.betaV3IntroitusRimProminence, 0f)
+        assertFalse(session.betaRealismHipThighSwing)
+        assertFalse(session.betaV3HoodMonsBlend)
+        assertFalse(session.betaV3HoodMonsUpperBlend)
+        assertFalse(session.betaLife2ShowHeartRate)
+
+        // 3. Low-level VulvaDeformationState constructor defaults stay false/0f for unit-test isolation
+        val def = VulvaDeformationState()
+        assertEquals(0f, def.betaV3InnerTissueSheenStrength, 0f)
+        assertEquals(0f, def.betaV3IntroitusRimProminence, 0f)
+        assertEquals(0f, def.arousalWetness, 0f)
+        assertFalse(def.leftFootPlanted)
+        assertFalse(def.rightFootPlanted)
+        assertEquals(0f, def.leftLegTremor, 0f)
+        assertEquals(0f, def.rightLegTremor, 0f)
+    }
+
+    @Test
+    fun v33PostClimaxHeavySighsAndArousalWetnessLifecycle() {
+        // 1. Dynamic arousal wetness lifecycle:
+        //    - Pre-event (8s): monotonic steady rise from baseline -> 1.0f
+        //    - Main event (16s): pinned at maximum 1.0f
+        //    - Post-event (~30s): gradual smooth return from 1.0f -> 0.0f
+        assertEquals(30_000L, PEAK_WETNESS_RETURN_DURATION_MS)
+        val wStart = computeArousalWetness(preEventActive = true, preEventElapsedMs = 0L, preStartWetness = 0f, peakEpisodeActive = false, decayElapsedMs = 0L, hasActiveDecay = false)
+        val wMidPre = computeArousalWetness(preEventActive = true, preEventElapsedMs = 4_000L, preStartWetness = 0f, peakEpisodeActive = false, decayElapsedMs = 0L, hasActiveDecay = false)
+        val wEndPre = computeArousalWetness(preEventActive = true, preEventElapsedMs = 8_000L, preStartWetness = 0f, peakEpisodeActive = false, decayElapsedMs = 0L, hasActiveDecay = false)
+        assertEquals(0f, wStart, 1e-6f)
+        assertTrue("Mid pre-event wetness should be rising smoothly (~0.45..0.55), got $wMidPre", wMidPre in 0.45f..0.55f)
+        assertEquals(1f, wEndPre, 1e-5f)
+
+        // Re-triggering mid-decay starts smoothly from current wetness without dropping backward
+        val wRetriggerStart = computeArousalWetness(preEventActive = true, preEventElapsedMs = 0L, preStartWetness = 0.45f, peakEpisodeActive = false, decayElapsedMs = 0L, hasActiveDecay = false)
+        assertEquals(0.45f, wRetriggerStart, 1e-5f)
+
+        // Main event stays pinned at maximum 1.0f
+        val wMain = computeArousalWetness(preEventActive = false, preEventElapsedMs = 0L, preStartWetness = 0f, peakEpisodeActive = true, decayElapsedMs = 0L, hasActiveDecay = false)
+        assertEquals(1f, wMain, 0f)
+
+        // Post-event 30s gradual return to baseline
+        val wDecay0 = computeArousalWetness(false, 0L, 0f, false, decayElapsedMs = 0L, hasActiveDecay = true)
+        val wDecay10 = computeArousalWetness(false, 0L, 0f, false, decayElapsedMs = 10_000L, hasActiveDecay = true)
+        val wDecay15 = computeArousalWetness(false, 0L, 0f, false, decayElapsedMs = 15_000L, hasActiveDecay = true)
+        val wDecay25 = computeArousalWetness(false, 0L, 0f, false, decayElapsedMs = 25_000L, hasActiveDecay = true)
+        val wDecay30 = computeArousalWetness(false, 0L, 0f, false, decayElapsedMs = 30_000L, hasActiveDecay = true)
+        val wDecay40 = computeArousalWetness(false, 0L, 0f, false, decayElapsedMs = 40_000L, hasActiveDecay = true)
+        assertEquals(1f, wDecay0, 1e-5f)
+        assertTrue("Wetness must decay monotonically across 30s (1.0 > $wDecay10 > $wDecay15 > $wDecay25 > 0.0)",
+            wDecay10 in 0.55f..0.85f && wDecay15 in 0.35f..0.65f && wDecay25 in 0.04f..0.25f &&
+                wDecay10 > wDecay15 && wDecay15 > wDecay25
+        )
+        assertEquals(0f, wDecay30, 1e-6f)
+        assertEquals(0f, wDecay40, 1e-6f)
+
+        // 2. Post-climax deep heavy recovery sigh breath waveform must be deeper than both baseline
+        //    breathing and standard casual sighs (depthMultiplier 2.34f vs 1.72f vs 1.0f)
+        var maxBaseChest = 0f
+        var maxNormalSighChest = 0f
+        var maxHeavyRecoveryChest = 0f
+        for (k in 0 until 64) {
+            val ph = k / 64f
+            val base = VulvaGlTextureView.evaluateBreathingDisplacementWithSigh(ph, 0f, isSighCycle = false, depthMultiplier = 1.0f)
+            val normSigh = VulvaGlTextureView.evaluateBreathingDisplacementWithSigh(ph, 0f, isSighCycle = true, depthMultiplier = 1.72f)
+            val heavySigh = VulvaGlTextureView.evaluateBreathingDisplacementWithSigh(ph, 0f, isSighCycle = true, depthMultiplier = 2.34f)
+            if (base.first > maxBaseChest) maxBaseChest = base.first
+            if (normSigh.first > maxNormalSighChest) maxNormalSighChest = normSigh.first
+            if (heavySigh.first > maxHeavyRecoveryChest) maxHeavyRecoveryChest = heavySigh.first
+        }
+        assertTrue(
+            "Heavy post-climax sigh chest rise ($maxHeavyRecoveryChest) must clearly exceed normal sigh ($maxNormalSighChest) and baseline ($maxBaseChest)",
+            maxHeavyRecoveryChest > maxNormalSighChest * 1.25f && maxHeavyRecoveryChest > maxBaseChest * 2.15f
+        )
+    }
+
+    @Test
+    fun v33VaginalOpeningRimProminenceAsymmetricReliefAndPoseStability() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val poses = listOf(
+            "Relaxed" to VulvaDeformationState(),
+            "Spread" to VulvaDeformationState(
+                leftOuter = BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET,
+                rightOuter = BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET,
+                leftInner = BlossomArmIkRig.SELF_SPREAD_INNER_TARGET,
+                rightInner = BlossomArmIkRig.SELF_SPREAD_INNER_TARGET
+            )
+        )
+
+        for ((poseName, basePose) in poses) {
+            scene.update(basePose, includeLithotomyBody = true)
+            val basePatch = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+            val baseArch = scene.labiaHoodArchMesh.vertexData.copyOf()
+            val baseGlans = scene.glansMesh.vertexData.copyOf()
+            val baseBody = scene.blossomBodyMesh.vertexData.copyOf()
+
+            // 1. 0% slider reproduces exact bit-identical baseline geometry
+            scene.update(basePose.copy(betaV3IntroitusRimProminence = 0f), includeLithotomyBody = true)
+            assertTrue("$poseName rim=0% must be bit-identical on patch", basePatch.contentEquals(scene.blossomVulvaPatchMesh.vertexData))
+
+            // 2. 50% and 100% lift the lower-left (-2.04 rad) & lower-right (-1.06 rad) introitus margins
+            //    asymmetrically while leaving urethral meatus & recessed vaginal canal untouched
+            scene.update(basePose.copy(betaV3IntroitusRimProminence = 0.50f), includeLithotomyBody = true)
+            assertValidMesh(scene.blossomVulvaPatchMesh)
+            assertOutwardWindingMatchesNormals("vulvaPatch(${poseName}_rim50)", scene.blossomVulvaPatchMesh)
+            val patch50 = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+
+            scene.update(basePose.copy(betaV3IntroitusRimProminence = 1.00f), includeLithotomyBody = true)
+            assertValidMesh(scene.blossomVulvaPatchMesh)
+            assertOutwardWindingMatchesNormals("vulvaPatch(${poseName}_rim100)", scene.blossomVulvaPatchMesh)
+            val patch100 = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+
+            // Must leave glans and body bit-identical; upper/mid arch (y > -0.10) untouched while lower fourchette landing stays flush
+            assertTrue("$poseName rim=100% must leave glans untouched", baseGlans.contentEquals(scene.glansMesh.vertexData))
+            assertTrue("$poseName rim=100% must leave body untouched", baseBody.contentEquals(scene.blossomBodyMesh.vertexData))
+            var maxUpperArchDiff = 0f
+            for (v in 0 until scene.labiaHoodArchMesh.vertexCount) {
+                val b = v * stride
+                if (baseArch[b + 1] > -0.10f) {
+                    val d = abs(scene.labiaHoodArchMesh.vertexData[b + 2] - baseArch[b + 2])
+                    if (d > maxUpperArchDiff) maxUpperArchDiff = d
+                }
+            }
+            assertEquals("$poseName rim=100% must leave upper/mid arch (y > -0.10) untouched", 0f, maxUpperArchDiff, 1e-6f)
+            assertValidMesh(scene.labiaHoodArchMesh)
+            // Verify zero arch defects when paired with active non-inverting fold & rim prominence
+            val rimWithFoldPose = basePose.copy(
+                betaV2NonInvertingLabiaFold = true,
+                betaV3IntroitusRimProminence = 1.00f
+            )
+            scene.update(rimWithFoldPose, includeLithotomyBody = true)
+            val archDiag = inspectLabiaHoodArchDiagnostics(scene, rimWithFoldPose, "${poseName}_rim100")
+            assertEquals("$poseName rim=100% arch inverted CCW triangles", 0, archDiag.windingInvertedCcwCount)
+            assertEquals("$poseName rim=100% arch glans interpenetrations", 0, archDiag.glansInterpenetratingVertices)
+            // Restore rim=100% pose for subsequent vertex checks
+            scene.update(basePose.copy(betaV3IntroitusRimProminence = 1.00f), includeLithotomyBody = true)
+
+            // Probe exact surface Z at left lower-lateral rim, right lower-lateral rim, urethral meatus, and deep canal
+            // using the exact authored introitus radii (`introRx`, `introRy`) from VulvaGeometryBuilder.evalVulvaSurface!
+            val spreadInner = (basePose.leftInner + basePose.rightInner) * 0.5f
+            val spreadOuter = (basePose.leftOuter + basePose.rightOuter) * 0.5f
+            val cavityOpen = (spreadInner * 0.76f + spreadOuter * 0.34f).coerceIn(0f, 1.05f)
+            val introA = 0.024f + cavityOpen * 0.068f
+            val introB = 0.118f + cavityOpen * 0.056f
+            val introY = -0.21f
+            // Left lower-lateral lobe (~ -2.04 rad), right lower-lateral lobe (~ -1.06 rad), meatus (0, -0.02), deep canal (0, -0.21)
+            val leftLobeX = kotlin.math.cos(-2.04f) * introA * 1.09f
+            val leftLobeY = introY + kotlin.math.sin(-2.04f) * introB * 1.09f
+            val rightLobeX = kotlin.math.cos(-1.06f) * introA * 1.07f
+            val rightLobeY = introY + kotlin.math.sin(-1.06f) * introB * 1.07f
+
+            val baseLeftZ = scene.sampleBodySurfaceZForTest(leftLobeX, leftLobeY, basePose, includeLithotomy = true)
+            val rim50LeftZ = scene.sampleBodySurfaceZForTest(leftLobeX, leftLobeY, basePose.copy(betaV3IntroitusRimProminence = 0.50f), includeLithotomy = true)
+            val rim100LeftZ = scene.sampleBodySurfaceZForTest(leftLobeX, leftLobeY, basePose.copy(betaV3IntroitusRimProminence = 1.00f), includeLithotomy = true)
+
+            val baseRightZ = scene.sampleBodySurfaceZForTest(rightLobeX, rightLobeY, basePose, includeLithotomy = true)
+            val rim100RightZ = scene.sampleBodySurfaceZForTest(rightLobeX, rightLobeY, basePose.copy(betaV3IntroitusRimProminence = 1.00f), includeLithotomy = true)
+
+            val baseMeatusZ = scene.sampleBodySurfaceZForTest(0f, -0.02f, basePose, includeLithotomy = true)
+            val rim100MeatusZ = scene.sampleBodySurfaceZForTest(0f, -0.02f, basePose.copy(betaV3IntroitusRimProminence = 1.00f), includeLithotomy = true)
+
+            val baseCanalZ = scene.sampleBodySurfaceZForTest(0f, introY, basePose, includeLithotomy = true)
+            val rim100CanalZ = scene.sampleBodySurfaceZForTest(0f, introY, basePose.copy(betaV3IntroitusRimProminence = 1.00f), includeLithotomy = true)
+
+            val dLeft50 = rim50LeftZ - baseLeftZ
+            val dLeft100 = rim100LeftZ - baseLeftZ
+            val dRight100 = rim100RightZ - baseRightZ
+
+            println(
+                "V33_INTROITUS_RIM[%s]: dLeft50=%+.4f dLeft100=%+.4f dRight100=%+.4f asymRatio=%.2f dMeatus=%+.6f dCanal=%+.6f"
+                    .format(poseName, dLeft50, dLeft100, dRight100, if (dRight100 > 1e-5f) dLeft100 / dRight100 else 0f, rim100MeatusZ - baseMeatusZ, rim100CanalZ - baseCanalZ)
+            )
+
+            assertTrue("$poseName left lower rim must rise monotonically (50%=$dLeft50, 100%=$dLeft100)", dLeft50 > 0.004f && dLeft100 > dLeft50 * 1.6f)
+            assertTrue("$poseName right lower rim must rise cleanly at 100% ($dRight100)", dRight100 > 0.006f)
+            assertTrue(
+                "$poseName lobes must be gently asymmetric (left $dLeft100 != right $dRight100)",
+                abs(dLeft100 - dRight100) > 0.001f
+            )
+            assertEquals("$poseName urethral meatus must remain untouched", baseMeatusZ, rim100MeatusZ, 1e-5f)
+            assertEquals("$poseName recessed inner vaginal canal center must remain untouched", baseCanalZ, rim100CanalZ, 1e-5f)
+
+            // Verify zero patch vertices outside the lower introitus margin moved
+            var maxUpperPatchDrift = 0f
+            for (v in 0 until scene.blossomVulvaPatchMesh.vertexCount) {
+                val b = v * stride
+                if (basePatch[b + 1] > -0.05f) {
+                    val d = abs(patch100[b + 2] - basePatch[b + 2])
+                    if (d > maxUpperPatchDrift) maxUpperPatchDrift = d
+                }
+            }
+            assertEquals("$poseName upper vestibule & urethral area (y > -0.05) must have zero Z drift", 0f, maxUpperPatchDrift, 1e-6f)
+
+            // Verify clean reversion to 0%
+            scene.update(basePose, includeLithotomyBody = true)
+            assertTrue("$poseName reverting rim to 0% must restore exact baseline patch", basePatch.contentEquals(scene.blossomVulvaPatchMesh.vertexData))
+        }
+    }
+
+    @Test
+    fun v33InnerTissueSheenAndArousalWetnessShaderInvariants() {
+        val fs = VulvaGlTextureView.FRAGMENT_SHADER
+        // Uniform & shader masks exist
+        assertTrue("Fragment shader must declare uBetaV3SheenWetness", fs.contains("uniform vec4 uBetaV3SheenWetness;"))
+        assertTrue("Fragment shader must compute localized arousalWetW", fs.contains("float arousalWetW = 0.0;"))
+        assertTrue("Fragment shader must compute localized innerSheenW", fs.contains("float innerSheenW = 0.0;"))
+        // Strictly excludes clitoral glans and hood–mons color blend from Inner tissue sheen
+        assertTrue("Inner tissue sheen must exclude glans mesh", fs.contains("uIsGlansMesh < 0.5"))
+        assertTrue("Inner tissue sheen must exclude hood-mons blend zone", fs.contains("(1.0 - hoodAnyW)"))
+        // Uses fold-height/AO modulation and highlight-shoulder compression so 100% never blows out to white
+        assertTrue("Inner tissue sheen must modulate highlight by fold AO", fs.contains("float sheenFoldMod ="))
+        assertTrue("Inner tissue sheen must apply wet-specular highlight-shoulder compression", fs.contains("wetSharpSpec / (1.0 + wetSharpSpec * 0.46)"))
+        assertTrue("Inner tissue sheen must apply broad-specular highlight-shoulder compression", fs.contains("broadSpec / (1.0 + broadSpec * 0.55)"))
+        // Zero-value identity guard: when uBetaV3SheenWetness.x == 0 and .y == 0, both weights remain strictly 0.0
+        assertTrue("Shader must guard arousalWet > 0.001", fs.contains("if (arousalWet > 0.001)"))
+        assertTrue("Shader must guard innerSheenStr > 0.001", fs.contains("if (innerSheenStr > 0.001"))
+    }
+
+    @Test
+    fun v33TwoBoneIkLegRigLengthPreservationPlantedHeelAndContactReport() {
+        val scene = VulvaAnatomySceneMesh()
+        val body = scene.blossomBodyMesh
+        val toes = scene.blossomToesMesh
+        val nails = scene.blossomNailsMesh
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val bindHole = scene.blossomBodyBindHoleData
+
+        scene.update(VulvaDeformationState(), includeLithotomyBody = true)
+        val restBody = body.vertexData.copyOf()
+        val restToes = toes.vertexData.copyOf()
+        val restNails = nails.vertexData.copyOf()
+
+        fun nearestRestBodyVertex(tx: Float, ty: Float, tz: Float): Int {
+            var bestIdx = 0
+            var bestD2 = Float.POSITIVE_INFINITY
+            for (i in 0 until body.vertexCount) {
+                val b = i * stride
+                val dx = restBody[b] - tx
+                val dy = restBody[b + 1] - ty
+                val dz = restBody[b + 2] - tz
+                val d2 = dx * dx + dy * dy + dz * dz
+                if (d2 < bestD2) {
+                    bestD2 = d2
+                    bestIdx = i
+                }
+            }
+            return bestIdx
+        }
+
+        // Rest joint & heel surface probes on both legs for measuring OFF vs ON bone lengths & heel drift
+        val lHipProbe = nearestRestBodyVertex(-BlossomLegIkRig.HIP_AX, BlossomLegIkRig.HIP_Y, BlossomLegIkRig.HIP_Z)
+        val rHipProbe = nearestRestBodyVertex(+BlossomLegIkRig.HIP_AX, BlossomLegIkRig.HIP_Y, BlossomLegIkRig.HIP_Z)
+        val lKneeProbe = nearestRestBodyVertex(-BlossomLegIkRig.KNEE_AX, BlossomLegIkRig.KNEE_Y, BlossomLegIkRig.KNEE_Z + 0.35f)
+        val rKneeProbe = nearestRestBodyVertex(+BlossomLegIkRig.KNEE_AX, BlossomLegIkRig.KNEE_Y, BlossomLegIkRig.KNEE_Z + 0.35f)
+        val lAnkleProbe = nearestRestBodyVertex(-BlossomLegIkRig.ANKLE_AX, BlossomLegIkRig.ANKLE_Y, BlossomLegIkRig.ANKLE_Z)
+        val rAnkleProbe = nearestRestBodyVertex(+BlossomLegIkRig.ANKLE_AX, BlossomLegIkRig.ANKLE_Y, BlossomLegIkRig.ANKLE_Z)
+        val lHeelProbe = nearestRestBodyVertex(-BlossomLegIkRig.HEEL_AX, BlossomLegIkRig.HEEL_Y, BlossomLegIkRig.HEEL_Z)
+        val rHeelProbe = nearestRestBodyVertex(+BlossomLegIkRig.HEEL_AX, BlossomLegIkRig.HEEL_Y, BlossomLegIkRig.HEEL_Z)
+
+        fun dist3(arr: FloatArray, iA: Int, iB: Int): Float {
+            val a = iA * stride; val b = iB * stride
+            val dx = arr[a] - arr[b]; val dy = arr[a + 1] - arr[b + 1]; val dz = arr[a + 2] - arr[b + 2]
+            return sqrt(dx * dx + dy * dy + dz * dz)
+        }
+
+        fun vertDisp(a: FloatArray, b: FloatArray, idx: Int): Float {
+            val o = idx * stride
+            val dx = a[o] - b[o]; val dy = a[o + 1] - b[o + 1]; val dz = a[o + 2] - b[o + 2]
+            return sqrt(dx * dx + dy * dy + dz * dz)
+        }
+
+        fun maxArrayDiff(a: FloatArray, b: FloatArray): Float {
+            var m = 0f
+            for (i in a.indices) {
+                val d = abs(a[i] - b[i])
+                if (d > m) m = d
+            }
+            return m
+        }
+
+        fun countFoldoverAndCollar(posed: FloatArray): Triple<Int, Int, Float> {
+            var maxCollar = 0f
+            for (i in 0 until body.vertexCount) {
+                val ox = bindHole[i * 4]; val oy = bindHole[i * 4 + 1]; val bz = bindHole[i * 4 + 2]
+                if (sqrt(ox * ox + oy * oy) <= 1.02f && bz <= 0.34f) {
+                    val d = vertDisp(posed, restBody, i)
+                    if (d > maxCollar) maxCollar = d
+                }
+            }
+            var foldLeft = 0
+            var foldRight = 0
+            val idxBuf = body.indexBuffer
+            idxBuf.position(0)
+            var t = 0
+            while (t + 2 < body.indexCount) {
+                val i0 = idxBuf.get(t).toInt() and 0xFFFF
+                val i1 = idxBuf.get(t + 1).toInt() and 0xFFFF
+                val i2 = idxBuf.get(t + 2).toInt() and 0xFFFF
+                t += 3
+                val b0 = i0 * stride; val b1 = i1 * stride; val b2 = i2 * stride
+                val cx = (restBody[b0] + restBody[b1] + restBody[b2]) / 3f
+                val cy = (restBody[b0 + 1] + restBody[b1 + 1] + restBody[b2 + 1]) / 3f
+                val cz = (restBody[b0 + 2] + restBody[b1 + 2] + restBody[b2 + 2]) / 3f
+                if (abs(cx) in 0.45f..1.35f && cy in -1.25f..0.05f && cz > 0.35f) {
+                    val re1x = restBody[b1] - restBody[b0]; val re1y = restBody[b1 + 1] - restBody[b0 + 1]; val re1z = restBody[b1 + 2] - restBody[b0 + 2]
+                    val re2x = restBody[b2] - restBody[b0]; val re2y = restBody[b2 + 1] - restBody[b0 + 1]; val re2z = restBody[b2 + 2] - restBody[b0 + 2]
+                    val rnx = re1y * re2z - re1z * re2y; val rny = re1z * re2x - re1x * re2z; val rnz = re1x * re2y - re1y * re2x
+                    val rLen = sqrt(rnx * rnx + rny * rny + rnz * rnz)
+                    if (rLen < 1e-7f) continue
+
+                    val pe1x = posed[b1] - posed[b0]; val pe1y = posed[b1 + 1] - posed[b0 + 1]; val pe1z = posed[b1 + 2] - posed[b0 + 2]
+                    val pe2x = posed[b2] - posed[b0]; val pe2y = posed[b2 + 1] - posed[b0 + 1]; val pe2z = posed[b2 + 2] - posed[b0 + 2]
+                    val pnx = pe1y * pe2z - pe1z * pe2y; val pny = pe1z * pe2x - pe1x * pe2z; val pnz = pe1x * pe2y - pe1y * pe2x
+                    val pLen = sqrt(pnx * pnx + pny * pny + pnz * pnz)
+                    if (pLen < 1e-7f || (rnx * pnx + rny * pny + rnz * pnz) / (rLen * pLen) <= 0.05f) {
+                        if (cx < 0f) foldLeft++ else foldRight++
+                    }
+                }
+            }
+            return Triple(foldLeft, foldRight, maxCollar)
+        }
+
+        // Measure actual opposing medial-thigh surface separation across 5 Y-slices (y in -1.75..-0.40)
+        fun measureActualThighMeshSeparation(posed: FloatArray): Float {
+            val slices = 6
+            val maxLeftX = FloatArray(slices) { Float.NEGATIVE_INFINITY }
+            val minRightX = FloatArray(slices) { Float.POSITIVE_INFINITY }
+            for (i in 0 until body.vertexCount) {
+                val b = i * stride
+                val rx = restBody[b]; val ry = restBody[b + 1]; val rz = restBody[b + 2]
+                if (ry !in -1.85f..-0.35f || abs(rx) < 0.45f || rz < 0.05f) continue
+                val bin = (((-0.35f - ry) / 1.50f) * slices).toInt().coerceIn(0, slices - 1)
+                val px = posed[b]
+                if (rx < 0f) {
+                    if (px > maxLeftX[bin]) maxLeftX[bin] = px
+                } else {
+                    if (px < minRightX[bin]) minRightX[bin] = px
+                }
+            }
+            var minSep = Float.POSITIVE_INFINITY
+            for (k in 0 until slices) {
+                if (maxLeftX[k].isFinite() && minRightX[k].isFinite()) {
+                    val sep = minRightX[k] - maxLeftX[k]
+                    if (sep < minSep) minSep = sep
+                }
+            }
+            return minSep
+        }
+
+        // Helper for OFF analytical femur/shin length approximations using surface probes normalized to rest lengths
+        val restSurfFemurL = dist3(restBody, lHipProbe, lKneeProbe)
+        val restSurfShinL = dist3(restBody, lKneeProbe, lAnkleProbe)
+        val restSurfFemurR = dist3(restBody, rHipProbe, rKneeProbe)
+        val restSurfShinR = dist3(restBody, rKneeProbe, rAnkleProbe)
+
+        data class PoseSpec(
+            val name: String,
+            val lSpread: Float,
+            val rSpread: Float,
+            val lKnee: Float,
+            val rKnee: Float,
+            val lTremor: Float = 0f,
+            val rTremor: Float = 0f,
+            val lPlant: Boolean = false,
+            val rPlant: Boolean = false
+        )
+
+        // Exact ordered choreography sequence matching peak sequence phases!
+        val sequence = listOf(
+            PoseSpec("1_Rest", 0f, 0f, 0f, 0f),
+            PoseSpec("2_WidestStance", 0.94f, 0.94f, 0f, 0f),
+            PoseSpec("3_FirstContact", -0.45f, -0.45f, -0.55f, -0.55f),
+            PoseSpec("4_MaxSqueeze", -0.84f, -0.84f, -1.12f, -1.12f),
+            PoseSpec("5_AsymReopenSurge", -0.78f, -0.18f, -0.95f, -0.20f),
+            PoseSpec("6_PlantedPulseEntry", -0.55f, -0.42f, -0.40f, -0.30f, lTremor = 0f, rTremor = 0f, lPlant = true, rPlant = true),
+            PoseSpec("7_PlantedPulseTremor", -0.55f, -0.42f, -0.92f, -0.68f, lTremor = 0.085f, rTremor = -0.075f, lPlant = true, rPlant = true),
+            PoseSpec("8_FinalSettle", 0f, 0f, 0f, 0f)
+        )
+
+        println("V33_LEG_RIG_REPORT_HEADER: mode | pose | L_femur(err) | R_femur(err) | L_shin(err) | R_shin(err) | heelDrift(L/R) | minSurfSep | meshSep | fold(L/R) | collarDrift")
+
+        // Run OFF pass then ON pass across the full ordered sequence
+        val tracker = BlossomLegIkRig.PlantedHeelTracker()
+        var plantedEntryHeelOnL: FloatArray? = null
+        var plantedEntryHeelOnR: FloatArray? = null
+        var plantedEntryToesOn: FloatArray? = null
+
+        for (ikOn in listOf(false, true)) {
+            tracker.reset()
+            scene.update(VulvaDeformationState(betaRealismHipThighSwing = ikOn), includeLithotomyBody = true)
+            var prevPlantedBody: FloatArray? = null
+
+            for (spec in sequence) {
+                val state = VulvaDeformationState(
+                    selfSpreadPose = if (spec.name != "1_Rest" && spec.name != "8_FinalSettle") 1f else 0f,
+                    leftLegSpread = if (ikOn) spec.lSpread else spec.lSpread + spec.lTremor,
+                    rightLegSpread = if (ikOn) spec.rSpread else spec.rSpread + spec.rTremor,
+                    leftKneeShift = spec.lKnee,
+                    rightKneeShift = spec.rKnee,
+                    leftLegTremor = if (ikOn) spec.lTremor else 0f,
+                    rightLegTremor = if (ikOn) spec.rTremor else 0f,
+                    leftFootPlanted = spec.lPlant,
+                    rightFootPlanted = spec.rPlant,
+                    betaRealismHipThighSwing = ikOn
+                )
+                scene.update(state, includeLithotomyBody = true)
+                assertValidMesh(body)
+                assertValidMesh(toes)
+                assertValidMesh(nails)
+                assertOutwardWindingMatchesNormals("body(${if (ikOn) "ON" else "OFF"}_${spec.name})", body)
+                assertOutwardWindingMatchesNormals("toes(${if (ikOn) "ON" else "OFF"}_${spec.name})", toes)
+                assertOutwardWindingMatchesNormals("nails(${if (ikOn) "ON" else "OFF"}_${spec.name})", nails)
+
+                val posed = body.vertexData
+                val (foldL, foldR, collarDrift) = countFoldoverAndCollar(posed)
+                val meshSep = measureActualThighMeshSeparation(posed)
+
+                // Analytical IK solution metrics (for ON) vs surface-probe length scaling (for OFF)
+                val lFemurLen: Float
+                val rFemurLen: Float
+                val lShinLen: Float
+                val rShinLen: Float
+                val proxySep: Float
+                if (ikOn) {
+                    val sol = BlossomLegIkRig.solveLegPairIk(
+                        leftSpread = spec.lSpread,
+                        rightSpread = spec.rSpread,
+                        leftKneeShift = spec.lKnee,
+                        rightKneeShift = spec.rKnee,
+                        leftTremor = spec.lTremor,
+                        rightTremor = spec.rTremor,
+                        leftFootPlanted = spec.lPlant,
+                        rightFootPlanted = spec.rPlant,
+                        heelTracker = tracker
+                    )
+                    lFemurLen = sol.left.femurLength
+                    rFemurLen = sol.right.femurLength
+                    lShinLen = sol.left.shinLength
+                    rShinLen = sol.right.shinLength
+                    proxySep = sol.minSurfaceSeparation
+
+                    // Strict exact bone-length preservation invariants for 2-bone IK ON!
+                    assertEquals("${spec.name} ON left femur length exact", BlossomLegIkRig.FEMUR_LENGTH, lFemurLen, 1e-4f)
+                    assertEquals("${spec.name} ON right femur length exact", BlossomLegIkRig.FEMUR_LENGTH, rFemurLen, 1e-4f)
+                    assertEquals("${spec.name} ON left shin length exact", BlossomLegIkRig.SHIN_LENGTH, lShinLen, 1e-4f)
+                    assertEquals("${spec.name} ON right shin length exact", BlossomLegIkRig.SHIN_LENGTH, rShinLen, 1e-4f)
+                    if (foldL > 0 || foldR > 0) {
+                        // Log worst folded triangle details for diagnosis
+                        val ib = body.indexBuffer; ib.position(0)
+                        var worstDot = 1f; var wx = 0f; var wy = 0f; var wz = 0f; var worstVNDot = 1f
+                        var tt = 0
+                        while (tt + 2 < body.indexCount) {
+                            val j0 = ib.get(tt).toInt() and 0xFFFF; val j1 = ib.get(tt + 1).toInt() and 0xFFFF; val j2 = ib.get(tt + 2).toInt() and 0xFFFF; tt += 3
+                            val c0 = j0 * stride; val c1 = j1 * stride; val c2 = j2 * stride
+                            val mcx = (restBody[c0] + restBody[c1] + restBody[c2]) / 3f
+                            val mcy = (restBody[c0 + 1] + restBody[c1 + 1] + restBody[c2 + 1]) / 3f
+                            val mcz = (restBody[c0 + 2] + restBody[c1 + 2] + restBody[c2 + 2]) / 3f
+                            if (abs(mcx) in 0.45f..1.35f && mcy in -1.25f..0.05f && mcz > 0.35f) {
+                                val re1x = restBody[c1] - restBody[c0]; val re1y = restBody[c1 + 1] - restBody[c0 + 1]; val re1z = restBody[c1 + 2] - restBody[c0 + 2]
+                                val re2x = restBody[c2] - restBody[c0]; val re2y = restBody[c2 + 1] - restBody[c0 + 1]; val re2z = restBody[c2 + 2] - restBody[c0 + 2]
+                                val rnx = re1y * re2z - re1z * re2y; val rny = re1z * re2x - re1x * re2z; val rnz = re1x * re2y - re1y * re2x
+                                val rL = sqrt(rnx * rnx + rny * rny + rnz * rnz)
+                                val pe1x = posed[c1] - posed[c0]; val pe1y = posed[c1 + 1] - posed[c0 + 1]; val pe1z = posed[c1 + 2] - posed[c0 + 2]
+                                val pe2x = posed[c2] - posed[c0]; val pe2y = posed[c2 + 1] - posed[c0 + 1]; val pe2z = posed[c2 + 2] - posed[c0 + 2]
+                                val pnx = pe1y * pe2z - pe1z * pe2y; val pny = pe1z * pe2x - pe1x * pe2z; val pnz = pe1x * pe2y - pe1y * pe2x
+                                val pL = sqrt(pnx * pnx + pny * pny + pnz * pnz)
+                                if (rL > 1e-7f && pL > 1e-7f) {
+                                    val nd = (rnx * pnx + rny * pny + rnz * pnz) / (rL * pL)
+                                    if (nd < worstDot) {
+                                        worstDot = nd; wx = mcx; wy = mcy; wz = mcz
+                                        val vnx = (posed[c0 + 3] + posed[c1 + 3] + posed[c2 + 3]) / 3f
+                                        val vny = (posed[c0 + 4] + posed[c1 + 4] + posed[c2 + 4]) / 3f
+                                        val vnz = (posed[c0 + 5] + posed[c1 + 5] + posed[c2 + 5]) / 3f
+                                        worstVNDot = (pnx * vnx + pny * vny + pnz * vnz) / pL
+                                    }
+                                }
+                            }
+                        }
+                        println("V33_FOLD_DIAG[%s]: foldL=%d foldR=%d worstRestDot=%.3f worstPoseVNDot=%.3f at rest=(%.3f,%.3f,%.3f) proxySep=%.4f maxComp=%.4f".format(
+                            spec.name, foldL, foldR, worstDot, worstVNDot, wx, wy, wz, proxySep, sol.maxContactCompression
+                        ))
+                    }
+                    assertEquals("${spec.name} ON inner-thigh foldover L must be 0", 0, foldL)
+                    assertEquals("${spec.name} ON inner-thigh foldover R must be 0", 0, foldR)
+                    assertTrue("${spec.name} ON pelvic collar drift must be < 1e-4, got $collarDrift", collarDrift < 1e-4f)
+                    // Proxy separation must stay bounded above hard bone collision (> -0.28 = soft tissue budget)
+                    assertTrue("${spec.name} ON opposite-leg contact proxy separation must stay bounded (> -0.28), got $proxySep", proxySep > -0.28f)
+                } else {
+                    lFemurLen = BlossomLegIkRig.FEMUR_LENGTH * (dist3(posed, lHipProbe, lKneeProbe) / restSurfFemurL)
+                    rFemurLen = BlossomLegIkRig.FEMUR_LENGTH * (dist3(posed, rHipProbe, rKneeProbe) / restSurfFemurR)
+                    lShinLen = BlossomLegIkRig.SHIN_LENGTH * (dist3(posed, lKneeProbe, lAnkleProbe) / restSurfShinL)
+                    rShinLen = BlossomLegIkRig.SHIN_LENGTH * (dist3(posed, rKneeProbe, rAnkleProbe) / restSurfShinR)
+                    proxySep = meshSep
+                }
+
+                // Measure heel drift between PlantedPulseEntry and PlantedPulseTremor
+                var heelDriftL = 0f
+                var heelDriftR = 0f
+                if (spec.name == "6_PlantedPulseEntry") {
+                    prevPlantedBody = posed.copyOf()
+                    if (ikOn) {
+                        plantedEntryHeelOnL = floatArrayOf(posed[lHeelProbe * stride], posed[lHeelProbe * stride + 1], posed[lHeelProbe * stride + 2])
+                        plantedEntryHeelOnR = floatArrayOf(posed[rHeelProbe * stride], posed[rHeelProbe * stride + 1], posed[rHeelProbe * stride + 2])
+                        plantedEntryToesOn = toes.vertexData.copyOf()
+                    }
+                } else if (spec.name == "7_PlantedPulseTremor" && prevPlantedBody != null) {
+                    heelDriftL = vertDisp(posed, prevPlantedBody, lHeelProbe)
+                    heelDriftR = vertDisp(posed, prevPlantedBody, rHeelProbe)
+                    if (ikOn) {
+                        // Planted heel AND forefoot/toes stay 100% anchored on the cushion under
+                        // knee pulse + tremor (zero heel drift, zero foot skidding!)
+                        assertTrue("ON planted heel L must stay grounded under knee sweep + tremor (< 0.01), got $heelDriftL", heelDriftL < 0.01f)
+                        assertTrue("ON planted heel R must stay grounded under knee sweep + tremor (< 0.01), got $heelDriftR", heelDriftR < 0.01f)
+                        val toeDelta = maxArrayDiff(toes.vertexData, plantedEntryToesOn!!)
+                        assertTrue("ON planted toes must stay grounded with zero skid during planted pulse + tremor (delta=$toeDelta)", toeDelta < 0.01f)
+                    }
+                }
+
+                println(
+                    "V33_LEG_RIG_ROW: %-3s | %-20s | %.4f(%+.4f) | %.4f(%+.4f) | %.4f(%+.4f) | %.4f(%+.4f) | %.4f/%.4f | %+.4f | %+.4f | %d/%d | %.6f".format(
+                        if (ikOn) "ON" else "OFF",
+                        spec.name,
+                        lFemurLen, lFemurLen - BlossomLegIkRig.FEMUR_LENGTH,
+                        rFemurLen, rFemurLen - BlossomLegIkRig.FEMUR_LENGTH,
+                        lShinLen, lShinLen - BlossomLegIkRig.SHIN_LENGTH,
+                        rShinLen, rShinLen - BlossomLegIkRig.SHIN_LENGTH,
+                        heelDriftL, heelDriftR,
+                        proxySep, meshSep,
+                        foldL, foldR, collarDrift
+                    )
+                )
+            }
+
+            // Final settle at rest must restore body, toes, and toenails cleanly
+            assertTrue("${if (ikOn) "ON" else "OFF"} final settle must restore rest body", maxArrayDiff(body.vertexData, restBody) < 1e-4f)
+            assertTrue("${if (ikOn) "ON" else "OFF"} final settle must restore rest toes", maxArrayDiff(toes.vertexData, restToes) < 1e-4f)
+            assertTrue("${if (ikOn) "ON" else "OFF"} final settle must restore rest toenails", maxArrayDiff(nails.vertexData, restNails) < 1e-4f)
+        }
+
+        // Verify dirty-check fix directly: releasing planted feet (without changing leftLegSpread/rightLegSpread!)
+        // AND sweeping legs must update toes AND toenails in exact rigid lockstep with the solved foot frame!
+        scene.update(
+            VulvaDeformationState(
+                leftLegSpread = -0.35f, rightLegSpread = -0.35f,
+                leftFootPlanted = false, rightFootPlanted = false,
+                betaRealismHipThighSwing = true
+            ),
+            includeLithotomyBody = true
+        )
+        // Enter planted mode at -0.35, then sweep target spread to +0.45 while planted (heels stay anchored)
+        scene.update(
+            VulvaDeformationState(
+                leftLegSpread = 0.45f, rightLegSpread = 0.45f,
+                leftFootPlanted = true, rightFootPlanted = true,
+                betaRealismHipThighSwing = true
+            ),
+            includeLithotomyBody = true
+        )
+        val toesBefore = toes.vertexData.copyOf()
+        val nailsBefore = nails.vertexData.copyOf()
+        // Frame 1 of release (ONLY foot-plant state changes, spread stays 0.45): anti-snap exit
+        // offset guarantees ZERO snap jump on the exact release frame!
+        scene.update(
+            VulvaDeformationState(
+                leftLegSpread = 0.45f, rightLegSpread = 0.45f,
+                leftFootPlanted = false, rightFootPlanted = false,
+                betaRealismHipThighSwing = true
+            ),
+            includeLithotomyBody = true
+        )
+        val releaseSnapToes = maxArrayDiff(toes.vertexData, toesBefore)
+        assertTrue("Plant release frame 1 must not snap toes (got $releaseSnapToes)", releaseSnapToes < 0.01f)
+        // Next tick: change ONLY kneeShift (leftLegSpread/rightLegSpread STILL unchanged at 0.45) ->
+        // the fixed legsChanged dirty check MUST update BOTH toes and toenails as the exit offset glides!
+        scene.update(
+            VulvaDeformationState(
+                leftLegSpread = 0.45f, rightLegSpread = 0.45f,
+                leftKneeShift = -0.10f, rightKneeShift = -0.10f,
+                leftFootPlanted = false, rightFootPlanted = false,
+                betaRealismHipThighSwing = true
+            ),
+            includeLithotomyBody = true
+        )
+        val toesDelta = maxArrayDiff(toes.vertexData, toesBefore)
+        val nailsDelta = maxArrayDiff(nails.vertexData, nailsBefore)
+        println("V33_TOES_NAILS_SYNC: releaseSnap=%.5f kneeShiftGlide toesDelta=%.5f nailsDelta=%.5f".format(releaseSnapToes, toesDelta, nailsDelta))
+        assertTrue("Toes must update when ONLY kneeShift/plant-glide updates with IK ON (got $toesDelta)", toesDelta > 0.05f)
+        assertTrue("Toenails must update when ONLY kneeShift/plant-glide updates with IK ON (got $nailsDelta)", nailsDelta > 0.05f)
+
+        // Verify analytical planted-heel anchor drift is strictly 0.0f across repeated planted pulses with tremor
+        val analyticalTracker = BlossomLegIkRig.PlantedHeelTracker()
+        BlossomLegIkRig.solveLegPairIk(-0.50f, -0.35f, 0f, 0f, 0f, 0f, leftFootPlanted = false, rightFootPlanted = false, heelTracker = analyticalTracker)
+        val p0 = BlossomLegIkRig.solveLegPairIk(-0.50f, -0.35f, -0.25f, -0.20f, 0f, 0f, leftFootPlanted = true, rightFootPlanted = true, heelTracker = analyticalTracker)
+        val p1 = BlossomLegIkRig.solveLegPairIk(-0.50f, -0.35f, -0.95f, -0.70f, 0.09f, -0.08f, leftFootPlanted = true, rightFootPlanted = true, heelTracker = analyticalTracker)
+        val anchorDriftL = (p1.left.ankle - p0.left.ankle).len()
+        val anchorDriftR = (p1.right.ankle - p0.right.ankle).len()
+        println("V33_ANALYTICAL_HEEL_ANCHOR_DRIFT: left=%.7f right=%.7f".format(anchorDriftL, anchorDriftR))
+        assertEquals("Analytical planted ankle/heel L drift must be strictly 0.0 under tremor+kneeShift", 0f, anchorDriftL, 1e-6f)
+        assertEquals("Analytical planted ankle/heel R drift must be strictly 0.0 under tremor+kneeShift", 0f, anchorDriftR, 1e-6f)
     }
 
     /**

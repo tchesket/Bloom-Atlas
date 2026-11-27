@@ -150,6 +150,7 @@ internal const val PEAK_PRE_EVENT_WIDE_STANCE = 0.94f
 internal const val PEAK_RECOVERY_FLOOR_BPM = 125f
 internal const val PEAK_FAST_RECOVERY_DURATION_MS = 6_000L
 internal const val PEAK_POST_125_HOLD_DURATION_MS = 15_000L
+internal const val PEAK_WETNESS_RETURN_DURATION_MS = 30_000L
 
 /** Autonomous heart rate ramp during the 8-second pre-event delay (136 -> 152 BPM regardless of touch). */
 internal fun computePreEventHeartRateBpm(startBpm: Float, elapsedMs: Long): Float {
@@ -157,6 +158,35 @@ internal fun computePreEventHeartRateBpm(startBpm: Float, elapsedMs: Long): Floa
     val u = (elapsedMs.toFloat() / PEAK_PRE_EVENT_DURATION_MS.toFloat()).coerceIn(0f, 1f)
     return (start + (PEAK_PRE_EVENT_TARGET_BPM - start) * u)
         .coerceIn(PEAK_EPISODE_TRIGGER_BPM, PEAK_PRE_EVENT_TARGET_BPM)
+}
+
+/**
+ * Evaluates Blossom's dynamic physiological vaginal wetness in `[0..1]`:
+ *  - During the 8s pre-event: steadily increases from `preStartWetness` up to maximum (`1f`).
+ *  - During the 16s main event: remains pinned at maximum (`1f`).
+ *  - After the main event ends: gradually decays back to baseline (`0f`) over ~30 seconds.
+ */
+internal fun computeArousalWetness(
+    preEventActive: Boolean,
+    preEventElapsedMs: Long,
+    preStartWetness: Float,
+    peakEpisodeActive: Boolean,
+    decayElapsedMs: Long,
+    hasActiveDecay: Boolean
+): Float = when {
+    peakEpisodeActive -> 1f
+    preEventActive -> {
+        val start = preStartWetness.coerceIn(0f, 1f)
+        val u = (preEventElapsedMs.toFloat() / PEAK_PRE_EVENT_DURATION_MS.toFloat()).coerceIn(0f, 1f)
+        (start + (1f - start) * u).coerceIn(0f, 1f)
+    }
+    hasActiveDecay -> {
+        val u = (decayElapsedMs.toFloat() / PEAK_WETNESS_RETURN_DURATION_MS.toFloat()).coerceIn(0f, 1f)
+        // Smooth ease-out physiological return to baseline over ~30s
+        val remain = 1f - u
+        (remain * remain * (3f - 2f * remain)).coerceIn(0f, 1f)
+    }
+    else -> 0f
 }
 
 /**
@@ -813,6 +843,9 @@ fun InteractiveVulva3DCanvas(
     var peakRefractoryUntilMs by sessionState.peakRefractoryUntilMsState
     var postPeakSighToken by sessionState.postPeakSighTokenState
     var postPeakSighCount by sessionState.postPeakSighCountState
+    var arousalWetness by sessionState.arousalWetnessState
+    var sessionLeftFootPlanted by sessionState.leftFootPlantedState
+    var sessionRightFootPlanted by sessionState.rightFootPlantedState
     val peakHeadPitch = remember(sessionState) { Animatable(sessionState.peakHeadPitch) }
     val peakHeadTurn = remember(sessionState) { Animatable(sessionState.peakHeadTurn) }
     val peakHeadRoll = remember(sessionState) { Animatable(sessionState.peakHeadRoll) }
@@ -868,6 +901,8 @@ fun InteractiveVulva3DCanvas(
     var betaV3HoodMonsStrength by sessionState.betaV3HoodMonsStrengthState
     var betaV3HoodMonsUpperBlend by sessionState.betaV3HoodMonsUpperBlendState
     var betaV3HoodMonsUpperStrength by sessionState.betaV3HoodMonsUpperStrengthState
+    var betaV3InnerTissueSheenStrength by sessionState.betaV3InnerTissueSheenStrengthState
+    var betaV3IntroitusRimProminence by sessionState.betaV3IntroitusRimProminenceState
     var betaVulvaElasticityEnabled by sessionState.betaVulvaElasticityEnabledState
     var betaVulvaElasticity by sessionState.betaVulvaElasticityState
     var betaBreastSizeBoostEnabled by sessionState.betaBreastSizeBoostEnabledState
@@ -1207,9 +1242,9 @@ fun InteractiveVulva3DCanvas(
     }
 
     // Smoothly integrate physiological heart rate and drive the 3-phase 136 BPM peak sequence:
-    //   Phase 1 (7s pre-event): triggered at 136 BPM -> autonomous HR climb 136 -> 152 BPM
-    //   Phase 2 (12s peak):     sustained at 152 BPM with dramatic choreography + irregular pulsing vibration
-    //   Phase 3 (cooldown):     2-3 powerful sighs + 2x HR recovery stopping cleanly at 125 BPM
+    //   Phase 1 (8s pre-event): triggered at 136 BPM -> autonomous HR climb 136 -> 152 BPM + steady vaginal wetness ramp 0 -> 1
+    //   Phase 2 (16s peak):     sustained at 152 BPM + maximum wetness (1.0) with dramatic choreography & heavy pulses
+    //   Phase 3 (cooldown):     3-4 deep slow heavy recovery sighs + 2x HR recovery to 125 BPM + ~30s wetness return to baseline
     LaunchedEffect(showExperimentalLegs) {
         if (!showExperimentalLegs) {
             touchStimulus = 0f
@@ -1221,6 +1256,11 @@ fun InteractiveVulva3DCanvas(
             peakPostCooldownActive = false
             peakRecoveryFastEndMs = 0L
             peakRecoveryHoldUntilMs = 0L
+            arousalWetness = 0f
+            sessionState.peakWetnessPreStart = 0f
+            sessionState.peakWetnessDecayStartMs = 0L
+            sessionLeftFootPlanted = false
+            sessionRightFootPlanted = false
             hapticsEngine.cancel()
             return@LaunchedEffect
         }
@@ -1240,7 +1280,7 @@ fun InteractiveVulva3DCanvas(
                 }
             }
 
-            // Phase 1 Trigger: enter 7-second pre-event delay immediately upon hitting 136 BPM
+            // Phase 1 Trigger: enter 8-second pre-event delay immediately upon hitting 136 BPM
             if (!peakPreEventActive && !peakEpisodeActive && !peakPostCooldownActive &&
                 heartRateBpm >= PEAK_EPISODE_TRIGGER_BPM && nowMs >= peakRefractoryUntilMs
             ) {
@@ -1248,27 +1288,49 @@ fun InteractiveVulva3DCanvas(
                 peakPreEventStartMs = nowMs
                 peakPreEventStartBpm = heartRateBpm.coerceIn(PEAK_EPISODE_TRIGGER_BPM, PEAK_PRE_EVENT_TARGET_BPM)
                 peakRecoveryHoldUntilMs = 0L
+                sessionState.peakWetnessPreStart = arousalWetness.coerceIn(0f, 1f)
+                sessionState.peakWetnessDecayStartMs = 0L
             }
 
-            // Phase 1 -> Phase 2 Transition: after 7s pre-event, start the 12-second peak event at 152 BPM
+            // Phase 1 -> Phase 2 Transition: after 8s pre-event, start the 16-second peak event at 152 BPM
             if (peakPreEventActive && nowMs - peakPreEventStartMs >= PEAK_PRE_EVENT_DURATION_MS) {
                 peakPreEventActive = false
                 peakEpisodeActive = true
                 peakEpisodeEndMs = nowMs + PEAK_EPISODE_DURATION_MS
                 heartRateBpm = PEAK_PRE_EVENT_TARGET_BPM
+                arousalWetness = 1f
             }
 
-            // Phase 2 -> Phase 3 Transition: end 12-second peak event -> recovery sighs + cooldown ONLY down to 125 BPM
+            // Phase 2 -> Phase 3 Transition: end 16-second peak event -> 3–4 deep slow heavy recovery sighs
+            // while HR drops, plus ~30-second gradual vaginal wetness return back to baseline
             if (peakEpisodeActive && nowMs >= peakEpisodeEndMs) {
                 peakEpisodeActive = false
                 peakPostCooldownActive = true
-                postPeakSighCount = 2 + peakRng.nextInt(2)
+                postPeakSighCount = 3 + peakRng.nextInt(2)
                 postPeakSighToken++
+                sessionState.peakWetnessDecayStartMs = nowMs
                 peakRecoveryFastEndMs = nowMs + PEAK_FAST_RECOVERY_DURATION_MS
                 peakRefractoryUntilMs = nowMs + 4_000L
                 heartRateDrive = 0f
                 heartRateSensitivity = 0f
                 lastHeartStimMs = nowMs - 3_000L
+            }
+
+            // Update continuous dynamic vaginal wetness across pre-event ramp, peak hold, and ~30s post-event decay
+            val decayStartMs = sessionState.peakWetnessDecayStartMs
+            val nextWetness = computeArousalWetness(
+                preEventActive = peakPreEventActive,
+                preEventElapsedMs = (nowMs - peakPreEventStartMs).coerceAtLeast(0L),
+                preStartWetness = sessionState.peakWetnessPreStart,
+                peakEpisodeActive = peakEpisodeActive,
+                decayElapsedMs = if (decayStartMs > 0L) (nowMs - decayStartMs).coerceAtLeast(0L) else 0L,
+                hasActiveDecay = decayStartMs > 0L
+            )
+            arousalWetness = nextWetness
+            if (!peakPreEventActive && !peakEpisodeActive && decayStartMs > 0L &&
+                nowMs - decayStartMs >= PEAK_WETNESS_RETURN_DURATION_MS
+            ) {
+                sessionState.peakWetnessDecayStartMs = 0L
             }
 
             val secsSinceHeartStim = ((nowMs - lastHeartStimMs).coerceAtLeast(0L)) / 1000f
@@ -1281,11 +1343,11 @@ fun InteractiveVulva3DCanvas(
 
             heartRateBpm = when {
                 peakPreEventActive -> {
-                    // Autonomous steady climb from 136 -> 152 BPM across the 7-second pre-event, regardless of touch
+                    // Autonomous steady climb from 136 -> 152 BPM across the 8-second pre-event, regardless of touch
                     computePreEventHeartRateBpm(peakPreEventStartBpm, nowMs - peakPreEventStartMs)
                 }
                 peakEpisodeActive -> {
-                    // Sustained at peak 152 BPM throughout the 12-second main event
+                    // Sustained at peak 152 BPM throughout the 16-second main event
                     PEAK_PRE_EVENT_TARGET_BPM
                 }
                 peakPostCooldownActive -> {
@@ -1329,6 +1391,56 @@ fun InteractiveVulva3DCanvas(
                         maxBpm = VulvaGlTextureView.MAX_HEART_RATE_BPM
                     )
                 }
+            }
+        }
+    }
+
+    // Phase 3 Post-Climax Heavy Recovery Sigh Choreography (v33.0):
+    // Synchronizes 3–4 slow, deep, heavy shoulder rises/exhale drops and soft parted-lip exhales
+    // with the renderer's deep chest/abdomen recovery sighs while Blossom's heart rate drops.
+    LaunchedEffect(showExperimentalLegs, postPeakSighToken) {
+        if (!showExperimentalLegs || postPeakSighToken <= 0) return@LaunchedEffect
+        val sighCount = postPeakSighCount.coerceIn(3, 4)
+        for (idx in 0 until sighCount) {
+            if (latestPeakEpisodeActive || latestPeakPreEventActive) break
+            val progress = idx.toFloat() / sighCount.toFloat()
+            val inhaleMs = (2450 + idx * 140)
+            val crestHoldMs = 360L
+            val exhaleMs = (2750 + idx * 180)
+            val restPauseMs = 460L
+            val liftTarget = -(0.22f - 0.04f * progress) // gentle upward shoulder heave on deep inhale
+            val dropTarget = (0.72f - 0.14f * progress)  // heavy relaxed shoulder melt on slow exhale
+            val mouthPartTarget = (0.34f - 0.06f * progress).coerceAtLeast(0.14f)
+
+            val jInL = launch { shoulderRelaxL.animateTo(liftTarget, tween(inhaleMs, easing = FastOutSlowInEasing)) }
+            val jInR = launch { shoulderRelaxR.animateTo(liftTarget * 0.94f, tween(inhaleMs + 60, easing = FastOutSlowInEasing)) }
+            val jInM = launch {
+                if (!latestPeakEpisodeActive && manualMouthOpen.value < 0.05f) {
+                    peakMouthOpen.animateTo(mouthPartTarget * 0.65f, tween(inhaleMs, easing = FastOutSlowInEasing))
+                }
+            }
+            jInL.join(); jInR.join(); jInM.join()
+            if (latestPeakEpisodeActive || latestPeakPreEventActive) break
+            delay(crestHoldMs)
+
+            val jExL = launch { shoulderRelaxL.animateTo(dropTarget, tween(exhaleMs, easing = FastOutSlowInEasing)) }
+            val jExR = launch { shoulderRelaxR.animateTo(dropTarget * 0.96f, tween(exhaleMs + 80, easing = FastOutSlowInEasing)) }
+            val jExM = launch {
+                if (!latestPeakEpisodeActive && manualMouthOpen.value < 0.05f) {
+                    peakMouthOpen.animateTo(mouthPartTarget, tween((exhaleMs * 0.45f).toInt(), easing = FastOutSlowInEasing))
+                    peakMouthOpen.animateTo(0f, tween((exhaleMs * 0.55f).toInt(), easing = FastOutSlowInEasing))
+                }
+            }
+            jExL.join(); jExR.join(); jExM.join()
+            if (latestPeakEpisodeActive || latestPeakPreEventActive) break
+            delay(restPauseMs)
+        }
+        if (!latestPeakEpisodeActive && !latestPeakPreEventActive) {
+            val settleSpec = tween<Float>(durationMillis = 1200, easing = FastOutSlowInEasing)
+            launch { shoulderRelaxL.animateTo(0f, settleSpec) }
+            launch { shoulderRelaxR.animateTo(0f, settleSpec) }
+            if (manualMouthOpen.value < 0.05f) {
+                launch { peakMouthOpen.animateTo(0f, settleSpec) }
             }
         }
     }
@@ -1482,6 +1594,8 @@ fun InteractiveVulva3DCanvas(
             }
             if (wasPeakEpisodeActive) {
                 wasPeakEpisodeActive = false
+                sessionLeftFootPlanted = false
+                sessionRightFootPlanted = false
                 // Ensure eyelids open cleanly and legs relax smoothly back toward comfortable default stance
                 val eyeOpenSpec = tween<Float>(durationMillis = 280, easing = FastOutSlowInEasing)
                 val legRelaxSpec = tween<Float>(durationMillis = 1950, easing = FastOutSlowInEasing)
@@ -1552,6 +1666,8 @@ fun InteractiveVulva3DCanvas(
 
             var leftFootPlanted = false
             var rightFootPlanted = false
+            sessionLeftFootPlanted = false
+            sessionRightFootPlanted = false
             var legSettlingToRest = false
 
             val laterPulses = buildLaterPeakLegPulses(legDriftLRng)
@@ -1564,6 +1680,8 @@ fun InteractiveVulva3DCanvas(
 
                     leftFootPlanted = pulse.plantedFeet
                     rightFootPlanted = pulse.plantedFeet
+                    sessionLeftFootPlanted = pulse.plantedFeet
+                    sessionRightFootPlanted = pulse.plantedFeet
 
                     // Reopening phase (mix of smaller partial reopenings and asymmetric wider releases)
                     val jOpenL = launch {
@@ -1613,6 +1731,8 @@ fun InteractiveVulva3DCanvas(
                 legSettlingToRest = true
                 leftFootPlanted = false
                 rightFootPlanted = false
+                sessionLeftFootPlanted = false
+                sessionRightFootPlanted = false
                 val trailRight = legDriftRRng.nextBoolean()
                 val trailLagMs = (140 + legDriftRRng.nextInt(110)).toLong()
                 val remainingEase = (endMs - System.currentTimeMillis()).coerceIn(900L, PEAK_LEG_FINAL_EASE_MS)
@@ -2518,6 +2638,18 @@ fun InteractiveVulva3DCanvas(
     } else {
         BlossomSdfBodyBuilder.MANUAL_MIN_LEG_SPREAD
     }
+    // When 2-bone IK leg rig is active, route tremor separately into knee target BEFORE contact constraints
+    // so held squeezes tremble cleanly without pulling planted heels sideways; preserve exact legacy sum when OFF.
+    val effectiveLeftLegSpread = if (betaRealismHipThighSwing) {
+        (leftLegSpread.value + settleLegL.value).coerceIn(activeLegMinSpread, 1f)
+    } else {
+        (leftLegSpread.value + settleLegL.value + peakLegShakeL.value).coerceIn(activeLegMinSpread, 1f)
+    }
+    val effectiveRightLegSpread = if (betaRealismHipThighSwing) {
+        (rightLegSpread.value + settleLegR.value).coerceIn(activeLegMinSpread, 1f)
+    } else {
+        (rightLegSpread.value + settleLegR.value + peakLegShakeR.value).coerceIn(activeLegMinSpread, 1f)
+    }
     val currentDeform = VulvaDeformationState(
         leftOuter = leftOuterSpread.value,
         rightOuter = rightOuterSpread.value,
@@ -2529,8 +2661,8 @@ fun InteractiveVulva3DCanvas(
         rightBreastX = rightBreastX.value,
         rightBreastY = rightBreastY.value,
         breastSize = breastSize,
-        leftLegSpread = (leftLegSpread.value + settleLegL.value + peakLegShakeL.value).coerceIn(activeLegMinSpread, 1f),
-        rightLegSpread = (rightLegSpread.value + settleLegR.value + peakLegShakeR.value).coerceIn(activeLegMinSpread, 1f),
+        leftLegSpread = effectiveLeftLegSpread,
+        rightLegSpread = effectiveRightLegSpread,
         selfSpreadPose = selfSpreadPose.value,
         headTurn = (headTurn.value + idleHeadTurn.value + settleHeadTurn.value + peakHeadTurn.value).coerceIn(-1f, 1f),
         headPitch = (headPitch.value + idleHeadPitch.value + settleHeadPitch.value + peakHeadPitch.value).coerceIn(-1f, 1f),
@@ -2588,7 +2720,14 @@ fun InteractiveVulva3DCanvas(
         betaRealismDynamicCreases = betaRealismDynamicCreases,
         betaRealismFacialMicro = betaRealismFacialMicro,
         betaRealismSurfaceMicro = betaRealismSurfaceMicro,
-        betaRealismHipThighSwing = betaRealismHipThighSwing
+        betaRealismHipThighSwing = betaRealismHipThighSwing,
+        betaV3InnerTissueSheenStrength = betaV3InnerTissueSheenStrength,
+        betaV3IntroitusRimProminence = betaV3IntroitusRimProminence,
+        arousalWetness = arousalWetness,
+        leftLegTremor = if (betaRealismHipThighSwing) peakLegShakeL.value else 0f,
+        rightLegTremor = if (betaRealismHipThighSwing) peakLegShakeR.value else 0f,
+        leftFootPlanted = sessionLeftFootPlanted,
+        rightFootPlanted = sessionRightFootPlanted
     )
     val currentCam = VulvaCamera3D(
         yawDeg = camYaw.value,
@@ -3392,6 +3531,9 @@ fun InteractiveVulva3DCanvas(
                                 peakRecoveryFastEndMs = 0L
                                 peakRecoveryHoldUntilMs = 0L
                                 peakRefractoryUntilMs = 0L
+                                sessionState.peakWetnessDecayStartMs = 0L
+                                sessionLeftFootPlanted = false
+                                sessionRightFootPlanted = false
                                 heartRateBpm = PEAK_EPISODE_TRIGGER_BPM
                             },
                             modifier = Modifier
@@ -3448,6 +3590,8 @@ fun InteractiveVulva3DCanvas(
                     betaV3MedialRootContinuity,
                     betaV3HoodMonsBlend,
                     betaV3HoodMonsUpperBlend,
+                    betaV3InnerTissueSheenStrength > 0.005f,
+                    betaV3IntroitusRimProminence > 0.005f,
                     betaVulvaElasticityEnabled && betaVulvaElasticity > 0.005f,
                     betaBreastSizeBoostEnabled && betaBreastSizeBoost > 0.005f
                 ).count { it }
@@ -3481,7 +3625,12 @@ fun InteractiveVulva3DCanvas(
                 val displayedVulvaBetaCount = if (showExtraBetaOptions) {
                     activeVulvaBetaCount
                 } else {
-                    listOf(betaV3HoodMonsBlend, betaV3HoodMonsUpperBlend).count { it }
+                    listOf(
+                        betaV3HoodMonsBlend,
+                        betaV3HoodMonsUpperBlend,
+                        betaV3InnerTissueSheenStrength > 0.005f,
+                        betaV3IntroitusRimProminence > 0.005f
+                    ).count { it }
                 }
                 val displayedLifelikeBetaCount = if (showExtraBetaOptions) activeLifelikeBetaCount else 0
                 val displayedLifelike2BetaCount = if (showExtraBetaOptions) {
@@ -3624,7 +3773,7 @@ fun InteractiveVulva3DCanvas(
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
-                                    if (showExtraBetaOptions && totalActiveBetaCount > 0) {
+                                    if (totalActiveBetaCount > 0) {
                                         Box(
                                             modifier = Modifier
                                                 .heightIn(min = 48.dp)
@@ -4021,6 +4170,32 @@ fun InteractiveVulva3DCanvas(
                                             onValueChange = { betaV3HoodMonsUpperStrength = it }
                                         )
                                     }
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    Text(
+                                        text = "v33.0 Vulva Surface & Contour Sliders",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, lineHeight = 11.sp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                    BetaStrengthSliderRow(
+                                        label = "Inner tissue sheen",
+                                        value = betaV3InnerTissueSheenStrength,
+                                        tag = "slider_beta_v3_inner_tissue_sheen",
+                                        onValueChange = { betaV3InnerTissueSheenStrength = it }
+                                    )
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    BetaStrengthSliderRow(
+                                        label = "Vaginal opening rim prominence",
+                                        value = betaV3IntroitusRimProminence,
+                                        tag = "slider_beta_v3_introitus_rim_prominence",
+                                        onValueChange = { betaV3IntroitusRimProminence = it }
+                                    )
                                 } else if (betaMenuTab == 1) {
                                     if (!showExtraBetaOptions) {
                                         Spacer(modifier = Modifier.height(64.dp))
@@ -4330,7 +4505,7 @@ fun InteractiveVulva3DCanvas(
                                     )
                                     VulvaBetaToggleRow(
                                         title = "Hip-anchored thigh swing",
-                                        subtitle = "Swings upper thighs smoothly from the hip pivot during peak & spread motion with zero low hinge",
+                                        subtitle = "Length-preserving 2-bone leg IK with planted heels, opposite-thigh soft-tissue contact & synced toes",
                                         checked = betaRealismHipThighSwing,
                                         tag = "toggle_beta_realism_hip_thigh_swing",
                                         compact = true,

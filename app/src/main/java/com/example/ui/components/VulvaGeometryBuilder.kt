@@ -167,7 +167,17 @@ data class VulvaDeformationState(
     val betaRealismDynamicCreases: Boolean = false,
     val betaRealismFacialMicro: Boolean = false,
     val betaRealismSurfaceMicro: Boolean = false,
-    val betaRealismHipThighSwing: Boolean = false
+    val betaRealismHipThighSwing: Boolean = false,
+    // v33.0 Independent Vulva Beta sliders (0..1, strictly 0f default so baseline stays bit-identical)
+    val betaV3InnerTissueSheenStrength: Float = 0f,
+    val betaV3IntroitusRimProminence: Float = 0f,
+    // v33.0 Dynamic physiological arousal wetness (0..1; ramps in pre-event, peaks at 1.0, decays over ~30s)
+    val arousalWetness: Float = 0f,
+    // v33.0 2-bone leg IK tremor & planted-heel contact signals (0f / false at rest)
+    val leftLegTremor: Float = 0f,
+    val rightLegTremor: Float = 0f,
+    val leftFootPlanted: Boolean = false,
+    val rightFootPlanted: Boolean = false
 )
 
 class DynamicGlMesh(
@@ -290,6 +300,11 @@ class VulvaAnatomySceneMesh {
     private var lastAppliedLeftToeWiggle = Float.NaN
     private var lastAppliedRightToeWiggle = Float.NaN
     private var lastAppliedBetaRealismHipThighSwing: Boolean? = null
+    private var lastAppliedLeftLegTremor = Float.NaN
+    private var lastAppliedRightLegTremor = Float.NaN
+    private var lastAppliedLeftFootPlanted: Boolean? = null
+    private var lastAppliedRightFootPlanted: Boolean? = null
+    internal val blossomLegHeelTracker = BlossomLegIkRig.PlantedHeelTracker()
     private var lastAppliedLeftGluteX = Float.NaN
     private var lastAppliedLeftGluteY = Float.NaN
     private var lastAppliedRightGluteX = Float.NaN
@@ -360,6 +375,7 @@ class VulvaAnatomySceneMesh {
     private var lastVulvaBetaV3HoodMonsStrength = Float.NaN
     private var lastVulvaBetaV3HoodMonsUpperBlend = false
     private var lastVulvaBetaV3HoodMonsUpperStrength = Float.NaN
+    private var lastVulvaBetaV3IntroitusRimProminence = Float.NaN
     private var lastBetaShortPerineum = false
     private var lastBetaSoftButtockTable = false
     private var lastBetaSmoothVulvaSeam = false
@@ -733,7 +749,8 @@ class VulvaAnatomySceneMesh {
                     state.betaV3HoodMonsStrength != lastVulvaBetaV3HoodMonsStrength) ||
                 state.betaV3HoodMonsUpperBlend != lastVulvaBetaV3HoodMonsUpperBlend ||
                 (state.betaV3HoodMonsUpperBlend &&
-                    state.betaV3HoodMonsUpperStrength != lastVulvaBetaV3HoodMonsUpperStrength)
+                    state.betaV3HoodMonsUpperStrength != lastVulvaBetaV3HoodMonsUpperStrength) ||
+                state.betaV3IntroitusRimProminence != lastVulvaBetaV3IntroitusRimProminence
             if (vulvaNeedsUpdate) {
                 updateBlossomVulvaPatch(state)
                 updateClitoralGlans(state, includeLithotomy = true)
@@ -763,12 +780,28 @@ class VulvaAnatomySceneMesh {
             val toesChanged = state.leftToeWiggle != lastAppliedLeftToeWiggle ||
                 state.rightToeWiggle != lastAppliedRightToeWiggle
             val hipThighSwingChanged = state.betaRealismHipThighSwing != lastAppliedBetaRealismHipThighSwing
-            val legsChanged = legsSpreadChanged || kneeShiftChanged || toesChanged || hipThighSwingChanged
+            val tremorChanged = state.leftLegTremor != lastAppliedLeftLegTremor ||
+                state.rightLegTremor != lastAppliedRightLegTremor
+            val footPlantedChanged = state.leftFootPlanted != lastAppliedLeftFootPlanted ||
+                state.rightFootPlanted != lastAppliedRightFootPlanted
+            val legsChanged = legsSpreadChanged || kneeShiftChanged || toesChanged ||
+                hipThighSwingChanged || tremorChanged || footPlantedChanged
             val glutesChanged = state.leftGluteX != lastAppliedLeftGluteX ||
                 state.leftGluteY != lastAppliedLeftGluteY ||
                 state.rightGluteX != lastAppliedRightGluteX ||
                 state.rightGluteY != lastAppliedRightGluteY
             if (legsChanged || glutesChanged) {
+                val legsAtExactRest = abs(state.leftLegSpread) < 1e-4f &&
+                    abs(state.rightLegSpread) < 1e-4f &&
+                    abs(state.leftKneeShift) < 1e-4f &&
+                    abs(state.rightKneeShift) < 1e-4f &&
+                    abs(state.leftLegTremor) < 1e-4f &&
+                    abs(state.rightLegTremor) < 1e-4f &&
+                    !state.leftFootPlanted &&
+                    !state.rightFootPlanted
+                if (hipThighSwingChanged || legsAtExactRest) {
+                    blossomLegHeelTracker.reset()
+                }
                 BlossomSdfBodyBuilder.applyLegSpread(
                     bodyMesh = blossomBodyMesh,
                     toesMesh = blossomToesMesh,
@@ -776,13 +809,19 @@ class VulvaAnatomySceneMesh {
                     cache = blossomLegSkinCache,
                     leftLegSpread = state.leftLegSpread,
                     rightLegSpread = state.rightLegSpread,
-                    includeToesAndNails = legsSpreadChanged || toesChanged,
+                    // v33.0: Always sync toes & toenails whenever ANY leg/knee/IK/tremor/plant input changes
+                    includeToesAndNails = legsChanged,
                     commitBody = false,
                     leftKneeShift = state.leftKneeShift,
                     rightKneeShift = state.rightKneeShift,
                     leftToeWiggle = state.leftToeWiggle,
                     rightToeWiggle = state.rightToeWiggle,
-                    useHipAnchoredThighSwing = state.betaRealismHipThighSwing
+                    useHipAnchoredThighSwing = state.betaRealismHipThighSwing,
+                    leftLegTremor = state.leftLegTremor,
+                    rightLegTremor = state.rightLegTremor,
+                    leftFootPlanted = state.leftFootPlanted,
+                    rightFootPlanted = state.rightFootPlanted,
+                    heelTracker = blossomLegHeelTracker
                 )
                 BlossomSdfBodyBuilder.applyGluteElasticity(
                     bodyMesh = blossomBodyMesh,
@@ -799,6 +838,10 @@ class VulvaAnatomySceneMesh {
                 lastAppliedLeftToeWiggle = state.leftToeWiggle
                 lastAppliedRightToeWiggle = state.rightToeWiggle
                 lastAppliedBetaRealismHipThighSwing = state.betaRealismHipThighSwing
+                lastAppliedLeftLegTremor = state.leftLegTremor
+                lastAppliedRightLegTremor = state.rightLegTremor
+                lastAppliedLeftFootPlanted = state.leftFootPlanted
+                lastAppliedRightFootPlanted = state.rightFootPlanted
                 lastAppliedLeftGluteX = state.leftGluteX
                 lastAppliedLeftGluteY = state.leftGluteY
                 lastAppliedRightGluteX = state.rightGluteX
@@ -929,7 +972,8 @@ class VulvaAnatomySceneMesh {
                     state.betaV3HoodMonsStrength != lastVulvaBetaV3HoodMonsStrength) ||
                 state.betaV3HoodMonsUpperBlend != lastVulvaBetaV3HoodMonsUpperBlend ||
                 (state.betaV3HoodMonsUpperBlend &&
-                    state.betaV3HoodMonsUpperStrength != lastVulvaBetaV3HoodMonsUpperStrength)
+                    state.betaV3HoodMonsUpperStrength != lastVulvaBetaV3HoodMonsUpperStrength) ||
+                state.betaV3IntroitusRimProminence != lastVulvaBetaV3IntroitusRimProminence
             if (pelvisVulvaNeedsUpdate) {
                 updateContouredPelvis(state)
                 updateClitoralGlans(state, includeLithotomy = false)
@@ -979,6 +1023,7 @@ class VulvaAnatomySceneMesh {
         lastVulvaBetaV3HoodMonsStrength = state.betaV3HoodMonsStrength
         lastVulvaBetaV3HoodMonsUpperBlend = state.betaV3HoodMonsUpperBlend
         lastVulvaBetaV3HoodMonsUpperStrength = state.betaV3HoodMonsUpperStrength
+        lastVulvaBetaV3IntroitusRimProminence = state.betaV3IntroitusRimProminence
     }
 
     private fun updateBlossomBreasts(s: VulvaDeformationState) {
@@ -1306,8 +1351,62 @@ class VulvaAnatomySceneMesh {
         // Compensate vaginal canal depth by savedBasinDepthForIntroitus so reducing vestibular concavity
         // never shallows the vaginal orifice itself!
         val introDepth = ((0.135f + 0.24f * cavityOpen) + savedBasinDepthForIntroitus) * introEnvelope
-        val coronaRing = exp(-((sqrt(iR2) - 1.04f) / 0.19f).let { it * it }) *
+        val iR = sqrt(iR2)
+        val coronaRing = exp(-((iR - 1.04f) / 0.19f).let { it * it }) *
             (0.018f + 0.010f * sin(iAngle * 6f + 0.3f)) * insideVestibule * (0.40f + 0.60f * cavityOpen)
+        // v33.0 Independent Vulva Beta Slider ("Vaginal opening rim prominence"):
+        // Builds directly on coronaRing along the lower & lower-lateral introitus margin with two
+        // gently asymmetric, softly tapered fleshy sections (+ faint inferior bridge), strictly below
+        // the urethral meatus (y < -0.08..-0.17) and outside the recessed canal (iR > 0.76..0.98) so
+        // 0% is bit-identical and interior canal depth/rugae stay untouched.
+        val rimPromS = s.betaV3IntroitusRimProminence.coerceIn(0f, 1f)
+        val introitusRimProminenceBump: Float
+        val introitusRimCrestMask: Float
+        val introitusRimBaseAo: Float
+        if (rimPromS > 1e-5f) {
+            val belowMeatusGate = smoothStep(-0.08f, -0.17f, y)
+            val outsideCanalGate = smoothStep(0.76f, 0.98f, iR)
+            val poseScale = 0.56f + 0.44f * cavityOpen
+            val rimGate = belowMeatusGate * outsideCanalGate * insideVestibule * poseScale
+            if (rimGate > 1e-4f) {
+                fun wrapAngDiff(a: Float, b: Float): Float {
+                    var d = a - b
+                    while (d > PI.toFloat()) d -= (2.0 * PI).toFloat()
+                    while (d < -PI.toFloat()) d += (2.0 * PI).toFloat()
+                    return d
+                }
+                // Lower-left fleshy caruncle lobe (~7:30 o'clock): fuller & slightly longer
+                val dAngL = wrapAngDiff(iAngle, -2.04f) / 0.42f
+                val dRadL = (iR - 1.09f) / 0.22f
+                val lobeL = exp(-(dAngL * dAngL + dRadL * dRadL)) * (0.025f * (1f + 0.14f * sin(iAngle * 5f + 1.4f)))
+
+                // Lower-right fleshy caruncle lobe (~4:30 o'clock): subtly narrower & lower for natural asymmetry
+                val dAngR = wrapAngDiff(iAngle, -1.06f) / 0.36f
+                val dRadR = (iR - 1.07f) / 0.21f
+                val lobeR = exp(-(dAngR * dAngR + dRadR * dRadR)) * (0.0175f * (1f + 0.12f * sin(iAngle * 5f - 0.6f)))
+
+                // Soft subordinate inferior tissue bridge (~6 o'clock) so lobes blend organically without forming a uniform ring
+                val dAngInf = wrapAngDiff(iAngle, -1.56f) / 0.30f
+                val dRadInf = (iR - 1.11f) / 0.20f
+                val lobeInf = exp(-(dAngInf * dAngInf + dRadInf * dRadInf)) * 0.010f
+
+                val combinedLobes = lobeL + lobeR + lobeInf
+                introitusRimProminenceBump = combinedLobes * rimGate * rimPromS
+                introitusRimCrestMask = (combinedLobes / 0.024f).coerceIn(0f, 1f) * rimGate * rimPromS
+                // Faint soft trough shading right outside the fleshy lobes' outer base
+                val outerTroughRad = exp(-((iR - 1.36f) / 0.16f).let { it * it })
+                val angFootprint = (exp(-dAngL * dAngL * 0.85f) + exp(-dAngR * dAngR * 0.85f) + 0.45f * exp(-dAngInf * dAngInf)).coerceIn(0f, 1f)
+                introitusRimBaseAo = 0.055f * outerTroughRad * angFootprint * rimGate * rimPromS
+            } else {
+                introitusRimProminenceBump = 0f
+                introitusRimCrestMask = 0f
+                introitusRimBaseAo = 0f
+            }
+        } else {
+            introitusRimProminenceBump = 0f
+            introitusRimCrestMask = 0f
+            introitusRimBaseAo = 0f
+        }
         val rugae = if (iR2 < 0.88f) {
             0.008f * sin(y * 62f + x * 12f) * (1f - iR2) * (0.35f + 0.65f * cavityOpen)
         } else 0f
@@ -1328,7 +1427,8 @@ class VulvaAnatomySceneMesh {
                 0.0031f * cos(y * 61f - asymX * 38f + 0.7f)
             organicPlicae * rimBand * foldS
         } else 0f
-        dz += coronaRing - introDepth + rugae + (softVestContour + vestRegionalNuance + vestBorderFolds) * (1f - introEnvelope)
+        dz += coronaRing + introitusRimProminenceBump - introDepth + rugae +
+            (softVestContour + vestRegionalNuance + vestBorderFolds) * (1f - introEnvelope)
 
         // Fossa Navicularis & Smooth Posterior Fourchette right below vaginal orifice
         val fossaDx = x / 0.065f
@@ -1431,7 +1531,8 @@ class VulvaAnatomySceneMesh {
         val wetness = (effectiveVestibuleColorMask * (0.34f + 0.28f * cavityOpen) +
             exp(-uR2 * 1.8f) * 0.28f * effectiveVestibuleColorMask +
             exp(-iR2 * 1.05f) * 0.34f +
-            exp(-aR2 * 4.0f) * 0.10f).coerceIn(0f, 0.86f)
+            exp(-aR2 * 4.0f) * 0.10f +
+            introitusRimCrestMask * 0.06f).coerceIn(0f, 0.86f)
 
         val closedCleftDarkening = (1f - cavityOpen * 0.72f) * effectiveVestibuleColorMask * 0.42f
         val introAo = exp(-iR2 * 1.55f) * 0.84f
@@ -1469,7 +1570,7 @@ class VulvaAnatomySceneMesh {
         val rapheFlankAo = if (rapheSpan > 0.001f) {
             0.036f * exp(-(((abs(x) - 0.024f) / 0.013f).let { it * it })) * rapheSpan
         } else 0f
-        val ao = (1f - closedCleftDarkening - introAo - urethralAo - anusCenterAo - groinAo - sulcusAo - rapheFlankAo).coerceIn(0.08f, 1f)
+        val ao = (1f - closedCleftDarkening - introAo - urethralAo - anusCenterAo - groinAo - sulcusAo - rapheFlankAo - introitusRimBaseAo).coerceIn(0.08f, 1f)
 
         // Slightly richer warm cutaneous pigmentation across labia majora cushions fading gently outward into thigh skin
         val pigmentFullnessCurve = if (s.betaSoftLabiaInteriorEdge) {
