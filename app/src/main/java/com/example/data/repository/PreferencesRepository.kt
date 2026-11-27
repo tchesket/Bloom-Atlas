@@ -3,6 +3,7 @@ package com.example.data.repository
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
@@ -19,7 +20,8 @@ data class UserPreferencesState(
     val bookmarkedArticleIds: Set<String> = emptySet(),
     val bookmarkedStudyNumbers: Set<Int> = emptySet(),
     val masteredMythIds: Set<String> = emptySet(),
-    val audienceMode: AudienceMode = AudienceMode.EVERYONE
+    val audienceMode: AudienceMode = AudienceMode.EVERYONE,
+    val showExtraBetaOptions: Boolean = false
 )
 
 class PreferencesRepository(private val context: Context) {
@@ -29,6 +31,7 @@ class PreferencesRepository(private val context: Context) {
         val BOOKMARKED_STUDIES = stringSetPreferencesKey("bookmarked_studies")
         val MASTERED_MYTHS = stringSetPreferencesKey("mastered_myths")
         val AUDIENCE_MODE = stringPreferencesKey("audience_mode")
+        val SHOW_EXTRA_BETA_OPTIONS = booleanPreferencesKey("show_extra_beta_options")
     }
 
     val preferencesFlow: Flow<UserPreferencesState> = context.bloomDataStore.data.map { prefs ->
@@ -40,11 +43,13 @@ class PreferencesRepository(private val context: Context) {
         val modeName = prefs[Keys.AUDIENCE_MODE] ?: AudienceMode.EVERYONE.name
         val audienceMode = AudienceMode.entries.firstOrNull { it.name == modeName }
             ?: AudienceMode.EVERYONE
+        val showExtraBetaOptions = prefs[Keys.SHOW_EXTRA_BETA_OPTIONS] ?: false
         UserPreferencesState(
             bookmarkedArticleIds = articleIds,
             bookmarkedStudyNumbers = studyNumbers,
             masteredMythIds = mythIds,
-            audienceMode = audienceMode
+            audienceMode = audienceMode,
+            showExtraBetaOptions = showExtraBetaOptions
         )
     }
 
@@ -75,6 +80,12 @@ class PreferencesRepository(private val context: Context) {
     suspend fun setAudienceMode(mode: AudienceMode) {
         context.bloomDataStore.edit { prefs ->
             prefs[Keys.AUDIENCE_MODE] = mode.name
+        }
+    }
+
+    suspend fun setShowExtraBetaOptions(show: Boolean) {
+        context.bloomDataStore.edit { prefs ->
+            prefs[Keys.SHOW_EXTRA_BETA_OPTIONS] = show
         }
     }
 }

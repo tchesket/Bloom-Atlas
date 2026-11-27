@@ -101,7 +101,8 @@ data class AtlasUiState(
     // Persisted preferences
     val bookmarkedArticleIds: Set<String> = emptySet(),
     val bookmarkedStudyNumbers: Set<Int> = emptySet(),
-    val masteredMythIds: Set<String> = emptySet()
+    val masteredMythIds: Set<String> = emptySet(),
+    val showExtraBetaOptions: Boolean = false
 ) {
     val currentViewParts: List<AnatomyPart>
         get() = AnatomyContentData.anatomyParts.filter { it.viewType == selectedView }
@@ -154,7 +155,8 @@ class AtlasViewModel(application: Application) : AndroidViewModel(application) {
                         bookmarkedArticleIds = prefs.bookmarkedArticleIds,
                         bookmarkedStudyNumbers = prefs.bookmarkedStudyNumbers,
                         masteredMythIds = prefs.masteredMythIds,
-                        audienceMode = prefs.audienceMode
+                        audienceMode = prefs.audienceMode,
+                        showExtraBetaOptions = prefs.showExtraBetaOptions
                     )
                 }
             }
@@ -452,6 +454,13 @@ class AtlasViewModel(application: Application) : AndroidViewModel(application) {
     fun markMythMastered(mythId: String) {
         viewModelScope.launch {
             preferencesRepository.markMythMastered(mythId)
+        }
+    }
+
+    fun setShowExtraBetaOptions(show: Boolean) {
+        _uiState.update { it.copy(showExtraBetaOptions = show) }
+        viewModelScope.launch {
+            preferencesRepository.setShowExtraBetaOptions(show)
         }
     }
 }

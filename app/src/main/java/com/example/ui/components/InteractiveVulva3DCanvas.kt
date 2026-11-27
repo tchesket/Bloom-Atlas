@@ -24,9 +24,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -526,6 +528,51 @@ internal fun vulvaElasticStep(current: Float, delta: Float, maxLimit: Float, res
     return (current + delta * resist).coerceIn(0f, maxLimit)
 }
 
+internal data class PeakVibrationChunk(
+    val timings: LongArray,
+    val amplitudes: IntArray,
+    val totalMs: Long
+)
+
+/**
+ * Generates an irregular chunk of deeper, heavier climax vibration pulses (~1/3 the original
+ * fast-pulse cadence, ~3x pulse period, pushed to peak motor amplitude 248..255 so hardware
+ * vibration actuators reach full mechanical spin-up on every beat).
+ */
+internal fun buildPeakVibrationChunk(
+    rng: kotlin.random.Random,
+    remainingMs: Long
+): PeakVibrationChunk {
+    val pulseCount = 3 + rng.nextInt(3) // 3..5 pulses per chunk (~0.7–1.2s)
+    val timingsList = ArrayList<Long>(pulseCount * 2)
+    val ampsList = ArrayList<Int>(pulseCount * 2)
+    var chunkMs = 0L
+    for (p in 0 until pulseCount) {
+        val onMs = (84 + rng.nextInt(76)).toLong() // 84..159ms (~3x longer than 26..53ms)
+        val pauseRoll = rng.nextFloat()
+        val offMs = when {
+            pauseRoll < 0.22f -> (44 + rng.nextInt(40)).toLong()   // 44..83ms
+            pauseRoll < 0.38f -> (170 + rng.nextInt(95)).toLong()  // 170..264ms
+            else -> (68 + rng.nextInt(76)).toLong()                // 68..143ms
+        }
+        if (chunkMs + onMs > remainingMs) break
+        val amp = 248 + rng.nextInt(8) // 248..255 hardware maximum amplitude
+        timingsList.add(onMs)
+        ampsList.add(amp)
+        chunkMs += onMs
+        if (chunkMs + offMs <= remainingMs) {
+            timingsList.add(offMs)
+            ampsList.add(0)
+            chunkMs += offMs
+        }
+    }
+    return PeakVibrationChunk(
+        timings = timingsList.toLongArray(),
+        amplitudes = ampsList.toIntArray(),
+        totalMs = chunkMs
+    )
+}
+
 private enum class CameraAnglePreset(
     val label: String,
     val yawDeg: Float,
@@ -576,6 +623,7 @@ fun InteractiveVulva3DCanvas(
     toneIndex: Int,
     onSelectPart: (String) -> Unit,
     modifier: Modifier = Modifier,
+    showExtraBetaOptions: Boolean = false,
     sessionState: BlossomViewportSessionState = remember { BlossomViewportSessionState() }
 ) {
     val isPreviewOrTest = LocalInspectionMode.current ||
@@ -1357,45 +1405,24 @@ fun InteractiveVulva3DCanvas(
         val extremLRng = kotlin.random.Random(startMs xor 0x61C2E3F4L)
         val extremRRng = kotlin.random.Random(startMs xor 0x94D5A6B7L)
 
-        // 0. High-intensity, high-frequency, slightly irregular pulsing phone vibration for the full 16s
+        // 0. Heavy, lower-frequency (~1/3 cadence), max-amplitude irregular pulsing phone vibration for the full 16s
         val pulseVibrationJob = launch {
             try {
                 while (System.currentTimeMillis() < endMs) {
                     val remaining = (endMs - System.currentTimeMillis()).coerceAtLeast(0L)
-                    if (remaining <= 30L) break
+                    if (remaining <= 85L) break
                     if (!latestHapticsEnabled) {
                         hapticsEngine.cancel()
                         delay(min(100L, remaining))
                         continue
                     }
-                    val pulseCount = 6 + vibRng.nextInt(5)
-                    val timingsList = ArrayList<Long>(pulseCount * 2)
-                    val ampsList = ArrayList<Int>(pulseCount * 2)
-                    var chunkMs = 0L
-                    for (p in 0 until pulseCount) {
-                        val onMs = (26 + vibRng.nextInt(28)).toLong()
-                        val offMs = when {
-                            vibRng.nextFloat() < 0.22f -> (14 + vibRng.nextInt(14)).toLong()
-                            vibRng.nextFloat() < 0.16f -> (58 + vibRng.nextInt(32)).toLong()
-                            else -> (22 + vibRng.nextInt(26)).toLong()
-                        }
-                        if (chunkMs + onMs > remaining) break
-                        val amp = 212 + vibRng.nextInt(44)
-                        timingsList.add(onMs)
-                        ampsList.add(amp)
-                        chunkMs += onMs
-                        if (chunkMs + offMs <= remaining) {
-                            timingsList.add(offMs)
-                            ampsList.add(0)
-                            chunkMs += offMs
-                        }
-                    }
-                    if (timingsList.isEmpty()) break
+                    val chunk = buildPeakVibrationChunk(vibRng, remaining)
+                    if (chunk.timings.isEmpty()) break
                     hapticsEngine.playIrregularPeakWaveform(
-                        timings = timingsList.toLongArray(),
-                        amplitudes = ampsList.toIntArray()
+                        timings = chunk.timings,
+                        amplitudes = chunk.amplitudes
                     )
-                    delay((chunkMs - 10L).coerceAtLeast(25L))
+                    delay((chunk.totalMs - 10L).coerceAtLeast(40L))
                 }
             } finally {
                 hapticsEngine.cancel()
@@ -1784,10 +1811,14 @@ fun InteractiveVulva3DCanvas(
     // Natural involuntary blinking: calm randomized intervals at rest (~3.4–6.2s), smoothly becoming
     // more frequent during breast/vulva touch (~1.8–3.2s) and especially clitoral engagement (~1.1–2.1s).
     // Supports Tab 2 "Occasional double blinking" and Tab 3 "Asymmetric blinking" (16–38ms L/R micro-offset).
-    LaunchedEffect(showExperimentalLegs) {
+    LaunchedEffect(showExperimentalLegs, peakEpisodeActive) {
         if (!showExperimentalLegs) {
             eyeBlink.snapTo(0f)
             eyeBlinkR.snapTo(0f)
+            return@LaunchedEffect
+        }
+        // Cancel any in-flight idle blink immediately when the 16-second peak eye choreography takes over
+        if (peakEpisodeActive) {
             return@LaunchedEffect
         }
         val rng = kotlin.random.Random(System.currentTimeMillis())
@@ -3272,7 +3303,14 @@ fun InteractiveVulva3DCanvas(
                     betaLife2LivingWarmth,
                     betaLife2ShowHeartRate
                 ).count { it }
-                val totalActiveBetaCount = activeVulvaBetaCount + activeLifelikeBetaCount + activeLifelike2BetaCount
+                val displayedVulvaBetaCount = if (showExtraBetaOptions) activeVulvaBetaCount else 0
+                val displayedLifelikeBetaCount = if (showExtraBetaOptions) activeLifelikeBetaCount else 0
+                val displayedLifelike2BetaCount = if (showExtraBetaOptions) {
+                    activeLifelike2BetaCount
+                } else {
+                    if (betaLife2ShowHeartRate) 1 else 0
+                }
+                val totalActiveBetaCount = displayedVulvaBetaCount + displayedLifelikeBetaCount + displayedLifelike2BetaCount
 
                 // Floating Hamburger Button anchored top-right over the 3D viewport (48dp touch target)
                 Box(
@@ -3407,7 +3445,7 @@ fun InteractiveVulva3DCanvas(
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
-                                    if (totalActiveBetaCount > 0) {
+                                    if (showExtraBetaOptions && totalActiveBetaCount > 0) {
                                         Box(
                                             modifier = Modifier
                                                 .heightIn(min = 48.dp)
@@ -3448,21 +3486,21 @@ fun InteractiveVulva3DCanvas(
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     BetaMenuTabPill(
-                                        label = if (activeVulvaBetaCount > 0) "Vulva $activeVulvaBetaCount" else "Vulva",
+                                        label = if (displayedVulvaBetaCount > 0) "Vulva $displayedVulvaBetaCount" else "Vulva",
                                         selected = betaMenuTab == 0,
                                         tag = "beta_tab_vulva",
                                         onClick = { betaMenuTab = 0 },
                                         modifier = Modifier.weight(1f)
                                     )
                                     BetaMenuTabPill(
-                                        label = if (activeLifelikeBetaCount > 0) "Life $activeLifelikeBetaCount" else "Life",
+                                        label = if (displayedLifelikeBetaCount > 0) "Life $displayedLifelikeBetaCount" else "Life",
                                         selected = betaMenuTab == 1,
                                         tag = "beta_tab_lifelike",
                                         onClick = { betaMenuTab = 1 },
                                         modifier = Modifier.weight(1f)
                                     )
                                     BetaMenuTabPill(
-                                        label = if (activeLifelike2BetaCount > 0) "Life+ $activeLifelike2BetaCount" else "Life+",
+                                        label = if (displayedLifelike2BetaCount > 0) "Life+ $displayedLifelike2BetaCount" else "Life+",
                                         selected = betaMenuTab == 2,
                                         tag = "beta_tab_lifelike_plus",
                                         onClick = { betaMenuTab = 2 },
@@ -3481,6 +3519,9 @@ fun InteractiveVulva3DCanvas(
                                     .verticalScroll(panelScroll)
                             ) {
                                 if (betaMenuTab == 0) {
+                                    if (!showExtraBetaOptions) {
+                                        Spacer(modifier = Modifier.height(64.dp))
+                                    } else {
                                     Text(
                                         text = "v21.0 tuned defaults (toggles preserve last slider value)",
                                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, lineHeight = 11.sp),
@@ -3750,7 +3791,11 @@ fun InteractiveVulva3DCanvas(
                                             )
                                         }
                                     }
+                                    }
                                 } else if (betaMenuTab == 1) {
+                                    if (!showExtraBetaOptions) {
+                                        Spacer(modifier = Modifier.height(64.dp))
+                                    } else {
                                     Text(
                                         text = "Subtle, irregular micro-behaviors (ON by default)",
                                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, lineHeight = 11.sp),
@@ -3843,7 +3888,9 @@ fun InteractiveVulva3DCanvas(
                                             if (hapticsEnabled) hapticsEngine.triggerTap(SensitivityTier.MODERATE)
                                         }
                                     )
+                                    }
                                 } else {
+                                    if (showExtraBetaOptions) {
                                     Text(
                                         text = "Next-gen realism (all ON by default except Heart Rate HUD)",
                                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, lineHeight = 11.sp),
@@ -3955,6 +4002,7 @@ fun InteractiveVulva3DCanvas(
                                         modifier = Modifier.padding(horizontal = 12.dp),
                                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
                                     )
+                                    }
                                     VulvaBetaToggleRow(
                                         title = "Show heart rate (BPM)",
                                         subtitle = "Displays Blossom's live stimulation-linked heart rate in the top-left corner",

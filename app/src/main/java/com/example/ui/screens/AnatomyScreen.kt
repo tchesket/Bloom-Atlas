@@ -389,6 +389,7 @@ fun AnatomyScreen(
                             resetTrigger = uiState.vulvaResetTrigger,
                             toneIndex = uiState.vulvaToneIndex,
                             onSelectPart = onSelectPart,
+                            showExtraBetaOptions = uiState.showExtraBetaOptions,
                             sessionState = blossomViewportState
                         )
                     } else {

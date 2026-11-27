@@ -18,9 +18,11 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Spa
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +53,7 @@ import com.example.ui.screens.LearnScreen
 import com.example.ui.screens.MythQuizScreen
 import com.example.ui.screens.PhotoLightboxScreen
 import com.example.ui.screens.ResourcesScreen
+import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SpectrumLabScreen
 import com.example.ui.screens.StudyDetailScreen
 import com.example.ui.theme.BloomAtlasTheme
@@ -288,6 +291,12 @@ private fun TabContentHost(
                 onOpenArticle = viewModel::openArticle,
                 onOpenStudyByNumber = viewModel::openStudyByNumber
             )
+            AtlasTab.SETTINGS -> SettingsScreen(
+                uiState = uiState,
+                onSetShowExtraBetaOptions = viewModel::setShowExtraBetaOptions,
+                onToggleHaptics = viewModel::toggleHaptics,
+                onAudienceModeChange = viewModel::setAudienceMode
+            )
         }
     }
 }
@@ -297,4 +306,5 @@ private fun tabIcon(tab: AtlasTab, selected: Boolean): ImageVector = when (tab) 
     AtlasTab.DIVERSITY -> if (selected) Icons.Filled.GridView else Icons.Outlined.GridView
     AtlasTab.LEARN -> if (selected) Icons.AutoMirrored.Filled.MenuBook else Icons.AutoMirrored.Outlined.MenuBook
     AtlasTab.RESOURCES -> if (selected) Icons.Filled.Explore else Icons.Outlined.Explore
+    AtlasTab.SETTINGS -> if (selected) Icons.Filled.Settings else Icons.Outlined.Settings
 }

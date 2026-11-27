@@ -1,5 +1,19 @@
 # Bloom Atlas — Version History
 
+## Version 26.0 (`versionCode = 26`)
+**Date:** 2026-11-26
+
+- **New Settings Page & "Show Extra Beta Options" Preference (`SettingsScreen.kt`, `PreferencesRepository.kt`, `AtlasViewModel.kt`, `MainActivity.kt`, `InteractiveVulva3DCanvas.kt`)**
+  - Added a dedicated **Settings** tab (`AtlasTab.SETTINGS`) with a DataStore-persisted **"Show Extra Beta Options"** checkbox (default OFF), plus Tactile Haptics, Reading Lens, and version info controls.
+  - Preserved the 3D viewport's hamburger menu and its three tabs (`Vulva`, `Life`, `Life+`), keeping all active realism defaults enabled under the hood while hiding extra Beta Lab toggles/sliders (and `"All off"`) when unchecked, and always keeping **"Show heart rate (BPM)"** visible in the `Life+` tab.
+- **Deeper, Lower-Frequency Climax Vibration Pattern (`InteractiveVulva3DCanvas.kt`)**
+  - Refactored the 16-second peak episode vibration generator into `buildPeakVibrationChunk(...)`, slowing pulse frequency to ~1/3 the previous rapid cadence (~3× period: `84–159ms` ON pulses and `44–264ms` irregular gaps) and driving every pulse at peak hardware amplitude (`248–255/255`) so phone vibration motors reach full mechanical spin-up on each beat.
+- **Fixed Blue Irises Visible When Eyes Should Be Closed (`BlossomUpperBodyBuilder.kt`, `InteractiveVulva3DCanvas.kt`)**
+  - Fixed a confirmed eyelid-closure geometry bug in `buildHeadRigCache()`: previously, recessed inner-aperture head rows (`ly < upperLidY`) compressed downward without wrapping forward over the eyeball sphere (`targetLz` remained recessed `-0.122` behind the eyeball), causing the bridging strip from the upper eyelid to slice through the eyeball and expose the lower half of the blue irises during full closure (`eyeBlink = 1.0f`).
+  - Updated closed-eyelid targets to wrap all upper-lid and inner-aperture rows monotonically onto a smooth `eyeRadius + 0.024f` cover shell across the full aperture width, and guarded the idle blink `LaunchedEffect` on `peakEpisodeActive` so in-flight idle blinks can never reopen her eyes mid-peak.
+
+---
+
 ## Version 25.0 (`versionCode = 25`)
 **Date:** 2026-11-26
 

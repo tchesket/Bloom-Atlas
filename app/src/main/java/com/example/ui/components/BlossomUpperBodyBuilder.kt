@@ -2021,9 +2021,9 @@ internal object BlossomUpperBodyBuilder {
         val headRest = copyPosNorm(headMesh)
 
         // Precompute sparse upper-eyelid blink targets in world space wrapping cleanly over both eyeballs
-        // with strictly monotonic vertical row order (zero fold-over, zero eyeball clipping!).
+        // with strictly monotonic vertical row order (zero fold-over, zero eyeball/iris bleed-through!).
         val eyeRadius = 0.136f
-        val eyeWrapR = eyeRadius + 0.016f
+        val eyeWrapR = eyeRadius + 0.024f
         val eyeCenterY = 0.038f
         val eyeCenterZ = 0.528f
         val blinkIdxBuf = IntArray(headMesh.vertexCount)
@@ -2054,33 +2054,34 @@ internal object BlossomUpperBodyBuilder {
             val side = if (lx >= 0f) 1f else -1f
             val ax = abs(lx)
             val eyeU = (ax - 0.256f) / 0.126f
-            if (abs(eyeU) >= 1.04f) continue
+            if (abs(eyeU) >= 1.08f) continue
 
             val clampedU = eyeU.coerceIn(-1f, 1f)
             val eyeSpan = (1f - clampedU * clampedU).coerceAtLeast(0f)
             val upperLidY = 0.036f + (0.056f + 0.008f * clampedU) * sqrt(eyeSpan)
             val lowerLidY = 0.036f - (0.036f - 0.006f * clampedU) * sqrt(eyeSpan)
-            val lidTop = upperLidY + 0.066f
-            val lidBot = lowerLidY + 0.002f
+            val lidTop = upperLidY + 0.068f
+            val lidBot = lowerLidY - 0.012f
             if (ly <= lidBot || ly >= lidTop) continue
 
-            val horizW = smoothStep(1.04f, 0.68f, abs(eyeU))
+            val horizW = smoothStep(1.08f, 0.78f, abs(eyeU))
             if (horizW <= 0.002f) continue
 
+            val seamY = lowerLidY + 0.002f
             val targetLy: Float
             var targetLz = lz
             var useSphereNormalW = 0f
 
             if (ly >= upperLidY) {
                 val tAbove = ((ly - upperLidY) / (lidTop - upperLidY).coerceAtLeast(1e-4f)).coerceIn(0f, 1f)
-                val seamY = lowerLidY + 0.004f
-                val closedLy = seamY + tAbove * (lidTop - seamY)
+                val tClosed = tAbove * (0.84f + 0.16f * tAbove)
+                val closedLy = seamY + tClosed * (lidTop - seamY)
                 targetLy = ly * (1f - horizW) + closedLy * horizW
 
                 val dxEye = lx - side * 0.256f
                 val dyEye = targetLy - eyeCenterY
                 val rad2 = dxEye * dxEye + dyEye * dyEye
-                val wrapW = horizW * (1f - smoothStep(0.68f, 1.0f, tAbove))
+                val wrapW = horizW * (1f - smoothStep(0.74f, 1.0f, tAbove))
                 if (rad2 < eyeWrapR * eyeWrapR && wrapW > 0.001f) {
                     val sphereZ = eyeCenterZ + sqrt(eyeWrapR * eyeWrapR - rad2)
                     val blendedZ = lz * (1f - wrapW) + sphereZ * wrapW
@@ -2088,10 +2089,24 @@ internal object BlossomUpperBodyBuilder {
                     useSphereNormalW = wrapW
                 }
             } else {
-                // Recessed inner-aperture vertices compress smoothly behind the lower-lid closure seam
+                // Recessed inner-aperture & lower-lid transition vertices compress monotonically to the
+                // closure seam AND wrap smoothly forward over the eyeball sphere so the bridging strip
+                // never slices behind the cornea/iris when the eyelid is shut.
                 val tBelow = ((ly - lidBot) / (upperLidY - lidBot).coerceAtLeast(1e-4f)).coerceIn(0f, 1f)
-                val closedLy = lidBot + tBelow * 0.002f
+                val closedLy = lidBot + tBelow * (seamY - lidBot)
                 targetLy = ly * (1f - horizW) + closedLy * horizW
+
+                val dxEye = lx - side * 0.256f
+                val dyEye = targetLy - eyeCenterY
+                val rad2 = dxEye * dxEye + dyEye * dyEye
+                val innerWrapR = eyeWrapR - 0.002f * (1f - tBelow)
+                val wrapW = horizW * smoothStep(0.0f, 0.10f, tBelow)
+                if (rad2 < innerWrapR * innerWrapR && wrapW > 0.001f) {
+                    val sphereZ = eyeCenterZ + sqrt(innerWrapR * innerWrapR - rad2)
+                    val blendedZ = lz * (1f - wrapW) + sphereZ * wrapW
+                    targetLz = max(lz, blendedZ)
+                    useSphereNormalW = wrapW
+                }
             }
 
             val closedW = headLocalToWorld(lx, targetLy, targetLz)
@@ -2103,7 +2118,7 @@ internal object BlossomUpperBodyBuilder {
                 val dyEye = targetLy - eyeCenterY
                 val dzEye = (targetLz - eyeCenterZ).coerceAtLeast(0.04f)
                 val sphereWorldN = headNormalToWorld(dxEye, dyEye, dzEye)
-                val blendN = useSphereNormalW * 0.78f
+                val blendN = useSphereNormalW * 0.82f
                 cnx = cnx * (1f - blendN) + sphereWorldN[0] * blendN
                 cny = cny * (1f - blendN) + sphereWorldN[1] * blendN
                 cnz = cnz * (1f - blendN) + sphereWorldN[2] * blendN

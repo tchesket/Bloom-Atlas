@@ -6,7 +6,8 @@ enum class AtlasTab(val label: String) {
     ANATOMY("Anatomy"),
     DIVERSITY("Diversity"),
     LEARN("Learn"),
-    RESOURCES("Resources")
+    RESOURCES("Resources"),
+    SETTINGS("Settings")
 }
 
 enum class AnatomyViewType(

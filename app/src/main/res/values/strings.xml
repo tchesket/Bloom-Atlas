@@ -7,6 +7,7 @@
     <string name="nav_diversity">Diversity</string>
     <string name="nav_learn">Learn</string>
     <string name="nav_resources">Resources</string>
+    <string name="nav_settings">Settings</string>
 
     <!-- Content Descriptions -->
     <string name="cd_hero_banner">Editorial botanical illustration for Bloom Atlas</string>
@@ -55,4 +56,17 @@
     <string name="resources_no_bookmarks">Tap the bookmark icon on any guide or diversity study to keep it handy here.</string>
     <string name="resources_directory_heading">Trusted Web Resources</string>
     <string name="resources_link_error">Unable to open link on this device.</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_subtitle">Manage 3D Studio controls, haptic feedback, and reading preferences.</string>
+    <string name="settings_studio_heading">3D Studio &amp; Beta Lab</string>
+    <string name="settings_show_extra_beta_title">Show Extra Beta Options</string>
+    <string name="settings_show_extra_beta_desc">Reveals the extra Vulva, Life, and Life+ toggles and sliders in the 3D viewport menu. All active realism features remain enabled either way, and the Heart Rate toggle stays available in the Life+ tab.</string>
+    <string name="settings_preferences_heading">Experience &amp; Reading</string>
+    <string name="settings_haptics_title">Tactile Haptics</string>
+    <string name="settings_haptics_desc">Feel region-specific touch sensations and rhythm pulses while interacting with the 3D model.</string>
+    <string name="settings_audience_title">Reading Lens</string>
+    <string name="settings_audience_desc">Tailors article framing in the Learn library.</string>
+    <string name="settings_about_heading">About</string>
 </resources>

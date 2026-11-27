@@ -4305,6 +4305,190 @@ class BlossomGeometryUnitTest {
         assertEquals("Restoring betaSmoothVulvaSeam ON while squeezed must restore exact pelvic opening", restFixed.pelvicVertsDiscarded, squeezedToggleRestored.pelvicVertsDiscarded)
     }
 
+    @Test
+    fun closedEyelidsFullyOccludeBlueIrisesAndPreserveOpenEyes() {
+        val scene = VulvaAnatomySceneMesh()
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        val baseState = VulvaDeformationState()
+
+        // Helper: convert world position back into head-local space (at headTurn=0, headPitch=0)
+        // matching BlossomUpperBodyBuilder.headLocalToWorld / headWorldToLocal
+        val headCenterY = 6.32f
+        val headCenterZ = BlossomBodyBuilder.mattressSurfaceZ(6.32f) + 0.62f
+        val headScale = 0.78f
+        val pitchRad = (-13.0 * Math.PI / 180.0).toFloat()
+        val cosP = kotlin.math.cos(pitchRad)
+        val sinP = kotlin.math.sin(pitchRad)
+        fun worldToHeadLocal(wx: Float, wy: Float, wz: Float): FloatArray {
+            val dx = wx
+            val dy = wy - headCenterY
+            val dz = wz - headCenterZ
+            val sy = dy * cosP + dz * sinP
+            val sz = -dy * sinP + dz * cosP
+            return floatArrayOf(dx / headScale, sy / headScale, sz / headScale)
+        }
+
+        // Compute front-most interpolated head-local Z on front-facing head triangles covering (qx, qy)
+        fun sampleFrontHeadLocalZ(headMesh: DynamicGlMesh, qx: Float, qy: Float): Float {
+            val hData = headMesh.vertexData
+            val idxBuf = headMesh.indexBuffer
+            idxBuf.position(0)
+            var bestZ = Float.NEGATIVE_INFINITY
+            var t = 0
+            while (t + 2 < headMesh.indexCount) {
+                val i0 = idxBuf.get(t).toInt() and 0xFFFF
+                val i1 = idxBuf.get(t + 1).toInt() and 0xFFFF
+                val i2 = idxBuf.get(t + 2).toInt() and 0xFFFF
+                t += 3
+                val b0 = i0 * stride
+                val b1 = i1 * stride
+                val b2 = i2 * stride
+                // Quick world-Y filter to skip back/lower head
+                if (hData[b0 + 1] < 5.95f && hData[b1 + 1] < 5.95f && hData[b2 + 1] < 5.95f) continue
+                val p0 = worldToHeadLocal(hData[b0], hData[b0 + 1], hData[b0 + 2])
+                val p1 = worldToHeadLocal(hData[b1], hData[b1 + 1], hData[b1 + 2])
+                val p2 = worldToHeadLocal(hData[b2], hData[b2 + 1], hData[b2 + 2])
+                if (p0[2] < 0.30f && p1[2] < 0.30f && p2[2] < 0.30f) continue
+                val minX = minOf(p0[0], p1[0], p2[0])
+                val maxX = maxOf(p0[0], p1[0], p2[0])
+                if (qx < minX - 1e-4f || qx > maxX + 1e-4f) continue
+                val minY = minOf(p0[1], p1[1], p2[1])
+                val maxY = maxOf(p0[1], p1[1], p2[1])
+                if (qy < minY - 1e-4f || qy > maxY + 1e-4f) continue
+
+                // 2D barycentric test in head-local (lx, ly)
+                val v0x = p1[0] - p0[0]; val v0y = p1[1] - p0[1]
+                val v1x = p2[0] - p0[0]; val v1y = p2[1] - p0[1]
+                val denom = v0x * v1y - v1x * v0y
+                if (abs(denom) < 1e-8f) continue
+                val vx = qx - p0[0]; val vy = qy - p0[1]
+                val u = (vx * v1y - v1x * vy) / denom
+                val v = (v0x * vy - vx * v0y) / denom
+                val w = 1f - u - v
+                if (u >= -1e-4f && v >= -1e-4f && w >= -1e-4f) {
+                    val zInterp = w * p0[2] + u * p1[2] + v * p2[2]
+                    if (zInterp > bestZ) bestZ = zInterp
+                }
+            }
+            idxBuf.position(0)
+            return bestZ
+        }
+
+        // 1. Open eyes (eyeBlink = 0f): blue iris vertices must sit strictly in front of recessed aperture
+        scene.update(baseState.copy(eyeBlink = 0f), includeLithotomyBody = true)
+        val openHeadSnapshot = scene.blossomHeadMesh.vertexData.copyOf()
+        var openVisibleIrisCount = 0
+        var totalIrisVerts = 0
+        val eyesMesh = scene.blossomEyeMeshes.first()
+        val eData = eyesMesh.vertexData
+        for (i in 0 until eyesMesh.vertexCount) {
+            val b = i * stride
+            val irisR = eData[b + 6]
+            if (irisR <= 0.48f) {
+                totalIrisVerts++
+                val lp = worldToHeadLocal(eData[b], eData[b + 1], eData[b + 2])
+                val headZ = sampleFrontHeadLocalZ(scene.blossomHeadMesh, lp[0], lp[1])
+                if (lp[2] > headZ + 0.01f) openVisibleIrisCount++
+            }
+        }
+        assertTrue(
+            "Open eyes must expose >80% of blue iris cleanly (visible=$openVisibleIrisCount/$totalIrisVerts)",
+            openVisibleIrisCount > (totalIrisVerts * 0.80f).toInt() && totalIrisVerts > 100
+        )
+
+        // 2. Closed eyes (eyeBlink = 1f) across multiple gaze & peak facial morph combinations:
+        //    EVERY iris & central-sclera vertex (irisR <= 0.65) must be strictly occluded behind the closed eyelid!
+        val closedTestConfigs = listOf(
+            baseState.copy(eyeBlink = 1.0f),
+            baseState.copy(eyeBlink = 1.0f, mouthOpen = 0.94f, faceBrow = 0.55f, faceWarmth = 0.6f),
+            baseState.copy(eyeBlink = 1.0f, eyeGazeX = 0.85f, eyeGazeY = -0.85f, eyelidGazeTrack = 1.0f),
+            baseState.copy(eyeBlink = 1.0f, eyeGazeX = -0.85f, eyeGazeY = 0.85f, eyelidGazeTrack = 1.0f)
+        )
+        for ((cfgIdx, cfg) in closedTestConfigs.withIndex()) {
+            scene.update(cfg, includeLithotomyBody = true)
+            assertValidMesh(scene.blossomHeadMesh)
+            assertOutwardWindingMatchesNormals("blossomHeadMesh(closedCfg=$cfgIdx)", scene.blossomHeadMesh)
+
+            var exposedIrisCount = 0
+            var minClearance = Float.POSITIVE_INFINITY
+            val curEyes = scene.blossomEyeMeshes.first().vertexData
+            for (i in 0 until eyesMesh.vertexCount) {
+                val b = i * stride
+                val irisR = curEyes[b + 6]
+                if (irisR <= 0.65f) {
+                    val lp = worldToHeadLocal(curEyes[b], curEyes[b + 1], curEyes[b + 2])
+                    val eyelidZ = sampleFrontHeadLocalZ(scene.blossomHeadMesh, lp[0], lp[1])
+                    val clearance = eyelidZ - lp[2]
+                    if (clearance < minClearance) minClearance = clearance
+                    if (clearance <= 0.006f) exposedIrisCount++
+                }
+            }
+            assertEquals(
+                "Closed eyelid (cfg=$cfgIdx) must fully occlude every iris/front-sclera vertex (minClearance=$minClearance)",
+                0,
+                exposedIrisCount
+            )
+            assertTrue(
+                "Closed eyelid (cfg=$cfgIdx) must maintain safe Z clearance > 0.006 over iris, got $minClearance",
+                minClearance > 0.006f
+            )
+        }
+
+        // 3. Reopening to eyeBlink = 0f must restore open head geometry cleanly
+        scene.update(baseState.copy(eyeBlink = 0f), includeLithotomyBody = true)
+        var maxRestoreDiff = 0f
+        for (i in openHeadSnapshot.indices) {
+            val d = abs(scene.blossomHeadMesh.vertexData[i] - openHeadSnapshot[i])
+            if (d > maxRestoreDiff) maxRestoreDiff = d
+        }
+        assertTrue("Reopening eyes must restore open head mesh (< 1e-5), got $maxRestoreDiff", maxRestoreDiff < 1e-5f)
+    }
+
+    @Test
+    fun climaxVibrationPatternHasOneThirdFrequencyAndMaxAmplitude() {
+        var totalOnMs = 0L
+        var totalOffMs = 0L
+        var onCount = 0
+        var offCount = 0
+        var minOnAmp = Int.MAX_VALUE
+        var maxOnAmp = Int.MIN_VALUE
+
+        for (seed in 1L..25L) {
+            val rng = kotlin.random.Random(seed * 7919L)
+            val chunk = com.example.ui.components.buildPeakVibrationChunk(rng, remainingMs = 12_000L)
+            assertTrue("Peak vibration chunk must not be empty", chunk.timings.isNotEmpty())
+            assertEquals("Timings and amplitudes arrays must match in length", chunk.timings.size, chunk.amplitudes.size)
+            assertTrue("Chunk duration must fit within remainingMs", chunk.totalMs <= 12_000L)
+            assertEquals("totalMs must equal sum of timings", chunk.timings.sum(), chunk.totalMs)
+
+            for (i in chunk.timings.indices) {
+                val dur = chunk.timings[i]
+                val amp = chunk.amplitudes[i]
+                if (i % 2 == 0) {
+                    assertTrue("ON pulse duration must be in 84..159ms, got $dur", dur in 84L..159L)
+                    assertTrue("ON pulse amplitude must be near hardware max (248..255), got $amp", amp in 248..255)
+                    totalOnMs += dur
+                    onCount++
+                    if (amp < minOnAmp) minOnAmp = amp
+                    if (amp > maxOnAmp) maxOnAmp = amp
+                } else {
+                    assertEquals("OFF gap amplitude must be 0", 0, amp)
+                    assertTrue("OFF gap duration must be in 44..264ms, got $dur", dur in 44L..264L)
+                    totalOffMs += dur
+                    offCount++
+                }
+            }
+        }
+
+        val avgOnMs = totalOnMs.toFloat() / onCount
+        val avgOffMs = totalOffMs.toFloat() / offCount
+        val avgPeriodMs = avgOnMs + avgOffMs
+        // Original fast cadence had ~75.5ms average period; 1/3 frequency is ~226ms period.
+        assertTrue("Average climax pulse period must be ~3x slower (195..270ms), got $avgPeriodMs", avgPeriodMs in 195f..270f)
+        assertTrue("Average ON pulse duration must allow full motor spin-up (105..140ms), got $avgOnMs", avgOnMs in 105f..140f)
+        assertTrue("Peak amplitudes must stay in 248..255, got $minOnAmp..$maxOnAmp", minOnAmp >= 248 && maxOnAmp == 255)
+    }
+
     /**
      * Guards against reversed OpenGL triangle winding (which triggers `!gl_FrontFacing` normal flip
      * in the fragment shader and turns meshes dark/inverted). Verifies that > 95% of non-degenerate
