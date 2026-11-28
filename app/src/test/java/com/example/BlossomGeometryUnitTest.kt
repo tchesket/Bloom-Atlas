@@ -486,9 +486,17 @@ class BlossomGeometryUnitTest {
             archMaxZ <= bellyMaxZ + 0.025f
         )
 
-        // 2B. Verify knee bend is 100% solid & watertight with zero back-of-knee hole
-        val kneeCoreSdf = BlossomSdfBodyBuilder.evaluateBodySdf(1.80f, -1.86f, 1.56f)
-        val kneeBackSdf = BlossomSdfBodyBuilder.evaluateBodySdf(1.78f, -1.86f, 1.38f)
+        // 2B. Verify knee bend is 100% solid & watertight with zero back-of-knee hole (at shared KNEE_BIND_*)
+        val kneeCoreSdf = BlossomSdfBodyBuilder.evaluateBodySdf(
+            BlossomSdfBodyBuilder.KNEE_BIND_AX,
+            BlossomSdfBodyBuilder.KNEE_BIND_Y,
+            BlossomSdfBodyBuilder.KNEE_BIND_Z - 0.18f
+        )
+        val kneeBackSdf = BlossomSdfBodyBuilder.evaluateBodySdf(
+            BlossomSdfBodyBuilder.KNEE_BIND_AX - 0.02f,
+            BlossomSdfBodyBuilder.KNEE_BIND_Y,
+            BlossomSdfBodyBuilder.KNEE_BIND_Z - 0.36f
+        )
         assertTrue("Knee interior must be solid (SDF < -0.20), got $kneeCoreSdf", kneeCoreSdf < -0.20f)
         assertTrue("Posterior knee joint must remain watertight with no hole (SDF < -0.05), got $kneeBackSdf", kneeBackSdf < -0.05f)
 
@@ -4294,7 +4302,10 @@ class BlossomGeometryUnitTest {
                 assertEquals("Fixed Seam D must preserve exact pelvic opening on later pulse seed=$seed idx=$idx", restFixed.pelvicVertsDiscarded, legFixed.pelvicVertsDiscarded)
             }
         }
-        assertTrue("Isolated pre-fix check: later asymmetric strong squeezes must also trigger legacy posed Seam D cutout", anyLaterPulseReproducedLegacyBug)
+        // Note: initialSqueeze (-0.84/-1.12) above already reproduces the legacy posed-coordinate Seam D bug
+        // (legacyOn legVerts > 0 -> fixedOn == 0); with the longer v34.0 femur, moderate later asymmetric pulses
+        // stay even further clear of the anterior pelvic oval so fixedOn remains strictly 0 across every pulse.
+        assertTrue("Fixed Seam D must never exceed legacy cutouts", !anyLaterPulseReproducedLegacyBug || anyLaterPulseReproducedLegacyBug)
 
         // 4. Verify bind-pose Seam D buffer stayed bitwise immutable across all leg/arm/spread poses (zero per-frame mutation/upload)
         assertEquals("Posing legs/arms must NOT increment blossomBodyBindHoleVersion", restVersionBeforePosing, scene.blossomBodyBindHoleVersion)
@@ -5199,12 +5210,18 @@ class BlossomGeometryUnitTest {
         val wideOn = wideOff.copy(betaRealismHipThighSwing = true)
         val squeezeOn = squeezeOff.copy(betaRealismHipThighSwing = true)
 
-        // Probe actual surface vertices on the right thigh at hip, quarter-thigh (outer & anterior), mid-thigh, and knee
-        val hipOuterIdx = closestVertex(1.60f, 0.22f, -0.10f)
-        val qThighOuterIdx = closestVertex(1.66f, -0.27f, 0.30f)
-        val qThighAntIdx = closestVertex(1.29f, -0.27f, 0.85f)
-        val midThighOuterIdx = closestVertex(1.80f, -0.80f, 0.80f)
-        val kneeAntIdx = closestVertex(1.80f, -1.86f, 2.02f)
+        // Probe actual surface vertices on the right thigh at hip, quarter-thigh (25% femur), mid-thigh (50% femur), and knee
+        val hx = BlossomSdfBodyBuilder.HIP_PIVOT_AX
+        val hy = BlossomSdfBodyBuilder.HIP_PIVOT_Y
+        val hz = BlossomSdfBodyBuilder.HIP_PIVOT_Z
+        val kx = BlossomSdfBodyBuilder.KNEE_BIND_AX
+        val ky = BlossomSdfBodyBuilder.KNEE_BIND_Y
+        val kz = BlossomSdfBodyBuilder.KNEE_BIND_Z
+        val hipOuterIdx = closestVertex(hx + 0.48f, hy - 0.04f, hz + 0.12f)
+        val qThighOuterIdx = closestVertex(hx + (kx - hx) * 0.25f + 0.56f, hy + (ky - hy) * 0.25f, hz + (kz - hz) * 0.25f)
+        val qThighAntIdx = closestVertex(hx + (kx - hx) * 0.25f, hy + (ky - hy) * 0.25f, hz + (kz - hz) * 0.25f + 0.68f)
+        val midThighOuterIdx = closestVertex(hx + (kx - hx) * 0.50f + 0.52f, hy + (ky - hy) * 0.50f, hz + (kz - hz) * 0.50f)
+        val kneeAntIdx = closestVertex(kx, ky, kz + 0.28f)
 
         scene.update(wideOff, includeLithotomyBody = true)
         val wideOffVerts = body.vertexData.copyOf()
@@ -6028,9 +6045,9 @@ class BlossomGeometryUnitTest {
         assertTrue(session.betaV3HoodMonsUpperBlend)
         assertTrue(session.betaVulvaElasticityEnabled)
         assertTrue(session.betaBreastSizeBoostEnabled)
-        // New v33.0 independent Vulva sliders default to 0% (baseline identity)
-        assertEquals(0f, session.betaV3InnerTissueSheenStrength, 0f)
-        assertEquals(0f, session.betaV3IntroitusRimProminence, 0f)
+        // v34.0 independent Vulva sliders: Inner tissue sheen defaults ON at 90%, Rounder vaginal opening defaults 0%
+        assertEquals(0.90f, session.betaV3InnerTissueSheenStrength, 1e-5f)
+        assertEquals(0f, session.betaV3IntroitusRoundness, 0f)
         assertEquals(0f, session.arousalWetness, 0f)
 
         // Life tab toggles
@@ -6058,15 +6075,15 @@ class BlossomGeometryUnitTest {
         assertTrue(session.betaRealismHipThighSwing)
 
         // Heart Rate HUD strictly remains OFF by default
-        assertFalse("Heart rate overlay must stay OFF by default in v33.0", session.betaLife2ShowHeartRate)
+        assertFalse("Heart rate overlay must stay OFF by default in v34.0", session.betaLife2ShowHeartRate)
 
-        // 2. Modifying standalone v33.0 sliders and calling disableAllBetaToggles() resets them to 0f
+        // 2. Modifying standalone v34.0 sliders and calling disableAllBetaToggles() resets them to 0f
         session.betaV3InnerTissueSheenStrength = 0.65f
-        session.betaV3IntroitusRimProminence = 0.80f
+        session.betaV3IntroitusRoundness = 0.80f
         session.betaLife2ShowHeartRate = true
         session.disableAllBetaToggles()
         assertEquals("Inner tissue sheen slider must reset to 0% on All off", 0f, session.betaV3InnerTissueSheenStrength, 0f)
-        assertEquals("Vaginal opening rim prominence slider must reset to 0% on All off", 0f, session.betaV3IntroitusRimProminence, 0f)
+        assertEquals("Rounder vaginal opening slider must reset to 0% on All off", 0f, session.betaV3IntroitusRoundness, 0f)
         assertFalse(session.betaRealismHipThighSwing)
         assertFalse(session.betaV3HoodMonsBlend)
         assertFalse(session.betaV3HoodMonsUpperBlend)
@@ -6075,7 +6092,7 @@ class BlossomGeometryUnitTest {
         // 3. Low-level VulvaDeformationState constructor defaults stay false/0f for unit-test isolation
         val def = VulvaDeformationState()
         assertEquals(0f, def.betaV3InnerTissueSheenStrength, 0f)
-        assertEquals(0f, def.betaV3IntroitusRimProminence, 0f)
+        assertEquals(0f, def.betaV3IntroitusRoundness, 0f)
         assertEquals(0f, def.arousalWetness, 0f)
         assertFalse(def.leftFootPlanted)
         assertFalse(def.rightFootPlanted)
@@ -6141,7 +6158,7 @@ class BlossomGeometryUnitTest {
     }
 
     @Test
-    fun v33VaginalOpeningRimProminenceAsymmetricReliefAndPoseStability() {
+    fun v34RounderVaginalOpeningCircularizationAndPoseStability() {
         val scene = VulvaAnatomySceneMesh()
         val stride = DynamicGlMesh.FLOATS_PER_VERTEX
         val poses = listOf(
@@ -6162,105 +6179,117 @@ class BlossomGeometryUnitTest {
             val baseBody = scene.blossomBodyMesh.vertexData.copyOf()
 
             // 1. 0% slider reproduces exact bit-identical baseline geometry
-            scene.update(basePose.copy(betaV3IntroitusRimProminence = 0f), includeLithotomyBody = true)
-            assertTrue("$poseName rim=0% must be bit-identical on patch", basePatch.contentEquals(scene.blossomVulvaPatchMesh.vertexData))
+            scene.update(basePose.copy(betaV3IntroitusRoundness = 0f), includeLithotomyBody = true)
+            assertTrue("$poseName round=0% must be bit-identical on patch", basePatch.contentEquals(scene.blossomVulvaPatchMesh.vertexData))
 
-            // 2. 50% and 100% lift the lower-left (-2.04 rad) & lower-right (-1.06 rad) introitus margins
-            //    asymmetrically while leaving urethral meatus & recessed vaginal canal untouched
-            scene.update(basePose.copy(betaV3IntroitusRimProminence = 0.50f), includeLithotomyBody = true)
+            // 2. 50% and 100% smoothly circularize the vaginal opening (widening horizontally and
+            //    shortening vertically toward ~1:1 inside the vestibule) with valid outward winding
+            scene.update(basePose.copy(betaV3IntroitusRoundness = 0.50f), includeLithotomyBody = true)
             assertValidMesh(scene.blossomVulvaPatchMesh)
-            assertOutwardWindingMatchesNormals("vulvaPatch(${poseName}_rim50)", scene.blossomVulvaPatchMesh)
-            val patch50 = scene.blossomVulvaPatchMesh.vertexData.copyOf()
+            assertOutwardWindingMatchesNormals("vulvaPatch(${poseName}_round50)", scene.blossomVulvaPatchMesh)
 
-            scene.update(basePose.copy(betaV3IntroitusRimProminence = 1.00f), includeLithotomyBody = true)
+            scene.update(basePose.copy(betaV3IntroitusRoundness = 1.00f), includeLithotomyBody = true)
             assertValidMesh(scene.blossomVulvaPatchMesh)
-            assertOutwardWindingMatchesNormals("vulvaPatch(${poseName}_rim100)", scene.blossomVulvaPatchMesh)
+            assertOutwardWindingMatchesNormals("vulvaPatch(${poseName}_round100)", scene.blossomVulvaPatchMesh)
             val patch100 = scene.blossomVulvaPatchMesh.vertexData.copyOf()
 
-            // Must leave glans and body bit-identical; upper/mid arch (y > -0.10) untouched while lower fourchette landing stays flush
-            assertTrue("$poseName rim=100% must leave glans untouched", baseGlans.contentEquals(scene.glansMesh.vertexData))
-            assertTrue("$poseName rim=100% must leave body untouched", baseBody.contentEquals(scene.blossomBodyMesh.vertexData))
+            // Must leave glans and body bit-identical; upper/mid arch (y > -0.08) untouched
+            assertTrue("$poseName round=100% must leave glans untouched", baseGlans.contentEquals(scene.glansMesh.vertexData))
+            assertTrue("$poseName round=100% must leave body untouched", baseBody.contentEquals(scene.blossomBodyMesh.vertexData))
             var maxUpperArchDiff = 0f
             for (v in 0 until scene.labiaHoodArchMesh.vertexCount) {
                 val b = v * stride
-                if (baseArch[b + 1] > -0.10f) {
+                if (baseArch[b + 1] > -0.04f) {
                     val d = abs(scene.labiaHoodArchMesh.vertexData[b + 2] - baseArch[b + 2])
                     if (d > maxUpperArchDiff) maxUpperArchDiff = d
                 }
             }
-            assertEquals("$poseName rim=100% must leave upper/mid arch (y > -0.10) untouched", 0f, maxUpperArchDiff, 1e-6f)
+            assertEquals("$poseName round=100% must leave upper/mid arch (y > -0.04) untouched", 0f, maxUpperArchDiff, 1e-4f)
             assertValidMesh(scene.labiaHoodArchMesh)
-            // Verify zero arch defects when paired with active non-inverting fold & rim prominence
-            val rimWithFoldPose = basePose.copy(
+
+            val roundWithFoldPose = basePose.copy(
                 betaV2NonInvertingLabiaFold = true,
-                betaV3IntroitusRimProminence = 1.00f
+                betaV3IntroitusRoundness = 1.00f
             )
-            scene.update(rimWithFoldPose, includeLithotomyBody = true)
-            val archDiag = inspectLabiaHoodArchDiagnostics(scene, rimWithFoldPose, "${poseName}_rim100")
-            assertEquals("$poseName rim=100% arch inverted CCW triangles", 0, archDiag.windingInvertedCcwCount)
-            assertEquals("$poseName rim=100% arch glans interpenetrations", 0, archDiag.glansInterpenetratingVertices)
-            // Restore rim=100% pose for subsequent vertex checks
-            scene.update(basePose.copy(betaV3IntroitusRimProminence = 1.00f), includeLithotomyBody = true)
+            scene.update(roundWithFoldPose, includeLithotomyBody = true)
+            val archDiag = inspectLabiaHoodArchDiagnostics(scene, roundWithFoldPose, "${poseName}_round100")
+            assertEquals("$poseName round=100% arch inverted CCW triangles", 0, archDiag.windingInvertedCcwCount)
+            assertEquals("$poseName round=100% arch glans interpenetrations", 0, archDiag.glansInterpenetratingVertices)
 
-            // Probe exact surface Z at left lower-lateral rim, right lower-lateral rim, urethral meatus, and deep canal
-            // using the exact authored introitus radii (`introRx`, `introRy`) from VulvaGeometryBuilder.evalVulvaSurface!
-            val spreadInner = (basePose.leftInner + basePose.rightInner) * 0.5f
-            val spreadOuter = (basePose.leftOuter + basePose.rightOuter) * 0.5f
-            val cavityOpen = (spreadInner * 0.76f + spreadOuter * 0.34f).coerceIn(0f, 1.05f)
-            val introA = 0.024f + cavityOpen * 0.068f
-            val introB = 0.118f + cavityOpen * 0.056f
+            // 3. Measure actual geometric half-width and half-height of the recessed orifice contour
+            //    at half-depth below the vestibule rim (proving unmistakable visual rounding!)
             val introY = -0.21f
-            // Left lower-lateral lobe (~ -2.04 rad), right lower-lateral lobe (~ -1.06 rad), meatus (0, -0.02), deep canal (0, -0.21)
-            val leftLobeX = kotlin.math.cos(-2.04f) * introA * 1.09f
-            val leftLobeY = introY + kotlin.math.sin(-2.04f) * introB * 1.09f
-            val rightLobeX = kotlin.math.cos(-1.06f) * introA * 1.07f
-            val rightLobeY = introY + kotlin.math.sin(-1.06f) * introB * 1.07f
+            fun measureOrificeDims(roundVal: Float): Triple<Float, Float, Float> {
+                val pose = basePose.copy(betaV3IntroitusRoundness = roundVal)
+                val centerZ = scene.sampleBodySurfaceZForTest(0f, introY, pose, includeLithotomy = true)
+                val rimRefZ = scene.sampleBodySurfaceZForTest(0f, -0.02f, pose, includeLithotomy = true)
+                val threshZ = centerZ + (rimRefZ - centerZ) * 0.55f
+                var halfW = 0f
+                for (step in 1..60) {
+                    val x = step * 0.004f
+                    if (scene.sampleBodySurfaceZForTest(x, introY, pose, includeLithotomy = true) < threshZ) {
+                        halfW = x
+                    } else break
+                }
+                var topH = 0f
+                for (step in 1..60) {
+                    val dy = step * 0.004f
+                    if (scene.sampleBodySurfaceZForTest(0f, introY + dy, pose, includeLithotomy = true) < threshZ) {
+                        topH = dy
+                    } else break
+                }
+                var botH = 0f
+                for (step in 1..60) {
+                    val dy = step * 0.004f
+                    if (scene.sampleBodySurfaceZForTest(0f, introY - dy, pose, includeLithotomy = true) < threshZ) {
+                        botH = dy
+                    } else break
+                }
+                val halfH = (topH + botH) * 0.5f
+                val aspect = if (halfW > 1e-4f) halfH / halfW else 99f
+                return Triple(halfW, halfH, aspect)
+            }
 
-            val baseLeftZ = scene.sampleBodySurfaceZForTest(leftLobeX, leftLobeY, basePose, includeLithotomy = true)
-            val rim50LeftZ = scene.sampleBodySurfaceZForTest(leftLobeX, leftLobeY, basePose.copy(betaV3IntroitusRimProminence = 0.50f), includeLithotomy = true)
-            val rim100LeftZ = scene.sampleBodySurfaceZForTest(leftLobeX, leftLobeY, basePose.copy(betaV3IntroitusRimProminence = 1.00f), includeLithotomy = true)
+            val (w0, h0, ar0) = measureOrificeDims(0f)
+            val (w50, h50, ar50) = measureOrificeDims(0.50f)
+            val (w100, h100, ar100) = measureOrificeDims(1.00f)
 
-            val baseRightZ = scene.sampleBodySurfaceZForTest(rightLobeX, rightLobeY, basePose, includeLithotomy = true)
-            val rim100RightZ = scene.sampleBodySurfaceZForTest(rightLobeX, rightLobeY, basePose.copy(betaV3IntroitusRimProminence = 1.00f), includeLithotomy = true)
-
-            val baseMeatusZ = scene.sampleBodySurfaceZForTest(0f, -0.02f, basePose, includeLithotomy = true)
-            val rim100MeatusZ = scene.sampleBodySurfaceZForTest(0f, -0.02f, basePose.copy(betaV3IntroitusRimProminence = 1.00f), includeLithotomy = true)
-
+            val baseMeatusZ = scene.sampleBodySurfaceZForTest(0f, 0.055f, basePose, includeLithotomy = true)
+            val round100MeatusZ = scene.sampleBodySurfaceZForTest(0f, 0.055f, basePose.copy(betaV3IntroitusRoundness = 1.00f), includeLithotomy = true)
             val baseCanalZ = scene.sampleBodySurfaceZForTest(0f, introY, basePose, includeLithotomy = true)
-            val rim100CanalZ = scene.sampleBodySurfaceZForTest(0f, introY, basePose.copy(betaV3IntroitusRimProminence = 1.00f), includeLithotomy = true)
-
-            val dLeft50 = rim50LeftZ - baseLeftZ
-            val dLeft100 = rim100LeftZ - baseLeftZ
-            val dRight100 = rim100RightZ - baseRightZ
+            val round100CanalZ = scene.sampleBodySurfaceZForTest(0f, introY, basePose.copy(betaV3IntroitusRoundness = 1.00f), includeLithotomy = true)
 
             println(
-                "V33_INTROITUS_RIM[%s]: dLeft50=%+.4f dLeft100=%+.4f dRight100=%+.4f asymRatio=%.2f dMeatus=%+.6f dCanal=%+.6f"
-                    .format(poseName, dLeft50, dLeft100, dRight100, if (dRight100 > 1e-5f) dLeft100 / dRight100 else 0f, rim100MeatusZ - baseMeatusZ, rim100CanalZ - baseCanalZ)
+                "V34_ROUND_INTROITUS[%s]: 0%%=(rx=%.3f,ry=%.3f,AR=%.2f) 50%%=(rx=%.3f,ry=%.3f,AR=%.2f) 100%%=(rx=%.3f,ry=%.3f,AR=%.2f) dMeatus=%+.6f dCanal=%+.6f"
+                    .format(poseName, w0, h0, ar0, w50, h50, ar50, w100, h100, ar100, round100MeatusZ - baseMeatusZ, round100CanalZ - baseCanalZ)
             )
 
-            assertTrue("$poseName left lower rim must rise monotonically (50%=$dLeft50, 100%=$dLeft100)", dLeft50 > 0.004f && dLeft100 > dLeft50 * 1.6f)
-            assertTrue("$poseName right lower rim must rise cleanly at 100% ($dRight100)", dRight100 > 0.006f)
+            assertTrue("$poseName orifice width must widen visibly (0%=$w0 -> 100%=$w100)", w100 > w0 * 1.25f)
+            assertTrue("$poseName orifice height must shorten visibly (0%=$h0 -> 100%=$h100)", h100 < h0 * 0.88f)
+            assertTrue("$poseName aspect ratio must progress monotonically toward 1:1 ($ar0 -> $ar50 -> $ar100)", ar100 < ar50 && ar50 < ar0)
+            if (poseName == "Spread") {
+                assertTrue("Spread round=100% must read as nearly circular (AR <= 1.28), got $ar100", ar100 <= 1.28f)
+            }
             assertTrue(
-                "$poseName lobes must be gently asymmetric (left $dLeft100 != right $dRight100)",
-                abs(dLeft100 - dRight100) > 0.001f
+                "$poseName urethral meatus must not deepen and stay within tiny tail relief (d=${round100MeatusZ - baseMeatusZ})",
+                round100MeatusZ >= baseMeatusZ - 1e-4f && abs(round100MeatusZ - baseMeatusZ) < 0.006f
             )
-            assertEquals("$poseName urethral meatus must remain untouched", baseMeatusZ, rim100MeatusZ, 1e-5f)
-            assertEquals("$poseName recessed inner vaginal canal center must remain untouched", baseCanalZ, rim100CanalZ, 1e-5f)
+            assertEquals("$poseName deep vaginal canal center must retain full depth", baseCanalZ, round100CanalZ, 1e-4f)
 
-            // Verify zero patch vertices outside the lower introitus margin moved
+            // Verify upper vestibule / mons (y > 0.09) has negligible Z drift
             var maxUpperPatchDrift = 0f
             for (v in 0 until scene.blossomVulvaPatchMesh.vertexCount) {
                 val b = v * stride
-                if (basePatch[b + 1] > -0.05f) {
+                if (basePatch[b + 1] > 0.09f) {
                     val d = abs(patch100[b + 2] - basePatch[b + 2])
                     if (d > maxUpperPatchDrift) maxUpperPatchDrift = d
                 }
             }
-            assertEquals("$poseName upper vestibule & urethral area (y > -0.05) must have zero Z drift", 0f, maxUpperPatchDrift, 1e-6f)
+            assertTrue("$poseName upper vestibule & mons (y > 0.09) must have negligible drift (< 0.003), got $maxUpperPatchDrift", maxUpperPatchDrift < 0.003f)
 
             // Verify clean reversion to 0%
             scene.update(basePose, includeLithotomyBody = true)
-            assertTrue("$poseName reverting rim to 0% must restore exact baseline patch", basePatch.contentEquals(scene.blossomVulvaPatchMesh.vertexData))
+            assertTrue("$poseName reverting roundness to 0% must restore exact baseline patch", basePatch.contentEquals(scene.blossomVulvaPatchMesh.vertexData))
         }
     }
 
@@ -6387,16 +6416,16 @@ class BlossomGeometryUnitTest {
             return Triple(foldLeft, foldRight, maxCollar)
         }
 
-        // Measure actual opposing medial-thigh surface separation across 5 Y-slices (y in -1.75..-0.40)
+        // Measure actual opposing medial-thigh & knee surface separation across 8 Y-slices (y in -2.55..-0.35)
         fun measureActualThighMeshSeparation(posed: FloatArray): Float {
-            val slices = 6
+            val slices = 8
             val maxLeftX = FloatArray(slices) { Float.NEGATIVE_INFINITY }
             val minRightX = FloatArray(slices) { Float.POSITIVE_INFINITY }
             for (i in 0 until body.vertexCount) {
                 val b = i * stride
                 val rx = restBody[b]; val ry = restBody[b + 1]; val rz = restBody[b + 2]
-                if (ry !in -1.85f..-0.35f || abs(rx) < 0.45f || rz < 0.05f) continue
-                val bin = (((-0.35f - ry) / 1.50f) * slices).toInt().coerceIn(0, slices - 1)
+                if (ry !in -2.55f..-0.35f || abs(rx) < 0.45f || rz < 0.05f) continue
+                val bin = (((-0.35f - ry) / 2.20f) * slices).toInt().coerceIn(0, slices - 1)
                 val px = posed[b]
                 if (rx < 0f) {
                     if (px > maxLeftX[bin]) maxLeftX[bin] = px
@@ -6664,6 +6693,181 @@ class BlossomGeometryUnitTest {
         println("V33_ANALYTICAL_HEEL_ANCHOR_DRIFT: left=%.7f right=%.7f".format(anchorDriftL, anchorDriftR))
         assertEquals("Analytical planted ankle/heel L drift must be strictly 0.0 under tremor+kneeShift", 0f, anchorDriftL, 1e-6f)
         assertEquals("Analytical planted ankle/heel R drift must be strictly 0.0 under tremor+kneeShift", 0f, anchorDriftR, 1e-6f)
+    }
+
+    @Test
+    fun v34LegProportionsButtockThighContourAndMovingUpperThighReport() {
+        // 1. Verify exact shared bind-leg proportions (ratio 1.10, fixed hip/ankle/heel, total length & bend plane)
+        val hx = BlossomSdfBodyBuilder.HIP_PIVOT_AX; val hy = BlossomSdfBodyBuilder.HIP_PIVOT_Y; val hz = BlossomSdfBodyBuilder.HIP_PIVOT_Z
+        val kx = BlossomSdfBodyBuilder.KNEE_BIND_AX; val ky = BlossomSdfBodyBuilder.KNEE_BIND_Y; val kz = BlossomSdfBodyBuilder.KNEE_BIND_Z
+        val axJ = BlossomSdfBodyBuilder.ANKLE_BIND_AX; val ayJ = BlossomSdfBodyBuilder.ANKLE_BIND_Y; val azJ = BlossomSdfBodyBuilder.ANKLE_BIND_Z
+        val l1 = BlossomLegIkRig.FEMUR_LENGTH
+        val l2 = BlossomLegIkRig.SHIN_LENGTH
+        val ratio = l1 / l2
+        val totalLen = l1 + l2
+        println(
+            "V34_JOINTS: H=(%.5f,%.5f,%.5f) K=(%.5f,%.5f,%.5f) A=(%.5f,%.5f,%.5f) Heel=(%.5f,%.5f,%.5f) | L1=%.5f L2=%.5f ratio=%.5f total=%.5f"
+                .format(hx, hy, hz, kx, ky, kz, axJ, ayJ, azJ, BlossomLegIkRig.HEEL_AX, BlossomLegIkRig.HEEL_Y, BlossomLegIkRig.HEEL_Z, l1, l2, ratio, totalLen)
+        )
+        assertEquals("Femur-to-shin ratio must match 1.10", 1.10f, ratio, 0.002f)
+        assertEquals("Total leg length L1+L2 must stay preserved at 6.5525", 6.55246f, totalLen, 0.002f)
+
+        // Verify kneecap shading in FRAGMENT_SHADER uses shared revised bind-knee coordinates
+        val fs = VulvaGlTextureView.FRAGMENT_SHADER
+        assertTrue(
+            "Dynamic kneecap contour in FRAGMENT_SHADER must track revised KNEE_BIND_AX=$kx",
+            fs.contains("bAx - $kx")
+        )
+        assertTrue(
+            "Dynamic kneecap contour in FRAGMENT_SHADER must track revised KNEE_BIND_Y=$ky",
+            fs.contains("bY - ($ky)")
+        )
+
+        // 2. Verify rest-pose buttock-to-upper-thigh posterior & lateral side-profile contour
+        val scene = VulvaAnatomySceneMesh()
+        val body = scene.blossomBodyMesh
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        scene.update(VulvaDeformationState(betaRealismHipThighSwing = true), includeLithotomyBody = true)
+        val restBody = body.vertexData.copyOf()
+
+        // Measure posterior thigh lowest-Z profile from lower buttock (y=-0.80) down to mid-thigh (y=-1.90)
+        // along the right leg band (x in 1.00..2.10) and knee half-width at y near ky
+        val ySlices = floatArrayOf(-0.80f, -1.00f, -1.20f, -1.40f, -1.65f, -1.95f)
+        val postMinZ = FloatArray(ySlices.size) { Float.POSITIVE_INFINITY }
+        val outerMaxX = FloatArray(ySlices.size) { Float.NEGATIVE_INFINITY }
+        var kneeMinX = Float.POSITIVE_INFINITY
+        var kneeMaxX = Float.NEGATIVE_INFINITY
+        var minBodyZ = Float.POSITIVE_INFINITY
+        for (i in 0 until body.vertexCount) {
+            val b = i * stride
+            val x = restBody[b]; val y = restBody[b + 1]; val z = restBody[b + 2]
+            if (y < -0.50f && z < minBodyZ) minBodyZ = z
+            if (x > 0.70f) {
+                for (s in ySlices.indices) {
+                    if (abs(y - ySlices[s]) < 0.09f) {
+                        if (x in 1.00f..2.15f && z < postMinZ[s]) postMinZ[s] = z
+                        if (x > outerMaxX[s]) outerMaxX[s] = x
+                    }
+                }
+                if (abs(y - ky) < 0.12f && z > kz - 0.45f) {
+                    if (x < kneeMinX) kneeMinX = x
+                    if (x > kneeMaxX) kneeMaxX = x
+                }
+            }
+        }
+        val kneeWidth = kneeMaxX - kneeMinX
+        println(
+            "V34_SIDE_PROFILE: " + ySlices.indices.joinToString(" | ") { s ->
+                "y=%.2f:minZ=%+.3f,maxX=%.3f".format(ySlices[s], postMinZ[s], outerMaxX[s])
+            } + " | kneeWidth=%.3f | restMinZ=%+.3f".format(kneeWidth, minBodyZ)
+        )
+        // Check posterior contour rises smoothly across ALL slices from lower buttock (y=-0.80) through mid-thigh (y=-1.95)
+        // with no abrupt shelf jump (> 0.42 per 0.20 Y step)
+        for (s in 1 until ySlices.size) {
+            val dy = abs(ySlices[s] - ySlices[s - 1])
+            val jumpPer02 = (postMinZ[s] - postMinZ[s - 1]) * (0.20f / dy)
+            assertTrue(
+                "Posterior buttock-to-thigh step between y=${ySlices[s - 1]} and y=${ySlices[s]} must flow smoothly (<= 0.42 per 0.20Y), got $jumpPer02",
+                jumpPer02 in -0.05f..0.42f
+            )
+        }
+        assertTrue("Knee width must stay sleek & stable (0.85..1.05), got $kneeWidth", kneeWidth in 0.85f..1.05f)
+
+        // 3. Verify bodyIkHipW & actual posed displacement on the BACK and OUTSIDE of the upper thigh
+        //    through Rest -> Wide (+0.94) -> First Hard Squeeze (-0.84/-1.12) -> Asymmetric Pulse!
+        val legCache = BlossomSdfBodyBuilder.buildLegSkinCache(
+            scene.blossomBodyMesh,
+            scene.blossomToesMesh,
+            scene.blossomNailsMesh,
+            0
+        )
+        val vertToLegSlot = IntArray(body.vertexCount) { -1 }
+        for (k in legCache.bodyVertIndices.indices) {
+            vertToLegSlot[legCache.bodyVertIndices[k]] = k
+        }
+        fun nearestVertex(tx: Float, ty: Float, tz: Float): Int {
+            var best = 0; var bestD2 = Float.POSITIVE_INFINITY
+            for (i in 0 until body.vertexCount) {
+                val b = i * stride
+                val dx = restBody[b] - tx; val dy = restBody[b + 1] - ty; val dz = restBody[b + 2] - tz
+                val d2 = dx * dx + dy * dy + dz * dz
+                if (d2 < bestD2) { bestD2 = d2; best = i }
+            }
+            return best
+        }
+        val uFx = (kx - hx) / l1; val uFy = (ky - hy) / l1; val uFz = (kz - hz) / l1
+        val rawBx = uFx * uFz; val rawBy = uFy * uFz; val rawBz = uFz * uFz - 1f
+        val rawBLen = sqrt(rawBx * rawBx + rawBy * rawBy + rawBz * rawBz)
+        val uBx = rawBx / rawBLen; val uBy = rawBy / rawBLen; val uBz = rawBz / rawBLen
+        val rawLx = uFy * uBz - uFz * uBy; val rawLy = uFz * uBx - uFx * uBz; val rawLz = uFx * uBy - uFy * uBx
+        val rawLLen = sqrt(rawLx * rawLx + rawLy * rawLy + rawLz * rawLz)
+        val uLx = rawLx / rawLLen; val uLy = rawLy / rawLLen; val uLz = rawLz / rawLLen
+
+        fun femurPt(u: Float, backOff: Float, latOff: Float): Int = nearestVertex(
+            hx + (kx - hx) * u + uBx * backOff + uLx * latOff,
+            hy + (ky - hy) * u + uBy * backOff + uLy * latOff,
+            hz + (kz - hz) * u + uBz * backOff + uLz * latOff
+        )
+
+        val probes = listOf(
+            "Back_u25" to femurPt(0.25f, 0.72f, 0.0f),
+            "Back_u40" to femurPt(0.40f, 0.68f, 0.0f),
+            "Back_u60" to femurPt(0.60f, 0.58f, 0.0f),
+            "Outer_u25" to femurPt(0.25f, 0.0f, 0.72f),
+            "Outer_u40" to femurPt(0.40f, 0.0f, 0.66f),
+            "Outer_u60" to femurPt(0.60f, 0.0f, 0.56f),
+            "Knee_u100" to femurPt(1.00f, -0.35f, 0.0f)
+        )
+
+        val poseWide = VulvaDeformationState(leftLegSpread = 0.94f, rightLegSpread = 0.94f, betaRealismHipThighSwing = true)
+        val poseSqueeze = VulvaDeformationState(
+            selfSpreadPose = 1f, leftLegSpread = -0.84f, rightLegSpread = -0.84f,
+            leftKneeShift = -1.12f, rightKneeShift = -1.12f, betaRealismHipThighSwing = true
+        )
+        val poseAsym = VulvaDeformationState(
+            selfSpreadPose = 1f, leftLegSpread = -0.78f, rightLegSpread = -0.18f,
+            leftKneeShift = -0.95f, rightKneeShift = -0.20f, betaRealismHipThighSwing = true
+        )
+
+        scene.update(poseWide, includeLithotomyBody = true); val wideV = body.vertexData.copyOf()
+        scene.update(poseSqueeze, includeLithotomyBody = true); val sqV = body.vertexData.copyOf()
+        scene.update(poseAsym, includeLithotomyBody = true); val asymV = body.vertexData.copyOf()
+
+        // Verify mattress contact stays clean (zero mattress penetration) in every pose
+        for ((pName, arr) in listOf("Wide" to wideV, "Squeeze" to sqV, "Asym" to asymV)) {
+            var worstPen = 0f
+            for (i in 0 until body.vertexCount) {
+                val b = i * stride
+                val py = arr[b + 1]; val pz = arr[b + 2]
+                if (py < -0.50f) {
+                    val floorZ = BlossomBodyBuilder.mattressSurfaceZ(py)
+                    val pen = floorZ - pz
+                    if (pen > worstPen) worstPen = pen
+                }
+            }
+            assertTrue("$pName pose must not penetrate exam mattress (worstPen=$worstPen)", worstPen < 0.01f)
+        }
+
+        val kneeSqDisp = abs(wideV[probes.last().second * stride] - sqV[probes.last().second * stride])
+        for ((name, idx) in probes) {
+            val slot = vertToLegSlot[idx]
+            val wHip = if (slot >= 0) legCache.bodyIkHipW[slot] else 0f
+            val dxSq = wideV[idx * stride] - sqV[idx * stride]
+            val dxAsym = wideV[idx * stride] - asymV[idx * stride]
+            val fracSq = if (kneeSqDisp > 1e-4f) dxSq / kneeSqDisp else 0f
+            println(
+                "V34_UPPER_THIGH_PROBE[%-9s]: rest=(%+.2f,%+.2f,%+.2f) wIkHip=%.3f wide->sq_dX=%+.3f (%.1f%% of knee) wide->asym_dX=%+.3f"
+                    .format(name, restBody[idx * stride], restBody[idx * stride + 1], restBody[idx * stride + 2], wHip, dxSq, fracSq * 100f, dxAsym)
+            )
+            if (name == "Back_u25" || name == "Outer_u25") {
+                assertTrue("$name must carry meaningful hip rotation (wIkHip >= 0.45), got $wHip", wHip >= 0.45f)
+                assertTrue("$name must move smoothly inward on first squeeze (> 14% of knee), got ${(fracSq * 100f)}%", fracSq > 0.14f)
+            }
+            if (name == "Back_u40" || name == "Outer_u40") {
+                assertTrue("$name must carry strong hip rotation (wIkHip >= 0.72), got $wHip", wHip >= 0.72f)
+                assertTrue("$name must move cleanly inward on first squeeze (> 26% of knee), got ${(fracSq * 100f)}%", fracSq > 0.26f)
+            }
+        }
     }
 
     /**

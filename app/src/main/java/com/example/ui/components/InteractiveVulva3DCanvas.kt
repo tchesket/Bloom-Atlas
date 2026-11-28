@@ -902,7 +902,7 @@ fun InteractiveVulva3DCanvas(
     var betaV3HoodMonsUpperBlend by sessionState.betaV3HoodMonsUpperBlendState
     var betaV3HoodMonsUpperStrength by sessionState.betaV3HoodMonsUpperStrengthState
     var betaV3InnerTissueSheenStrength by sessionState.betaV3InnerTissueSheenStrengthState
-    var betaV3IntroitusRimProminence by sessionState.betaV3IntroitusRimProminenceState
+    var betaV3IntroitusRoundness by sessionState.betaV3IntroitusRoundnessState
     var betaVulvaElasticityEnabled by sessionState.betaVulvaElasticityEnabledState
     var betaVulvaElasticity by sessionState.betaVulvaElasticityState
     var betaBreastSizeBoostEnabled by sessionState.betaBreastSizeBoostEnabledState
@@ -2722,7 +2722,7 @@ fun InteractiveVulva3DCanvas(
         betaRealismSurfaceMicro = betaRealismSurfaceMicro,
         betaRealismHipThighSwing = betaRealismHipThighSwing,
         betaV3InnerTissueSheenStrength = betaV3InnerTissueSheenStrength,
-        betaV3IntroitusRimProminence = betaV3IntroitusRimProminence,
+        betaV3IntroitusRoundness = betaV3IntroitusRoundness,
         arousalWetness = arousalWetness,
         leftLegTremor = if (betaRealismHipThighSwing) peakLegShakeL.value else 0f,
         rightLegTremor = if (betaRealismHipThighSwing) peakLegShakeR.value else 0f,
@@ -3591,7 +3591,7 @@ fun InteractiveVulva3DCanvas(
                     betaV3HoodMonsBlend,
                     betaV3HoodMonsUpperBlend,
                     betaV3InnerTissueSheenStrength > 0.005f,
-                    betaV3IntroitusRimProminence > 0.005f,
+                    betaV3IntroitusRoundness > 0.005f,
                     betaVulvaElasticityEnabled && betaVulvaElasticity > 0.005f,
                     betaBreastSizeBoostEnabled && betaBreastSizeBoost > 0.005f
                 ).count { it }
@@ -3629,7 +3629,7 @@ fun InteractiveVulva3DCanvas(
                         betaV3HoodMonsBlend,
                         betaV3HoodMonsUpperBlend,
                         betaV3InnerTissueSheenStrength > 0.005f,
-                        betaV3IntroitusRimProminence > 0.005f
+                        betaV3IntroitusRoundness > 0.005f
                     ).count { it }
                 }
                 val displayedLifelikeBetaCount = if (showExtraBetaOptions) activeLifelikeBetaCount else 0
@@ -4175,7 +4175,7 @@ fun InteractiveVulva3DCanvas(
                                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
                                     )
                                     Text(
-                                        text = "v33.0 Vulva Surface & Contour Sliders",
+                                        text = "v34.0 Vulva Surface & Contour Sliders",
                                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, lineHeight = 11.sp),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -4191,10 +4191,10 @@ fun InteractiveVulva3DCanvas(
                                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
                                     )
                                     BetaStrengthSliderRow(
-                                        label = "Vaginal opening rim prominence",
-                                        value = betaV3IntroitusRimProminence,
-                                        tag = "slider_beta_v3_introitus_rim_prominence",
-                                        onValueChange = { betaV3IntroitusRimProminence = it }
+                                        label = "Rounder vaginal opening",
+                                        value = betaV3IntroitusRoundness,
+                                        tag = "slider_beta_v3_introitus_roundness",
+                                        onValueChange = { betaV3IntroitusRoundness = it }
                                     )
                                 } else if (betaMenuTab == 1) {
                                     if (!showExtraBetaOptions) {

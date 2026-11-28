@@ -1,5 +1,21 @@
 # Bloom Atlas — Version History
 
+## Version 34.0 (`versionCode = 34`)
+**Date:** 2026-11-27
+
+- **Inner Tissue Sheen Enabled by Default at 90% (`BlossomViewportSessionState.kt`)**
+  - Set `betaV3InnerTissueSheenStrengthState` to default ON at **`90%`** (`0.90f`) in `BlossomViewportSessionState`, while preserving `0f` reset behavior in `disableAllBetaToggles()` and `0f` default on `VulvaDeformationState` for isolated baseline geometry comparisons.
+- **Replaced Vaginal Opening Rim Slider with "Rounder Vaginal Opening" Beta Slider (0–100%, Default 0%) (`VulvaGeometryBuilder.kt`, `BlossomViewportSessionState.kt`, `InteractiveVulva3DCanvas.kt`)**
+  - Replaced `betaV3IntroitusRimProminence` with `betaV3IntroitusRoundness` (*"Rounder vaginal opening"*, 0–100%, default `0%`) in Beta Lab Tab 0 (`Vulva`).
+  - Bit-identical to baseline at `0%`; smoothly widens horizontally and shortens vertically toward a natural circular orifice inside the exposed vestibule (`Spread` aspect ratio `2.09 -> 1.40 -> 0.97`, `Relaxed` `4.88 -> 3.00 -> 1.75` from `0% -> 50% -> 100%`), clamped safely to `vestHalfW * 0.78f` with a smooth upper-Y fade below the clitoral glans so the glans, body, upper arch, and vaginal canal depth (`dCanal = 0.000000`) remain unaffected and non-inverting.
+- **Revised 1.10 Femur-to-Shin Leg Proportions, Shared Bind-Leg Joints & Smooth Buttock-to-Upper-Thigh Transition (`BlossomSdfBodyBuilder.kt`, `BlossomLegIkRig.kt`, `VulvaGlRenderer.kt`, `BlossomTouchHitResolver.kt`)**
+  - Fixed hip socket `H = (1.12000, 0.26000, -0.22000)`, resting ankle `A = (1.68000, -4.24000, -0.94000)`, heel `(1.68000, -4.06000, -1.14000)`, total limb length `6.55247`, and the original `+Z` knee bend plane while updating femur-to-shin ratio to **`1.10`** (`L1 = 3.43225`, `L2 = 3.12022`, mirrored +X bind knee `K = (1.88425, -2.51391, 1.65127)`).
+  - Unified all bind-leg consumers (`BlossomSdfBodyBuilder`, `BlossomLegIkRig`, Pass A dynamic kneecap shader in `VulvaGlRenderer`, and `BlossomTouchHitResolver`) onto a single shared bind-joint definition (`HIP_PIVOT_*`, `KNEE_BIND_*`, `ANKLE_BIND_*`, `HEEL_BIND_*`), repositioning the patella, patellar tendon, calf belly perpendicular vector, Achilles tendon, and popliteal/knee material accents onto the new knee.
+  - Resculpted the posterior buttock-to-upper-thigh transition in the femur's orthonormal local frame, removing the projecting lower-buttock shelf while retaining a soft infragluteal fold and adding upper-third hamstring and outer-thigh fullness without widening the knee (`kneeWidth = 0.993`) or shifting inner contact surfaces (`V34_SIDE_PROFILE` smooth slope across `y = -0.80..-1.95`).
+  - Refined posterior upper-thigh weighting (`postThighDz` outside `collarDist3d <= 1.05f`), calibrated 5-station opposite-leg contact radii (`0.72..0.50`), and added a thigh mattress-floor clamp (`mattressSurfaceZ(y) + 0.005`), keeping upper-thigh motion fluid from the hip (`Back_u25 = 23.6%`, `Outer_u25 = 19.2%`, `Back_u40 = 42.3%`, `Outer_u40 = 37.5%` of knee travel) with `±0.0000` bone length error, `0.0000/0.0000` heel drift, `+0.0456` positive `meshSep` at max squeeze, `0/0` inner-thigh foldover, `0/4077` inverted outer-thigh triangles, `0.000000` Seam D collar drift, and `0` shared arm/leg vertices.
+
+---
+
 ## Version 33.0 (`versionCode = 33`)
 **Date:** 2026-11-27
 

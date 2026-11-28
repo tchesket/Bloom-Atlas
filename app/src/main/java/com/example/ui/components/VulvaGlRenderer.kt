@@ -2586,7 +2586,7 @@ class VulvaGlTextureView(
                 }
         """
 
-        private const val FRAGMENT_SHADER_PART_2 = """
+        private val FRAGMENT_SHADER_PART_2 = """
 
                 // -----------------------------------------------------------------
                 // PASS A: LIVING SKIN & MUCOSA WITH RGB SUBSURFACE SCATTERING (SSS)
@@ -2861,10 +2861,10 @@ class VulvaGlTextureView(
                             dynamicLandmarkAo *= (1.0 - cVal * 0.14);
                         }
 
-                        // 5) Vertex-locked anatomical kneecap (patella) contour centered at true rest knee (1.80, -1.86, 1.78)
-                        float kneeDist = length(vec2((bAx - 1.80) / 0.26, (bY + 1.86) / 0.26));
+                        // 5) Vertex-locked anatomical kneecap (patella) contour centered at shared v34.0 bind knee
+                        float kneeDist = length(vec2((bAx - ${BlossomSdfBodyBuilder.KNEE_BIND_AX}) / 0.26, (bY - (${BlossomSdfBodyBuilder.KNEE_BIND_Y})) / 0.26));
                         float patellaRing = exp(-sq((kneeDist - 0.86) / 0.30)) *
-                                            smoothstep(1.12, 1.54, bindPos.z) * smoothstep(0.18, 0.62, N.z);
+                                            smoothstep(${BlossomSdfBodyBuilder.KNEE_BIND_Z - 0.62f}, ${BlossomSdfBodyBuilder.KNEE_BIND_Z - 0.20f}, bindPos.z) * smoothstep(0.18, 0.62, N.z);
                         dynamicLandmarkAo *= (1.0 - patellaRing * 0.085);
                     }
 

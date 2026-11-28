@@ -258,12 +258,14 @@ class BlossomViewportSessionState {
     internal val betaV3HoodMonsUpperStrengthState = mutableFloatStateOf(0.75f)
     var betaV3HoodMonsUpperStrength: Float by betaV3HoodMonsUpperStrengthState
 
-    // v33.0 Independent Vulva Beta Sliders (0..100%, default 0% == exact baseline look)
-    internal val betaV3InnerTissueSheenStrengthState = mutableFloatStateOf(0f)
+    // v33.0–v34.0 Independent Vulva Beta Sliders:
+    // - Inner tissue sheen defaults ON at 90% in v34.0
+    // - Rounder vaginal opening defaults at 0% (exact baseline oval slit; 100% circularizes opening cleanly)
+    internal val betaV3InnerTissueSheenStrengthState = mutableFloatStateOf(0.90f)
     var betaV3InnerTissueSheenStrength: Float by betaV3InnerTissueSheenStrengthState
 
-    internal val betaV3IntroitusRimProminenceState = mutableFloatStateOf(0f)
-    var betaV3IntroitusRimProminence: Float by betaV3IntroitusRimProminenceState
+    internal val betaV3IntroitusRoundnessState = mutableFloatStateOf(0f)
+    var betaV3IntroitusRoundness: Float by betaV3IntroitusRoundnessState
 
     internal val betaVulvaElasticityEnabledState = mutableStateOf(true)
     var betaVulvaElasticityEnabled: Boolean by betaVulvaElasticityEnabledState
@@ -359,7 +361,7 @@ class BlossomViewportSessionState {
 
     /**
      * Turns OFF every Beta Lab toggle across all 3 tabs and resets standalone 0–100% sliders
-     * (Inner tissue sheen, Vaginal opening rim prominence) back to 0%, while preserving toggle-gated
+     * (Inner tissue sheen, Rounder vaginal opening) back to 0%, while preserving toggle-gated
      * strength slider values so re-enabling any toggle restores the user's prior tuning.
      */
     fun disableAllBetaToggles() {
@@ -373,7 +375,7 @@ class BlossomViewportSessionState {
         betaV3HoodMonsBlend = false
         betaV3HoodMonsUpperBlend = false
         betaV3InnerTissueSheenStrength = 0f
-        betaV3IntroitusRimProminence = 0f
+        betaV3IntroitusRoundness = 0f
         betaVulvaElasticityEnabled = false
         betaBreastSizeBoostEnabled = false
         betaLifeEyeMicrosaccades = false

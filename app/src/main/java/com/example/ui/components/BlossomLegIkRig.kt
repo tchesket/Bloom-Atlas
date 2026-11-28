@@ -38,21 +38,22 @@ import kotlin.math.tanh
  */
 internal object BlossomLegIkRig {
 
-    // Exact authored rest joint coordinates from BlossomSdfBodyBuilder (evaluated in +X half-space)
+    // Shared authored rest joint coordinates from BlossomSdfBodyBuilder (evaluated in +X half-space;
+    // v34.0 proportions: femur:shin = 1.10, L1 = 3.4322, L2 = 3.1202, fixed total length & bend plane)
     const val HIP_AX = BlossomSdfBodyBuilder.HIP_PIVOT_AX     // 1.12f
     const val HIP_Y = BlossomSdfBodyBuilder.HIP_PIVOT_Y       // 0.26f
     const val HIP_Z = BlossomSdfBodyBuilder.HIP_PIVOT_Z       // -0.22f
 
-    const val KNEE_AX = 1.80f
-    const val KNEE_Y = -1.86f
-    const val KNEE_Z = 1.74f
+    const val KNEE_AX = BlossomSdfBodyBuilder.KNEE_BIND_AX    // 1.88425f
+    const val KNEE_Y = BlossomSdfBodyBuilder.KNEE_BIND_Y      // -2.51391f
+    const val KNEE_Z = BlossomSdfBodyBuilder.KNEE_BIND_Z      // 1.65127f
 
-    const val ANKLE_AX = 1.68f
-    const val ANKLE_Y = -4.24f
-    const val ANKLE_Z = -0.94f
+    const val ANKLE_AX = BlossomSdfBodyBuilder.ANKLE_BIND_AX  // 1.68f
+    const val ANKLE_Y = BlossomSdfBodyBuilder.ANKLE_BIND_Y    // -4.24f
+    const val ANKLE_Z = BlossomSdfBodyBuilder.ANKLE_BIND_Z    // -0.94f
 
-    const val HEEL_AX = 1.68f
-    const val HEEL_Y = -4.06f
+    const val HEEL_AX = BlossomSdfBodyBuilder.HEEL_BIND_AX    // 1.68f
+    const val HEEL_Y = BlossomSdfBodyBuilder.HEEL_BIND_Y      // -4.06f
     const val HEEL_Z = BlossomBodyBuilder.MATTRESS_TOP_Z      // -1.14f
 
     // Exact authored bone lengths
@@ -72,7 +73,7 @@ internal object BlossomLegIkRig {
     // Radii match BlossomSdfBodyBuilder's SDF femur profile (slightly softened by ~0.94x for snug
     // medial adipose yield before hard bone-to-bone resistance).
     internal val CONTACT_STATION_U = floatArrayOf(0.28f, 0.44f, 0.60f, 0.78f, 0.96f)
-    internal val CONTACT_STATION_RADIUS = floatArrayOf(0.72f, 0.67f, 0.61f, 0.53f, 0.46f)
+    internal val CONTACT_STATION_RADIUS = floatArrayOf(0.72f, 0.68f, 0.63f, 0.56f, 0.50f)
     private const val MAX_SOFT_COMPRESS_PER_LEG = 0.120f
     private const val APPROACH_SLOW_MARGIN = 0.16f
 
@@ -847,10 +848,13 @@ internal object BlossomLegIkRig {
                 }
             }
 
-            // Keep lower shin / foot soles cleanly above exam cushion
+            // Keep posterior thighs, lower shins & foot soles cleanly above the exam mattress
             var finalZ = outPos.z
             if (y < -3.40f && finalZ < footFloorZ) {
                 finalZ = footFloorZ
+            } else if (outPos.y < -0.50f) {
+                val thighFloorZ = BlossomBodyBuilder.mattressSurfaceZ(outPos.y) + 0.005f
+                if (finalZ < thighFloorZ) finalZ = thighFloorZ
             }
 
             val nLen = outNorm.len().coerceAtLeast(1e-5f)

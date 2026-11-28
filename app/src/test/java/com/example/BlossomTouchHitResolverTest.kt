@@ -56,8 +56,8 @@ class BlossomTouchHitResolverTest {
         val breastZ = BlossomBodyBuilder.mattressSurfaceZ(BlossomUpperBodyBuilder.BREAST_CENTER_Y) + 1.54f
         val leftBreast = project(-BlossomUpperBodyBuilder.BREAST_CENTER_AX, BlossomUpperBodyBuilder.BREAST_CENTER_Y, breastZ)
         val rightBreast = project(BlossomUpperBodyBuilder.BREAST_CENTER_AX, BlossomUpperBodyBuilder.BREAST_CENTER_Y, breastZ)
-        val leftKnee = project(-1.80f, -1.86f, 1.74f)
-        val rightCalf = project(1.76f, -3.20f, 0.35f)
+        val leftKnee = project(-BlossomSdfBodyBuilder.KNEE_BIND_AX, BlossomSdfBodyBuilder.KNEE_BIND_Y, BlossomSdfBodyBuilder.KNEE_BIND_Z)
+        val rightCalf = project(1.76f, -3.40f, 0.25f)
 
         val vulvaHit = BlossomTouchHitResolver.resolveTouchZone(vulvaCenter, fullBodyCam, aspect, restDeform, showFullBody = true)
         assertEquals("Direct vulva center touch must resolve to VULVA", TouchTargetZone.VULVA, vulvaHit.zone)
@@ -104,7 +104,13 @@ class BlossomTouchHitResolverTest {
         val spreadDeform = VulvaDeformationState(leftLegSpread = 0.85f, rightLegSpread = 0.85f)
         val projector = BlossomCameraProjector(threeQuarterLeftCam, aspect)
 
-        val spreadRightKneeW = BlossomSdfBodyBuilder.transformLegPoint(1.80f, -1.86f, 1.74f, +1f, 0.85f)
+        val spreadRightKneeW = BlossomSdfBodyBuilder.transformLegPoint(
+            BlossomSdfBodyBuilder.KNEE_BIND_AX,
+            BlossomSdfBodyBuilder.KNEE_BIND_Y,
+            BlossomSdfBodyBuilder.KNEE_BIND_Z,
+            +1f,
+            0.85f
+        )
         val spreadRightKneeS = projector.projectUnclamped(spreadRightKneeW)!!.toOffset()
         val vulvaS = projector.projectUnclamped(0f, 0.04f, 0.12f)!!.toOffset()
         val rightArmS = projector.projectUnclamped(2.05f, 1.80f, BlossomBodyBuilder.mattressSurfaceZ(1.80f) + 0.28f)!!.toOffset()

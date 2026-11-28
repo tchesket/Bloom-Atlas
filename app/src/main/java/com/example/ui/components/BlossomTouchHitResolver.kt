@@ -404,7 +404,14 @@ internal object BlossomTouchHitResolver {
     ): Float {
         // Upper thigh start sits cleanly below/lateral to vulva & hips so hands, arms & labia never collide
         val thighStart = BlossomSdfBodyBuilder.transformLegPoint(side * 1.32f, -0.48f, 0.44f, side, spread, 0.65f)
-        val knee = BlossomSdfBodyBuilder.transformLegPoint(side * 1.80f, -1.86f, 1.74f, side, spread, 1.0f)
+        val knee = BlossomSdfBodyBuilder.transformLegPoint(
+            side * BlossomSdfBodyBuilder.KNEE_BIND_AX,
+            BlossomSdfBodyBuilder.KNEE_BIND_Y,
+            BlossomSdfBodyBuilder.KNEE_BIND_Z,
+            side,
+            spread,
+            1.0f
+        )
         val ankleFoot = BlossomSdfBodyBuilder.transformLegPoint(side * 1.74f, -4.60f, -0.96f, side, spread, 1.0f)
 
         val dThigh = evaluateProjectedSegmentDist(

@@ -304,11 +304,11 @@ internal object BlossomSdfBodyBuilder {
         // ---------------------------------------------------------------------
         val dGlute = sdEllipsoid(
             px = ax - 0.78f,
-            py = y - (-0.54f),
-            pz = z - (-0.65f),
+            py = y - (-0.50f),
+            pz = z - (-0.60f),
             rx = 0.88f,
-            ry = 0.66f,
-            rz = 0.56f
+            ry = 0.60f,
+            rz = 0.53f
         )
         // Natural gluteal cleft cradling the lower anus (-0.86 baseline, or -0.782 with betaShortPerineum: ~20% shorter)
         val cleftShiftY = if (betaShortPerineum) 0.078f else 0f
@@ -317,28 +317,47 @@ internal object BlossomSdfBodyBuilder {
         val cleftIndent = 0.095f * exp(-((x / 0.105f).let { it * it })) * cleftMask
         var dPelvis = smin(dTorso, dGlute, 0.38f) + cleftIndent
 
-        // Beta 2: Subtle anatomical infragluteal fold under each buttock cheek (posterior-inferior only)
-        if (betaSoftButtockTable && y in -1.34f..-0.64f && ax in 0.16f..1.38f && z < -0.10f) {
+        // Beta 2: Subtle anatomical infragluteal fold under each buttock cheek (posterior-inferior only;
+        // v34.0 softened slightly so the lower buttock flows smoothly into the upper hamstring without a shelf)
+        if (betaSoftButtockTable && y in -1.36f..-0.64f && ax in 0.16f..1.38f && z < -0.10f) {
             val foldY = -1.03f + 0.11f * smoothStep(0.28f, 1.18f, ax)
-            val foldBand = exp(-((y - foldY) / 0.082f).let { it * it })
+            val foldBand = exp(-((y - foldY) / 0.095f).let { it * it })
             val foldLat = smoothBell(ax, 0.30f, 1.14f, 0.16f)
             val foldPost = 1f - smoothStep(-0.48f, -0.12f, z)
             val foldAboveMat = smoothStep(mattressSurfaceZ(y) + 0.03f, mattressSurfaceZ(y) + 0.15f, z)
-            dPelvis += 0.039f * foldBand * foldLat * foldPost * foldAboveMat
+            dPelvis += 0.032f * foldBand * foldLat * foldPost * foldAboveMat
         }
 
         // ---------------------------------------------------------------------
         // 3. TWO-BONE SCULPTED LEGS (SYMMETRICALLY EVALUATED IN +X HALF-SPACE)
         // ---------------------------------------------------------------------
-        // Hip core H sits cleanly beside lower mons (+0.26), femur sweeps smoothly to crisp knee K,
-        // straight tibia descends through shapely calf to slender ankle A & grounded foot!
-        val hx = 1.12f; val hy = 0.26f; val hz = -0.22f
-        val kx = 1.80f; val ky = -1.86f; val kz = 1.74f
-        val axJ = 1.68f; val ayJ = -4.24f; val azJ = -0.94f
+        // v34.0 Shared bind-leg joints (femur:shin = 1.10, fixed hip/ankle/heel, total length & bend plane)
+        val hx = HIP_PIVOT_AX; val hy = HIP_PIVOT_Y; val hz = HIP_PIVOT_Z
+        val kx = KNEE_BIND_AX; val ky = KNEE_BIND_Y; val kz = KNEE_BIND_Z
+        val axJ = ANKLE_BIND_AX; val ayJ = ANKLE_BIND_Y; val azJ = ANKLE_BIND_Z
 
-        // 3A. Femur (Hip -> Knee) with sleek convex organic thigh profile & subtle musculature
+        // 3A. Femur (Hip -> Knee) sculpted in its exact orthonormal local frame (uLat, uF, uBack)
         val fdx = kx - hx; val fdy = ky - hy; val fdz = kz - hz
         val fLen2 = fdx * fdx + fdy * fdy + fdz * fdz
+        val fLen = sqrt(fLen2).coerceAtLeast(1e-5f)
+        val uFx = fdx / fLen; val uFy = fdy / fLen; val uFz = fdz / fLen
+        // Local posterior axis perpendicular to femur (points toward back of thigh / buttock / mattress)
+        val rawBackX = uFx * uFz
+        val rawBackY = uFy * uFz
+        val rawBackZ = uFz * uFz - 1f
+        val rawBackLen = sqrt(rawBackX * rawBackX + rawBackY * rawBackY + rawBackZ * rawBackZ).coerceAtLeast(1e-5f)
+        val uBackX = rawBackX / rawBackLen
+        val uBackY = rawBackY / rawBackLen
+        val uBackZ = rawBackZ / rawBackLen
+        // Local lateral axis (uF x uBack): +1 on outer thigh, -1 on inner/medial contact surface
+        val rawLatX = uFy * uBackZ - uFz * uBackY
+        val rawLatY = uFz * uBackX - uFx * uBackZ
+        val rawLatZ = uFx * uBackY - uFy * uBackX
+        val rawLatLen = sqrt(rawLatX * rawLatX + rawLatY * rawLatY + rawLatZ * rawLatZ).coerceAtLeast(1e-5f)
+        val uLatX = rawLatX / rawLatLen
+        val uLatY = rawLatY / rawLatLen
+        val uLatZ = rawLatZ / rawLatLen
+
         val hFem = (((ax - hx) * fdx + (y - hy) * fdy + (z - hz) * fdz) / fLen2).coerceIn(0f, 1f)
         val fpx = ax - (hx + fdx * hFem)
         val fpy = y - (hy + fdy * hFem)
@@ -346,41 +365,57 @@ internal object BlossomSdfBodyBuilder {
         val fDist = sqrt(fpx * fpx + fpy * fpy + fpz * fpz)
         val femDrop = smoothStep(0.14f, 1.0f, hFem)
         var rFem = 0.72f - 0.26f * femDrop * femDrop
-        // Subtle anterior quadriceps fullness & smooth, sleek posterior hamstring contour (zero lump!)
+        // Local-frame anterior quad curve + v34.0 upper-third posterior hamstring & outer-thigh fullness
+        // (keeps inner/medial contact surface at latDot < 0 and knee width at hFem -> 1.0 unchanged!)
         val midThighW = smoothBell(hFem, 0.14f, 0.78f, 0.16f)
-        if (midThighW > 0.001f && fDist > 1e-4f) {
-            val antFactor = (fpz / fDist).coerceIn(-1f, 1f)
-            rFem += max(0f, antFactor) * 0.036f * midThighW + max(0f, -antFactor) * 0.022f * midThighW
+        val upperThirdBackW = exp(-((hFem - 0.28f) / 0.24f).let { it * it }) *
+            smoothStep(0.02f, 0.14f, hFem) * (1f - smoothStep(0.56f, 0.78f, hFem))
+        val upperThirdLatW = exp(-((hFem - 0.22f) / 0.19f).let { it * it }) *
+            smoothStep(0.02f, 0.12f, hFem) * (1f - smoothStep(0.46f, 0.66f, hFem))
+        if (fDist > 1e-4f && (midThighW > 0.001f || upperThirdBackW > 0.001f || upperThirdLatW > 0.001f)) {
+            val invFDist = 1f / fDist
+            val backDot = ((fpx * uBackX + fpy * uBackY + fpz * uBackZ) * invFDist).coerceIn(-1f, 1f)
+            val latDot = ((fpx * uLatX + fpy * uLatY + fpz * uLatZ) * invFDist).coerceIn(-1f, 1f)
+            val antMask = smoothStep(0.10f, 0.90f, -backDot)
+            val backMask = smoothStep(-0.08f, 0.85f, backDot)
+            val midHamstringMask = smoothStep(0.12f, 0.90f, backDot)
+            val latMask = smoothStep(0.06f, 0.88f, latDot)
+            rFem += antMask * 0.036f * midThighW +
+                midHamstringMask * 0.042f * midThighW +
+                backMask * 0.175f * upperThirdBackW +
+                latMask * 0.078f * upperThirdLatW
         }
         val dFemur = fDist - rFem
 
-        // 3B. Sleek infragluteal saddle strictly bridging buttock cheek into upper hamstring (zero mid-thigh protrusion!)
+        // 3B. v34.0 Smooth buttock-to-upper-hamstring saddle eliminating the projecting lower-buttock shelf
+        // while keeping the transition organic into the upper third of the back of the thigh
         val dGluteBridge = sdCapsule(
             ax, y, z,
-            0.96f, -0.44f, -0.58f,
-            1.28f, -0.66f, 0.06f,
-            0.54f, 0.46f
+            0.98f, -0.54f, -0.54f,
+            1.38f, -1.10f, 0.04f,
+            0.53f, 0.42f
         )
 
-        // 3C. Crisp anatomical knee (patella dome + subtle descending patellar tendon taper & parapatellar softening)
+        // 3C. Crisp anatomical knee anchored directly to shared KNEE_BIND_* coordinates
         val dPatella = sdEllipsoid(
-            px = ax - 1.80f,
-            py = y - (-1.90f),
-            pz = z - 1.91f,
+            px = ax - kx,
+            py = y - (ky - 0.04f),
+            pz = z - (kz + 0.17f),
             rx = 0.24f,
             ry = 0.26f,
             rz = 0.22f
         )
+        val tdx = axJ - kx; val tdy = ayJ - ky; val tdz = azJ - kz
+        val tLen2 = tdx * tdx + tdy * tdy + tdz * tdz
+        val tLen = sqrt(tLen2).coerceAtLeast(1e-5f)
         val dPatellarTendon = sdCapsule(
             ax, y, z,
-            1.80f, -1.98f, 1.84f,
-            1.79f, -2.38f, 1.52f,
+            kx, ky - 0.12f, kz + 0.10f,
+            kx + (tdx / tLen) * 0.50f, ky + (tdy / tLen) * 0.50f - 0.04f, kz + (tdz / tLen) * 0.50f + 0.12f,
             0.155f, 0.135f
         )
 
-        // 3D. Tibia + sleek bone-aligned gastrocnemius calf contour tapering smoothly to slender ankle (zero pointy bump!)
-        val tdx = axJ - kx; val tdy = ayJ - ky; val tdz = azJ - kz
-        val tLen2 = tdx * tdx + tdy * tdy + tdz * tdz
+        // 3D. Tibia + sleek bone-aligned gastrocnemius calf contour tapering smoothly to slender ankle
         val hTib = (((ax - kx) * tdx + (y - ky) * tdy + (z - kz) * tdz) / tLen2).coerceIn(0f, 1f)
         val tpx = ax - (kx + tdx * hTib)
         val tpy = y - (ky + tdy * hTib)
@@ -389,21 +424,24 @@ internal object BlossomSdfBodyBuilder {
         val calfBelly = exp(-((hTib - 0.34f) / 0.24f).let { it * it })
         var rTib = 0.44f - 0.205f * smoothStep(0.14f, 0.96f, hTib) + 0.042f * calfBelly
         if (calfBelly > 0.001f && tDist > 1e-4f) {
-            // Posterior unit direction perpendicular to the diagonal tibia bone (smooth, elongated gastrocnemius curve)
-            val postFactor = ((tpy * 0.747f - tpz * 0.664f) / tDist).coerceIn(-1f, 1f)
+            // Exact posterior unit direction perpendicular to the diagonal tibia bone (+Y, -Z)
+            val tSagLen = sqrt(tdy * tdy + tdz * tdz).coerceAtLeast(1e-5f)
+            val tPostY = -tdz / tSagLen
+            val tPostZ = tdy / tSagLen
+            val postFactor = ((tpy * tPostY + tpz * tPostZ) / tDist).coerceIn(-1f, 1f)
             rTib += max(0f, postFactor) * 0.062f * calfBelly
         }
         val dTibia = tDist - rTib
 
-        val dUpperLeg = smin(dFemur, dGluteBridge, 0.24f)
+        val dUpperLeg = smin(dFemur, dGluteBridge, 0.36f)
         var dLeg = smin(dUpperLeg, dTibia, 0.16f)
         dLeg = smin(dLeg, dPatella, 0.12f)
         dLeg = smin(dLeg, dPatellarTendon, 0.13f)
-        // Subtle parapatellar soft depressions flanking the kneecap (sized >= 1.5x STEP so Surface Nets stays silky smooth)
-        if (y in -2.35f..-1.55f && z > 1.55f) {
-            val paraMed = exp(-(((ax - 1.56f) / 0.14f).let { it * it } + ((y + 1.94f) / 0.18f).let { it * it }))
-            val paraLat = exp(-(((ax - 2.04f) / 0.14f).let { it * it } + ((y + 1.94f) / 0.18f).let { it * it }))
-            dLeg += 0.017f * (paraMed + paraLat) * smoothStep(1.58f, 1.88f, z)
+        // Subtle parapatellar soft depressions flanking the kneecap (aligned to shared KNEE_BIND_*)
+        if (y in (ky - 0.49f)..(ky + 0.31f) && z > kz - 0.19f) {
+            val paraMed = exp(-(((ax - (kx - 0.24f)) / 0.14f).let { it * it } + ((y - (ky - 0.08f)) / 0.18f).let { it * it }))
+            val paraLat = exp(-(((ax - (kx + 0.24f)) / 0.14f).let { it * it } + ((y - (ky - 0.08f)) / 0.18f).let { it * it }))
+            dLeg += 0.017f * (paraMed + paraLat) * smoothStep(kz - 0.16f, kz + 0.14f, z)
         }
 
         // ---------------------------------------------------------------------
@@ -427,10 +465,10 @@ internal object BlossomSdfBodyBuilder {
             ry = 0.130f,
             rz = 0.114f
         )
-        // Subtle posterior Achilles tendon column anchoring calf cleanly into the heel
+        // Subtle posterior Achilles tendon column anchoring the steeper v34.0 lower calf cleanly into the heel
         val dAchilles = sdCapsule(
             ax, y, z,
-            1.68f, -3.55f, -0.44f,
+            1.71f, -3.72f, -0.46f,
             1.68f, -4.10f, -0.96f,
             0.125f, 0.115f
         )
@@ -961,10 +999,10 @@ internal object BlossomSdfBodyBuilder {
         val ingDip = exp(-((y - ingLineY) / 0.15f).let { it * it }) * smoothBell(ax, 0.42f, 1.24f, 0.24f) * frontW
         val ingAo = 1f - 0.08f * ingDip
 
-        // Back-of-knee popliteal crease AO
-        val popDx = (ax - 1.76f) / 0.36f
-        val popDy = (y - (-1.82f)) / 0.34f
-        val popDz = (z - 1.28f) / 0.36f
+        // Back-of-knee popliteal crease AO (aligned to shared KNEE_BIND_*)
+        val popDx = (ax - (KNEE_BIND_AX - 0.04f)) / 0.36f
+        val popDy = (y - (KNEE_BIND_Y + 0.04f)) / 0.34f
+        val popDz = (z - (KNEE_BIND_Z - 0.46f)) / 0.36f
         val popMask = exp(-(popDx * popDx + popDy * popDy + popDz * popDz)) * smoothStep(0.05f, 0.65f, -nz)
         val popAo = 1f - 0.26f * popMask
 
@@ -976,11 +1014,11 @@ internal object BlossomSdfBodyBuilder {
         // Aligned to exact v6.1 anterior cubital crease (ax=2.26, y=2.28)
         val cubitalLineY = 2.28f - (ax - 2.26f) * 0.12f
         val elbowAo = 1f - 0.15f * exp(-(((ax - 2.26f) / 0.24f).let { it * it } + ((y - cubitalLineY) / 0.15f).let { it * it })) * frontW
-        // Gentle parapatellar & retromalleolar joint contour AO
+        // Gentle parapatellar & retromalleolar joint contour AO (aligned to shared KNEE_BIND_*)
         val paraKneeAo = 1f - 0.065f * (
-            exp(-(((ax - 1.56f) / 0.16f).let { it * it } + ((y + 1.94f) / 0.22f).let { it * it })) +
-                exp(-(((ax - 2.04f) / 0.16f).let { it * it } + ((y + 1.94f) / 0.22f).let { it * it }))
-            ) * smoothStep(1.52f, 1.86f, z)
+            exp(-(((ax - (KNEE_BIND_AX - 0.24f)) / 0.16f).let { it * it } + ((y - (KNEE_BIND_Y - 0.08f)) / 0.22f).let { it * it })) +
+                exp(-(((ax - (KNEE_BIND_AX + 0.24f)) / 0.16f).let { it * it } + ((y - (KNEE_BIND_Y - 0.08f)) / 0.22f).let { it * it }))
+            ) * smoothStep(KNEE_BIND_Z - 0.22f, KNEE_BIND_Z + 0.12f, z)
         val ankleHollowAo = 1f - 0.10f * (
             exp(-(((ax - 1.535f) / 0.13f).let { it * it } + ((y + 3.96f) / 0.22f).let { it * it })) +
                 exp(-(((ax - 1.825f) / 0.13f).let { it * it } + ((y + 3.98f) / 0.22f).let { it * it }))
@@ -989,7 +1027,7 @@ internal object BlossomSdfBodyBuilder {
         val ao = (cushionAo * navelAo * cleftAo * infraglutealAo * ingAo * popAo * axillaAo * notchAo * supraClavAo *
             underChinAo * elbowAo * paraKneeAo * ankleHollowAo).coerceIn(0.14f, 1f)
 
-        val kneeWarm = exp(-(((ax - 1.80f) / 0.42f).let { it * it } + ((y + 1.86f) / 0.42f).let { it * it } + ((z - 1.78f) / 0.42f).let { it * it })) * 0.09f
+        val kneeWarm = exp(-(((ax - KNEE_BIND_AX) / 0.42f).let { it * it } + ((y - KNEE_BIND_Y) / 0.42f).let { it * it } + ((z - (KNEE_BIND_Z + 0.04f)) / 0.42f).let { it * it })) * 0.09f
         val shoulderWarm = exp(-(((ax - 1.32f) / 0.40f).let { it * it } + ((y - 4.50f) / 0.40f).let { it * it })) * 0.05f
         val elbowWarm = exp(-(((ax - 2.28f) / 0.30f).let { it * it } + ((y - 2.26f) / 0.30f).let { it * it })) * 0.055f * (1f - frontW * 0.55f)
         val ankleWarm = exp(-(((ax - 1.68f) / 0.34f).let { it * it } + ((y + 4.18f) / 0.32f).let { it * it })) * 0.045f
@@ -2655,9 +2693,25 @@ internal object BlossomSdfBodyBuilder {
     // -------------------------------------------------------------------------
     // 60 FPS HIP-SOCKET ARTICULATED LEG-SPREAD SKINNING (BODY + TOES + TOENAILS)
     // -------------------------------------------------------------------------
+    // Single shared bind-leg joint definition (+X half-space; mirrored in -X for left leg).
+    // v34.0 proportions: fixed hip/ankle/heel, total length (6.5525), and original +Z knee bend plane,
+    // with femur:shin = 1.10 (L1 = 3.4322, L2 = 3.1202) consumed identically by SDF, skinning, 2-bone IK,
+    // touch hit testing, and dynamic kneecap shader shading!
     const val HIP_PIVOT_AX = 1.12f
     const val HIP_PIVOT_Y = 0.26f
     const val HIP_PIVOT_Z = -0.22f
+
+    const val KNEE_BIND_AX = 1.88425f
+    const val KNEE_BIND_Y = -2.51391f
+    const val KNEE_BIND_Z = 1.65127f
+
+    const val ANKLE_BIND_AX = 1.68f
+    const val ANKLE_BIND_Y = -4.24f
+    const val ANKLE_BIND_Z = -0.94f
+
+    const val HEEL_BIND_AX = 1.68f
+    const val HEEL_BIND_Y = -4.06f
+
     const val MAX_LEG_SPREAD_RAD = 0.25f
     const val MANUAL_MIN_LEG_SPREAD = -0.30f
     const val PEAK_MIN_LEG_SPREAD = -1.00f
@@ -2706,23 +2760,23 @@ internal object BlossomSdfBodyBuilder {
         val ikHFemBuf = FloatArray(bodyMesh.vertexCount)
         var count = 0
 
-        // Femur bone vector in +X half-space (Hip -> Knee)
-        val fdx = 1.80f - HIP_PIVOT_AX
-        val fdy = -1.86f - HIP_PIVOT_Y
-        val fdz = 1.74f - HIP_PIVOT_Z
+        // Femur bone vector in +X half-space (Hip -> Knee) from shared bind joints
+        val fdx = KNEE_BIND_AX - HIP_PIVOT_AX
+        val fdy = KNEE_BIND_Y - HIP_PIVOT_Y
+        val fdz = KNEE_BIND_Z - HIP_PIVOT_Z
         val fLen2 = fdx * fdx + fdy * fdy + fdz * fdz
 
         // Tibia bone vector in +X half-space (Knee -> Ankle) for 2-bone IK ankle/foot transition
-        val tdx = 1.68f - 1.80f
-        val tdy = -4.24f - (-1.86f)
-        val tdz = -0.94f - 1.74f
+        val tdx = ANKLE_BIND_AX - KNEE_BIND_AX
+        val tdy = ANKLE_BIND_Y - KNEE_BIND_Y
+        val tdz = ANKLE_BIND_Z - KNEE_BIND_Z
         val tLen2 = tdx * tdx + tdy * tdy + tdz * tdz
 
         // Hip -> Ankle unit chord separates the entire femur (dot < 0) from the entire tibia (dot > 0)
         // cleanly across both the anterior patella and posterior popliteal knee crease
-        val hadx = 1.68f - HIP_PIVOT_AX
-        val hady = -4.24f - HIP_PIVOT_Y
-        val hadz = -0.94f - HIP_PIVOT_Z
+        val hadx = ANKLE_BIND_AX - HIP_PIVOT_AX
+        val hady = ANKLE_BIND_Y - HIP_PIVOT_Y
+        val hadz = ANKLE_BIND_Z - HIP_PIVOT_Z
         val haLen = sqrt(hadx * hadx + hady * hady + hadz * hadz).coerceAtLeast(1e-5f)
         val sepDirX = hadx / haLen
         val sepDirY = hady / haLen
@@ -2755,10 +2809,10 @@ internal object BlossomSdfBodyBuilder {
             val patchGuard = smoothStep(1.05f, 1.68f, collarDist3d)
             val groinYGuard = smoothStep(0.38f, -0.58f, y)
             val femRamp = smoothStep(0.10f, 0.54f, hFem)
-            val lowerLimbFull = smoothStep(-1.05f, -1.65f, y)
+            val lowerLimbFull = smoothStep(-1.25f, -1.98f, y)
             val w = max(femRamp * groinYGuard, lowerLimbFull) * patchGuard
 
-            // v30.0–v33.0 Beta ("Hip-anchored thigh swing" + 2-bone IK): preserves exact 3D pelvic collar
+            // v30.0–v34.0 Beta ("Hip-anchored thigh swing" + 2-bone IK): preserves exact 3D pelvic collar
             // guard (collarDist3d <= 1.05 pinned) while smoothly distributing hip-joint skinning from the
             // authored hip pivot along the femur, transitioning cleanly across the knee plane into the shin
             // and across the malleoli into the cushion-grounded foot frame.
@@ -2768,41 +2822,45 @@ internal object BlossomSdfBodyBuilder {
             val wHipSwingFull = max(hipSwingFemRamp * hipSwingPelvisGuard, lowerLimbFull) * patchGuard
             val wHipSwing = w + (wHipSwingFull - w) * lateralFemurFactor
 
-            // v33.0 Two-bone IK hip-socket weight: single unified C1-smooth field (zero lateral X-cliff!)
-            // that keeps Seam D / pelvic collar (collarDist3d <= 1.05) strictly pinned, compensates for
-            // collarDzNorm's 1/0.30 Z-compression above collarSurfaceZ, and uses a low-peak-slope ramp
-            // so the 3D hip-rotation Jacobian stays strictly positive (0/0 inner-thigh foldover even at
-            // max squeeze -0.84/-1.12) while driving clean linear hip-anchored swing across the thigh.
-            val collarExcess = (collarDist3d - 1.05f).coerceAtLeast(0f)
+            // v34.0 Two-bone IK hip-socket weight: single unified C1-smooth field (zero lateral X-cliff!)
+            // that keeps Seam D / pelvic collar (collarDist3d <= 1.05) strictly pinned, accounts for BOTH
+            // anterior (+Z) and posterior (-Z below the buttock) clearance from the anterior vulva patch
+            // so the back and outside of the upper thigh swing smoothly with the hip (no stationary band
+            // below the buttock!), while preserving 0/0 inner-thigh foldover at max squeeze (-0.84/-1.12).
+            val postThighDz = max(0f, 0.22f - z) *
+                smoothStep(0.68f, 1.15f, ax) *
+                smoothStep(-0.56f, -1.08f, y)
+            val ikCollarDist = sqrt(collarDist3d * collarDist3d + (postThighDz / 0.42f).let { it * it })
+            val collarExcess = (ikCollarDist - 1.05f).coerceAtLeast(0f)
             val zDamp = 1f / (1f + 0.17f * collarDzNorm)
-            val ikGuardT = (collarExcess * zDamp / 1.98f).coerceIn(0f, 1f)
+            val ikGuardT = (collarExcess * zDamp / 1.92f).coerceIn(0f, 1f)
             val ikPatchGuard = 0.45f * ikGuardT + 0.55f * (ikGuardT * ikGuardT * (3f - 2f * ikGuardT))
             val ikPelvisYGuard = smoothStep(0.42f, -0.24f, y)
-            val ikFemRamp = smoothStep(-0.04f, 0.42f, hFem)
+            val ikFemRamp = smoothStep(-0.04f, 0.36f, hFem)
             val wIkHip = max(ikFemRamp * ikPelvisYGuard, lowerLimbFull) * ikPatchGuard
 
             if (w > 0.001f || wHipSwing > 0.001f || wIkHip > 0.001f) {
                 // Planted-foot knee/upper-leg shift weight: 0 at pelvis & vulva, rises smoothly to 1.0 at knee,
-                // and tapers cleanly back to 0.0 above ankle/foot (y <= -3.85) so feet stay 100% planted!
-                val ankleAnchor = smoothStep(-3.86f, -2.02f, y)
+                // and tapers cleanly back to 0.0 above ankle/foot (y <= -3.86) so feet stay 100% planted!
+                val ankleAnchor = smoothStep(-3.86f, -2.56f, y)
                 val thighRamp = smoothStep(0.18f, 0.94f, hFem) * groinYGuard * patchGuard
                 val kw = if (w > 0.001f) (thighRamp * ankleAnchor).coerceIn(0f, 1f) else 0f
-                val tiltDir = (smoothStep(-2.12f, -1.58f, y) * 2f - 1f) * kw
+                val tiltDir = (smoothStep(KNEE_BIND_Y - 0.26f, KNEE_BIND_Y + 0.28f, y) * 2f - 1f) * kw
 
-                val femLinear = max(hFem.coerceIn(0f, 1f), smoothStep(-1.45f, -2.05f, y))
+                val femLinear = max(hFem.coerceIn(0f, 1f), smoothStep(-1.80f, -2.50f, y))
                 val hipRootEase = smoothStep(0.02f, 0.22f, hFem)
                 val kwHipSwingFull = (femLinear * (0.20f + 0.80f * hipRootEase) * hipSwingPelvisGuard * patchGuard * ankleAnchor).coerceIn(0f, 1f)
                 val kwHipSwing = if (wHipSwing > 0.001f) {
                     (kw + (kwHipSwingFull - kw) * lateralFemurFactor).coerceIn(0f, 1f)
                 } else 0f
-                val tiltDirHipSwing = (smoothStep(-2.12f, -1.58f, y) * 2f - 1f) * kwHipSwing
+                val tiltDirHipSwing = (smoothStep(KNEE_BIND_Y - 0.26f, KNEE_BIND_Y + 0.28f, y) * 2f - 1f) * kwHipSwing
 
-                // v33.0 Two-bone IK knee & foot transition weights:
+                // v34.0 Two-bone IK knee & foot transition weights centered on shared bind joints:
                 // - wIkShin: smooth knee transition centered on authored knee plane
                 // - wIkFoot: smooth malleoli/heel-to-instep transition (captures posterior heel at y=-4.06!)
-                val kneePlaneProj = (ax - 1.80f) * sepDirX + (y - (-1.86f)) * sepDirY + (z - 1.74f) * sepDirZ
+                val kneePlaneProj = (ax - KNEE_BIND_AX) * sepDirX + (y - KNEE_BIND_Y) * sepDirY + (z - KNEE_BIND_Z) * sepDirZ
                 val wIkShin = smoothStep(-0.36f, 0.36f, kneePlaneProj)
-                val hTib = ((ax - 1.80f) * tdx + (y - (-1.86f)) * tdy + (z - 1.74f) * tdz) / tLen2
+                val hTib = ((ax - KNEE_BIND_AX) * tdx + (y - KNEE_BIND_Y) * tdy + (z - KNEE_BIND_Z) * tdz) / tLen2
                 val wIkFoot = max(smoothStep(0.87f, 1.02f, hTib), smoothStep(-4.18f, -4.34f, y))
 
                 idxBuf[count] = i
