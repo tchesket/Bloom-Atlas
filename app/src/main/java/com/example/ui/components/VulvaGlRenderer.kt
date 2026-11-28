@@ -245,6 +245,7 @@ class VulvaGlTextureView(
 
     @Volatile
     var breathPhase: Float = 0f
+    var arousalTricklePhase: Float = 0f
     private var smoothedStimulus = 0f
     private var lastBreathTimeNs = 0L
     private val breathRng = kotlin.random.Random(System.nanoTime())
@@ -874,13 +875,23 @@ class VulvaGlTextureView(
             currentDeform.hoodRetract.coerceIn(0f, 1f),
             if (legsMode && currentDeform.betaRealismSurfaceMicro) 1.0f else 0.0f
         )
-        // v33.0 packed uniform: x=Inner tissue sheen slider (0..1), y=dynamic physiological arousal wetness (0..1)
+        // v33.0–v35.0 packed uniform:
+        // x=Inner tissue sheen (0..1), y=effective peak arousal wetness (arousalWetness * peakWetnessIntensity, 0..1),
+        // z=continuous viscous trickle clock (seconds, wraps cleanly on 1000s LCM of trickle periods),
+        // w=peakWetnessIntensity slider (0..1)
+        val peakWetIntensity = currentDeform.betaV3PeakWetnessIntensity.coerceIn(0f, 1f)
+        val effectiveArousalWet = (currentDeform.arousalWetness.coerceIn(0f, 1f) * peakWetIntensity).coerceIn(0f, 1f)
+        if (effectiveArousalWet > 0.008f) {
+            arousalTricklePhase = (arousalTricklePhase + dtSec * (0.70f + 0.30f * effectiveArousalWet)) % 1000.0f
+        } else {
+            arousalTricklePhase = 0f
+        }
         GLES20.glUniform4f(
             uBetaV3SheenWetnessLoc,
             currentDeform.betaV3InnerTissueSheenStrength.coerceIn(0f, 1f),
-            currentDeform.arousalWetness.coerceIn(0f, 1f),
-            0.0f,
-            0.0f
+            effectiveArousalWet,
+            arousalTricklePhase,
+            peakWetIntensity
         )
 
         GLES20.glEnableVertexAttribArray(aPosLoc)
@@ -2025,7 +2036,7 @@ class VulvaGlTextureView(
             uniform vec4 uBetaRealismFlags2; // x=dynamicCreases, y=headTurn, z=leftLegSpread, w=rightLegSpread
             uniform vec4 uBetaRealismPose;   // x=selfSpreadPose, y=leftKneeShift, z=rightKneeShift, w=eyeBlink
             uniform vec4 uBetaRealismFlags3; // x=hoodMonsBlend, y=facialMicro, z=hoodRetract, w=surfaceMicro
-            uniform vec4 uBetaV3SheenWetness; // x=innerTissueSheen (0..1), y=arousalWetness (0..1)
+            uniform vec4 uBetaV3SheenWetness; // x=innerTissueSheen (0..1), y=effectiveArousalWet (0..1), z=tricklePhaseSec, w=peakWetIntensity (0..1)
 
             float sq(float x) {
                 return x * x;
@@ -3308,19 +3319,119 @@ class VulvaGlTextureView(
                 float v3HydrationVar = mix(0.86, 1.18, nMid * 0.55 + nHemo * 0.45);
                 float v3MucosaSheen = 1.0 + v3ZoneMucosa * v3MatBounded * (0.28 * v3HydrationVar);
                 float v3GlansPearl = 1.0 + v3ZoneGlans * v3MatBounded * 0.24;
-                // v33.0 Dynamic physiological arousal wetness (ramps in 8s pre-event, holds max in 16s peak,
-                // decays back to baseline over ~30s). Strictly localized to moist vulvar mucosa (vestibule,
-                // introitus, inward labia minora, frenulum, glans); dry outer skin & hood-mons blend untouched!
+                // v33.0–v35.0 Dynamic physiological arousal wetness (ramps in 8s pre-event, holds max in 16s peak,
+                // decays back to baseline over ~30s, scaled by Beta Lab "Peak wetness intensity" slider).
+                // Models realistic viscous natural vaginal lubricant: warm optical wet darkening of hydrated mucosa,
+                // cohesive fluid-film thickness ripples & lower-vestibule pooling, dedicated high-IOR dielectric
+                // clear-coat liquid specular + neutral grazing Fresnel (clearly visible even over 90% baseline
+                // inner tissue sheen), and 2 subtle slow gravity-driven vestibule lubricant trails toward the
+                // posterior fourchette at elevated arousal. Strictly confined to moist vulvar mucosa!
                 float arousalWet = clamp(uBetaV3SheenWetness.y, 0.0, 1.0);
+                float arousalTrickleTime = uBetaV3SheenWetness.z;
                 float arousalWetW = 0.0;
+                float viscousClearCoat = 0.0;
+                float viscousFresnel = 0.0;
+                float viscousPoolW = 0.0;
+                float trickleBeadGlint = 0.0;
                 if (arousalWet > 0.001) {
+                    float archWetFacing = mix(
+                        1.0,
+                        smoothstep(-0.34, 0.36, -sign(vRestPos.x) * N.x + N.z * 0.46) * smoothstep(0.14, 0.58, archAlpha),
+                        uIsLabiaArchMesh
+                    );
                     float arousalMucosaMask = pelvicRegionMask * pelvicBindZGuard *
-                        smoothstep(0.18, 0.62, mucosa) * (1.0 - hoodAnyW * 0.88);
-                    float introWetFocus = exp(-(sq(vRestPos.x / 0.16) + sq((vRestPos.y + 0.18) / 0.24)));
-                    arousalWetW = arousalWet * arousalMucosaMask * (0.68 + 0.32 * introWetFocus);
-                    wetness = clamp(wetness + arousalWetW * (0.42 - 0.18 * wetness), 0.0, 0.98);
-                    // Physically subtle optical darkening of richly hydrated mucosal surface film
-                    albedo *= mix(1.0, 0.91, arousalWetW * 0.85);
+                        smoothstep(0.16, 0.56, mucosa) * archWetFacing * (1.0 - hoodAnyW * 0.90);
+                    float introWetFocus = exp(-(sq(vRestPos.x / 0.17) + sq((vRestPos.y + 0.22) / 0.26)));
+                    float lowerVestPool = (1.0 - uIsLabiaArchMesh) * (1.0 - uIsGlansMesh) *
+                        exp(-(sq(vRestPos.x / 0.13) + sq((vRestPos.y + 0.34) / 0.18)));
+                    arousalWetW = clamp(arousalWet * arousalMucosaMask * (0.66 + 0.34 * introWetFocus + 0.22 * lowerVestPool), 0.0, 1.0);
+                    viscousPoolW = clamp(arousalWet * arousalMucosaMask * (0.45 * introWetFocus + 0.72 * lowerVestPool), 0.0, 1.0);
+                    wetness = clamp(wetness + arousalWetW * (0.52 - 0.18 * wetness), 0.0, 0.99);
+                    // Physically grounded warm optical darkening & richer crimson saturation of fluid-coated mucosa
+                    albedo *= mix(vec3(1.0), vec3(0.84, 0.74, 0.76), arousalWetW * 0.88);
+
+                    // Cohesive viscous liquid-film thickness micro-meniscus normal perturbation
+                    vec3 pFilm = vRestPos * vec3(18.0, 14.0, 18.0) + vec3(0.0, arousalTrickleTime * 0.075, 0.0);
+                    float fDx = vnoise3(pFilm + vec3(0.35, 0.0, 0.0)) - vnoise3(pFilm - vec3(0.35, 0.0, 0.0));
+                    float fDy = vnoise3(pFilm + vec3(0.0, 0.35, 0.0)) - vnoise3(pFilm - vec3(0.0, 0.35, 0.0));
+                    vec3 filmGrad = vec3(fDx, fDy, 0.0) * (0.16 + 0.09 * lowerVestPool) * arousalWetW;
+                    // Soft meniscus pool lip around the inferior introitus rim & fossa navicularis
+                    vec3 poolRimSlope = vec3(-vRestPos.x * 1.1, -(vRestPos.y + 0.34) * 0.9, 0.0) *
+                        viscousPoolW * 0.14;
+
+                    // Subtle slow gravity-driven cohesive viscous trickle creeping from lower introitus (-0.21)
+                    // down the lower vestibule toward the posterior fourchette (-0.48) at elevated wetness
+                    vec3 trickleNormalShift = vec3(0.0);
+                    float trickleWakeBoost = 0.0;
+                    float trickleBeadMask = 0.0;
+                    if (arousalWet > 0.24 && uIsLabiaArchMesh < 0.5 && uIsGlansMesh < 0.5) {
+                        float trickleZone = pelvicRegionMask * pelvicBindZGuard *
+                            smoothstep(0.34, 0.70, mucosa) * (1.0 - hoodAnyW) *
+                            (1.0 - smoothstep(0.075, 0.115, abs(vRestPos.x))) *
+                            smoothstep(-0.52, -0.45, vRestPos.y) *
+                            (1.0 - smoothstep(-0.20, -0.15, vRestPos.y));
+                        float trickleEnv = smoothstep(0.24, 0.66, arousalWet) * trickleZone;
+                        if (trickleEnv > 0.002) {
+                            // Primary slow trail (10.0s cycle -> 0.10 Hz, divides 1000s wrap cleanly)
+                            float u1 = fract(arousalTrickleTime * 0.10);
+                            float life1 = smoothstep(0.0, 0.14, u1) * (1.0 - smoothstep(0.80, 0.99, u1));
+                            float headY1 = mix(-0.205, -0.475, smoothstep(0.0, 0.88, u1));
+                            float pathX1 = 0.015 + 0.010 * sin(vRestPos.y * 19.0 + 0.65);
+                            float dx1 = vRestPos.x - pathX1;
+                            float dy1 = vRestPos.y - headY1;
+                            float bead1 = exp(-(sq(dx1 / 0.014) + sq(dy1 / 0.023))) * life1;
+                            float wakeLen1 = smoothstep(headY1 - 0.005, headY1 + 0.018, vRestPos.y) *
+                                (1.0 - smoothstep(-0.225, -0.195, vRestPos.y)) *
+                                exp(-max(vRestPos.y - headY1, 0.0) * 5.2);
+                            float wake1 = exp(-sq(dx1 / 0.0088)) * wakeLen1 * life1;
+
+                            // Secondary offset delicate trail (12.5s cycle -> 0.08 Hz, divides 1000s wrap cleanly)
+                            float u2 = fract(arousalTrickleTime * 0.08 + 0.47);
+                            float life2 = smoothstep(0.0, 0.15, u2) * (1.0 - smoothstep(0.79, 0.99, u2));
+                            float headY2 = mix(-0.225, -0.485, smoothstep(0.0, 0.89, u2));
+                            float pathX2 = -0.020 + 0.009 * sin(vRestPos.y * 21.0 - 1.15);
+                            float dx2 = vRestPos.x - pathX2;
+                            float dy2 = vRestPos.y - headY2;
+                            float bead2 = exp(-(sq(dx2 / 0.013) + sq(dy2 / 0.021))) * life2 * 0.85;
+                            float wakeLen2 = smoothstep(headY2 - 0.005, headY2 + 0.016, vRestPos.y) *
+                                (1.0 - smoothstep(-0.240, -0.210, vRestPos.y)) *
+                                exp(-max(vRestPos.y - headY2, 0.0) * 5.8);
+                            float wake2 = exp(-sq(dx2 / 0.0082)) * wakeLen2 * life2 * 0.82;
+
+                            trickleBeadMask = clamp((bead1 + bead2) * trickleEnv, 0.0, 1.0);
+                            trickleWakeBoost = clamp((wake1 + wake2) * trickleEnv, 0.0, 1.0);
+                            // Cohesive teardrop dome & rivulet cylinder normal curvature
+                            vec2 dome1 = vec2(dx1 / 0.014, dy1 / 0.023) * bead1 + vec2(dx1 / 0.009, 0.0) * wake1 * 0.45;
+                            vec2 dome2 = vec2(dx2 / 0.013, dy2 / 0.021) * bead2 + vec2(dx2 / 0.0085, 0.0) * wake2 * 0.45;
+                            trickleNormalShift = vec3((dome1 + dome2) * (0.34 * trickleEnv), 0.0);
+                            // Subtle optical darkening along cohesive lubricant trail
+                            albedo *= mix(vec3(1.0), vec3(0.88, 0.80, 0.82), clamp(trickleBeadMask * 0.72 + trickleWakeBoost * 0.40, 0.0, 1.0));
+                        }
+                    }
+
+                    vec3 Nwet = normalize(N + filmGrad + poolRimSlope + trickleNormalShift);
+                    float NwetDotH1 = max(dot(Nwet, H1), 0.0001);
+                    float NwetDotH2 = max(dot(Nwet, H2), 0.0001);
+                    float NwetRim = clamp(1.0 - max(dot(Nwet, V), 0.0), 0.0, 1.0);
+
+                    // Dedicated high-IOR viscous clear-coat dielectric reflection (bypasses 90% innerSheen cap)
+                    float coatSharp = pow(NwetDotH1, 210.0) * 1.18 + pow(NwetDotH2, 150.0) * 0.36;
+                    float coatBody = pow(NwetDotH1, 46.0) * 0.42 + pow(NwetDotH2, 38.0) * 0.14;
+                    float coatMod = mix(0.76, 1.24, clamp(tangleHeightC * 0.55 + ringSoftAo * 0.45, 0.0, 1.0));
+                    float rawCoat = (coatSharp + coatBody) * arousalWetW * (0.88 + 0.38 * viscousPoolW) * coatMod;
+                    viscousClearCoat = rawCoat / (1.0 + rawCoat * 0.24);
+
+                    // Colorless dielectric grazing liquid-film Fresnel (distinctive glass-like wet edge)
+                    viscousFresnel = pow(max(NwetRim, 0.0001), 2.35) * arousalWetW * (0.28 + 0.15 * viscousPoolW) *
+                        coatMod * (0.40 + 0.60 * max(NdotL1, 0.0));
+
+                    // Crisp cohesive droplet bead highlight + delicate glistening trail wake
+                    if (trickleBeadMask > 0.001 || trickleWakeBoost > 0.001) {
+                        float rawBead = (pow(NwetDotH1, 250.0) * 1.48 + pow(NwetDotH2, 160.0) * 0.42) * trickleBeadMask +
+                            (pow(NwetDotH1, 84.0) * 0.52 + pow(NwetDotH2, 64.0) * 0.18) * trickleWakeBoost +
+                            pow(max(NwetRim, 0.0001), 2.2) * (trickleBeadMask * 0.22 + trickleWakeBoost * 0.10);
+                        trickleBeadGlint = rawBead / (1.0 + rawBead * 0.22);
+                    }
                 }
 
                 // v33.0 Independent Vulva Beta Slider ("Inner tissue sheen", 0..1, 0.0 == bit-identical):
@@ -3348,7 +3459,7 @@ class VulvaGlTextureView(
                     arousalWetW * 5.0);
                 float pelvicBroadTrim = (1.0 - pelvicCutaneousFinish * 0.28) * (1.0 - nonArchPelvicMucosa * 0.26) * (1.0 - pelvicFinishMask * labiaInnerMask * 0.12);
                 float sheenBroadLift = 1.0 + innerSheenW * (0.95 * labiaInnerMask + 0.72 * (1.0 - labiaInnerMask)) * sheenFoldMod +
-                    arousalWetW * 0.48 * sheenFoldMod;
+                    arousalWetW * 0.54 * sheenFoldMod;
                 float broadAmp = mix(0.070, 0.148, wetness) * (0.88 + 0.24 * naturalSheen) * (1.0 - 0.56 * labiaInnerMask) * pelvicBroadTrim * v3OuterMatte * v3TransSatin * sheenBroadLift;
                 float broadSpec = pow(NdotH1, broadExp) * broadAmp * labiaOilBreakup;
                 // Secondary tight crisp highlight strictly reserved for naturally moist inner mucosa & clitoral glans
@@ -3361,7 +3472,7 @@ class VulvaGlTextureView(
                     innerSheenW * (76.0 * labiaInnerMask + 42.0 * (1.0 - labiaInnerMask)) -
                     arousalWetW * 18.0);
                 float sheenWetGainLift = 1.0 + innerSheenW * (1.55 * labiaInnerMask + 1.18 * (1.0 - labiaInnerMask)) * sheenFoldMod +
-                    arousalWetW * (0.85 + 0.45 * labiaInnerMask) * sheenFoldMod;
+                    arousalWetW * (0.92 + 0.48 * labiaInnerMask) * sheenFoldMod;
                 float wetSpecGain = (1.0 - 0.56 * labiaInnerMask) * (1.0 - nonArchPelvicMucosa * 0.34) * (1.0 - pelvicFinishMask * labiaInnerMask * 0.12) *
                     clamp(1.0 - v3ZoneTrans * v3MatBounded * 0.24, 0.25, 1.0) * v3MucosaSheen * v3GlansPearl * sheenWetGainLift;
                 float wetSharpSpec = (pow(NdotH1, wetKeyExp) * wetness * 0.54 +
@@ -3383,7 +3494,7 @@ class VulvaGlTextureView(
                 float velvetWrap = pow(viewRim, 2.2) * (1.0 - mucosa) * (1.0 - hairCoverage * 0.80) *
                     (0.052 + 0.018 * v3ZoneOuter * v3MatBounded);
                 // Delicate grazing liquid-film reflection strictly on moist inner mucosa when sheen/arousal wetness active
-                float moistGrazingSheen = pow(viewRim, 2.9) * (innerSheenW * 0.085 + arousalWetW * 0.095) * sheenFoldMod *
+                float moistGrazingSheen = pow(viewRim, 2.9) * (innerSheenW * 0.085 + arousalWetW * 0.11) * sheenFoldMod *
                     (0.45 + 0.55 * max(NdotL1, 0.0));
 
                 // Colored Hemoglobin AO Bounce: prevents crevices from looking muddy gray & softens hip/lip/body contrast
@@ -3419,11 +3530,14 @@ class VulvaGlTextureView(
                     mix(albedo * 1.35 + vec3(0.18, 0.13, 0.12), vec3(1.0, 0.91, 0.87), 0.52),
                     max(0.42 * labiaInnerMask, 0.32 * innerSheenW)
                 );
+                // Neutral high-IOR dielectric fluid clear-coat reflection color (un-tinted glossy liquid surface)
+                vec3 fluidCoatColor = vec3(1.0, 0.985, 0.975);
 
                 vec3 lit = ambient * coloredAo +
                            albedo * (diffKeyRGB * 0.78 * keyColor + diffFillRGB * (0.22 + neckSkinBlend * 0.08) * fillColor) * (vec3(0.28) + 0.72 * coloredAo) +
                            sssTint * (terminator * 0.35 * faceSssTrim + grazingTrans * 0.19 + thinTransmit * (0.22 + 0.20 * uLightMode)) * coloredAo +
                            specColor * (broadSpec + wetSharpSpec + moistGrazingSheen) * (0.30 + 0.70 * fullAo) +
+                           fluidCoatColor * (viscousClearCoat + viscousFresnel + trickleBeadGlint) * (0.36 + 0.64 * fullAo) +
                            mix(uSkinBase, vec3(1.0, 0.96, 0.93), 0.28) * velvetWrap * (0.45 + 0.55 * fullAo) +
                            mix(uSkinBase, sssTint, 0.46) * rimLight;
 

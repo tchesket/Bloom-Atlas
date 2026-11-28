@@ -1,5 +1,20 @@
 # Bloom Atlas — Version History
 
+## Version 35.0 (`versionCode = 35`)
+**Date:** 2026-11-27
+
+- **Rounder Vaginal Opening Enabled by Default at 54% (`BlossomViewportSessionState.kt`)**
+  - Set `betaV3IntroitusRoundnessState` (*"Rounder vaginal opening"*) to default ON at **`54%`** (`0.54f`) in `BlossomViewportSessionState`, while preserving `0f` reset behavior in `disableAllBetaToggles()` and `0f` default on `VulvaDeformationState` for isolated baseline geometry comparisons.
+- **Noticeably Wetter Viscous Peak Lubrication, Subtle Slow Vestibule Trickle & "Peak Wetness Intensity" Beta Slider (`VulvaGlRenderer.kt`, `VulvaGeometryBuilder.kt`, `BlossomViewportSessionState.kt`, `InteractiveVulva3DCanvas.kt`)**
+  - Added an independent **`Peak wetness intensity`** slider (`0–100%`, default **`100%`**, reset to `0%` on *All off*) in Beta Lab Tab 0 (`Vulva`) that scales the automatic peak wetness lifecycle (8s pre-event ramp -> 16s peak max -> ~30s post-event decay).
+  - Upgraded the Pass A mucosal wetness shader with a dedicated high-IOR dielectric clear-coat liquid layer (`viscousClearCoat` + neutral colorless grazing `viscousFresnel`) that rises cleanly above the `90%` *Inner tissue sheen* baseline without washing out folds, paired with warm optical wet darkening of hydrated mucosa, cohesive fluid-film thickness ripples, lower-vestibule/fossa-navicularis pooling, and two delicate, slow gravity-driven cohesive lubricant trails drifting gently from the lower introitus toward the posterior fourchette at elevated wetness (`arousalWet > 0.24`), driven by a continuous render-thread `arousalTricklePhase` clock (`uBetaV3SheenWetness.z`) with zero dry-skin spill and zero mesh rebuild overhead.
+- **Eliminated Stepped Two-Shelf Buttock Underside Silhouette (`BlossomSdfBodyBuilder.kt`, `BlossomGeometryUnitTest.kt`)**
+  - Diagnosed the exact resting and spread-pose final posed mesh via off-axis software Z-buffer projection (`yaw = 86°/96°/104°/-96°, pitch = -22°..-28°`) with left (`-X`) vs. right (`+X`) attribution, identifying the flat lower-posterior cap of `dTorso` sliced against `matPlane` as the source of the squared near/far double-shelf corner (`maxCorner = 4..7px`).
+  - Added 3D posterior-only pelvic-basin rounding (`outsidePatchRim` protecting the anterior vulva patch & Seam A/B rim 100%, curving the lower-posterior and lateral underside smoothly off `matPlane`), refined `dGlute` and `dGluteBridge`, and preserved a soft natural infragluteal fold fading smoothly toward the outer thigh while keeping v34.0 hip/knee/ankle/heel positions, `1.10` femur-to-shin proportions, and peak squeeze timing untouched.
+  - Verified via JVM Z-buffer projection (`maxCorner` reduced from `4..7px` -> `1..2px` across `yaw = 86°/96°/104°`, exact mirror symmetry at `yaw = -96°`, rest and spread poses, and `betaSoftButtockTable` ON/OFF) alongside full Seam A/B, Beta 2, and 2-bone IK regression tests.
+
+---
+
 ## Version 34.0 (`versionCode = 34`)
 **Date:** 2026-11-27
 

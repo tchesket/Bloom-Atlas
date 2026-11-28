@@ -168,9 +168,11 @@ data class VulvaDeformationState(
     val betaRealismFacialMicro: Boolean = false,
     val betaRealismSurfaceMicro: Boolean = false,
     val betaRealismHipThighSwing: Boolean = false,
-    // v33.0–v34.0 Independent Vulva Beta sliders (0..1; strictly 0f default here so baseline stays bit-identical)
+    // v33.0–v35.0 Independent Vulva Beta sliders (0..1; sheen/roundness 0f default here so baseline tests stay bit-identical)
     val betaV3InnerTissueSheenStrength: Float = 0f,
     val betaV3IntroitusRoundness: Float = 0f,
+    // v35.0 Peak wetness intensity multiplier (0..1; scales automatic peak viscous clear-coat & subtle vestibule trickle)
+    val betaV3PeakWetnessIntensity: Float = 1.0f,
     // v33.0 Dynamic physiological arousal wetness (0..1; ramps in pre-event, peaks at 1.0, decays over ~30s)
     val arousalWetness: Float = 0f,
     // v33.0 2-bone leg IK tremor & planted-heel contact signals (0f / false at rest)

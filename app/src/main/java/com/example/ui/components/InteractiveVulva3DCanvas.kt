@@ -903,6 +903,7 @@ fun InteractiveVulva3DCanvas(
     var betaV3HoodMonsUpperStrength by sessionState.betaV3HoodMonsUpperStrengthState
     var betaV3InnerTissueSheenStrength by sessionState.betaV3InnerTissueSheenStrengthState
     var betaV3IntroitusRoundness by sessionState.betaV3IntroitusRoundnessState
+    var betaV3PeakWetnessIntensity by sessionState.betaV3PeakWetnessIntensityState
     var betaVulvaElasticityEnabled by sessionState.betaVulvaElasticityEnabledState
     var betaVulvaElasticity by sessionState.betaVulvaElasticityState
     var betaBreastSizeBoostEnabled by sessionState.betaBreastSizeBoostEnabledState
@@ -2723,6 +2724,7 @@ fun InteractiveVulva3DCanvas(
         betaRealismHipThighSwing = betaRealismHipThighSwing,
         betaV3InnerTissueSheenStrength = betaV3InnerTissueSheenStrength,
         betaV3IntroitusRoundness = betaV3IntroitusRoundness,
+        betaV3PeakWetnessIntensity = betaV3PeakWetnessIntensity,
         arousalWetness = arousalWetness,
         leftLegTremor = if (betaRealismHipThighSwing) peakLegShakeL.value else 0f,
         rightLegTremor = if (betaRealismHipThighSwing) peakLegShakeR.value else 0f,
@@ -3592,6 +3594,7 @@ fun InteractiveVulva3DCanvas(
                     betaV3HoodMonsUpperBlend,
                     betaV3InnerTissueSheenStrength > 0.005f,
                     betaV3IntroitusRoundness > 0.005f,
+                    betaV3PeakWetnessIntensity > 0.005f,
                     betaVulvaElasticityEnabled && betaVulvaElasticity > 0.005f,
                     betaBreastSizeBoostEnabled && betaBreastSizeBoost > 0.005f
                 ).count { it }
@@ -3629,7 +3632,8 @@ fun InteractiveVulva3DCanvas(
                         betaV3HoodMonsBlend,
                         betaV3HoodMonsUpperBlend,
                         betaV3InnerTissueSheenStrength > 0.005f,
-                        betaV3IntroitusRoundness > 0.005f
+                        betaV3IntroitusRoundness > 0.005f,
+                        betaV3PeakWetnessIntensity > 0.005f
                     ).count { it }
                 }
                 val displayedLifelikeBetaCount = if (showExtraBetaOptions) activeLifelikeBetaCount else 0
@@ -4175,7 +4179,7 @@ fun InteractiveVulva3DCanvas(
                                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
                                     )
                                     Text(
-                                        text = "v34.0 Vulva Surface & Contour Sliders",
+                                        text = "v35.0 Vulva Surface, Contour & Wetness",
                                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, lineHeight = 11.sp),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -4195,6 +4199,16 @@ fun InteractiveVulva3DCanvas(
                                         value = betaV3IntroitusRoundness,
                                         tag = "slider_beta_v3_introitus_roundness",
                                         onValueChange = { betaV3IntroitusRoundness = it }
+                                    )
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.40f)
+                                    )
+                                    BetaStrengthSliderRow(
+                                        label = "Peak wetness intensity",
+                                        value = betaV3PeakWetnessIntensity,
+                                        tag = "slider_beta_v3_peak_wetness_intensity",
+                                        onValueChange = { betaV3PeakWetnessIntensity = it }
                                     )
                                 } else if (betaMenuTab == 1) {
                                     if (!showExtraBetaOptions) {

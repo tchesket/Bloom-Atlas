@@ -6045,9 +6045,10 @@ class BlossomGeometryUnitTest {
         assertTrue(session.betaV3HoodMonsUpperBlend)
         assertTrue(session.betaVulvaElasticityEnabled)
         assertTrue(session.betaBreastSizeBoostEnabled)
-        // v34.0 independent Vulva sliders: Inner tissue sheen defaults ON at 90%, Rounder vaginal opening defaults 0%
+        // v35.0 independent Vulva sliders: Inner tissue sheen 90%, Rounder vaginal opening 54%, Peak wetness intensity 100%
         assertEquals(0.90f, session.betaV3InnerTissueSheenStrength, 1e-5f)
-        assertEquals(0f, session.betaV3IntroitusRoundness, 0f)
+        assertEquals(0.54f, session.betaV3IntroitusRoundness, 1e-5f)
+        assertEquals(1.0f, session.betaV3PeakWetnessIntensity, 1e-5f)
         assertEquals(0f, session.arousalWetness, 0f)
 
         // Life tab toggles
@@ -6075,24 +6076,27 @@ class BlossomGeometryUnitTest {
         assertTrue(session.betaRealismHipThighSwing)
 
         // Heart Rate HUD strictly remains OFF by default
-        assertFalse("Heart rate overlay must stay OFF by default in v34.0", session.betaLife2ShowHeartRate)
+        assertFalse("Heart rate overlay must stay OFF by default in v35.0", session.betaLife2ShowHeartRate)
 
-        // 2. Modifying standalone v34.0 sliders and calling disableAllBetaToggles() resets them to 0f
+        // 2. Modifying standalone v35.0 sliders and calling disableAllBetaToggles() resets them to 0f
         session.betaV3InnerTissueSheenStrength = 0.65f
         session.betaV3IntroitusRoundness = 0.80f
+        session.betaV3PeakWetnessIntensity = 0.75f
         session.betaLife2ShowHeartRate = true
         session.disableAllBetaToggles()
         assertEquals("Inner tissue sheen slider must reset to 0% on All off", 0f, session.betaV3InnerTissueSheenStrength, 0f)
         assertEquals("Rounder vaginal opening slider must reset to 0% on All off", 0f, session.betaV3IntroitusRoundness, 0f)
+        assertEquals("Peak wetness intensity slider must reset to 0% on All off", 0f, session.betaV3PeakWetnessIntensity, 0f)
         assertFalse(session.betaRealismHipThighSwing)
         assertFalse(session.betaV3HoodMonsBlend)
         assertFalse(session.betaV3HoodMonsUpperBlend)
         assertFalse(session.betaLife2ShowHeartRate)
 
-        // 3. Low-level VulvaDeformationState constructor defaults stay false/0f for unit-test isolation
+        // 3. Low-level VulvaDeformationState constructor defaults stay isolated for baseline tests
         val def = VulvaDeformationState()
         assertEquals(0f, def.betaV3InnerTissueSheenStrength, 0f)
         assertEquals(0f, def.betaV3IntroitusRoundness, 0f)
+        assertEquals(1.0f, def.betaV3PeakWetnessIntensity, 0f)
         assertEquals(0f, def.arousalWetness, 0f)
         assertFalse(def.leftFootPlanted)
         assertFalse(def.rightFootPlanted)
@@ -6310,6 +6314,12 @@ class BlossomGeometryUnitTest {
         // Zero-value identity guard: when uBetaV3SheenWetness.x == 0 and .y == 0, both weights remain strictly 0.0
         assertTrue("Shader must guard arousalWet > 0.001", fs.contains("if (arousalWet > 0.001)"))
         assertTrue("Shader must guard innerSheenStr > 0.001", fs.contains("if (innerSheenStr > 0.001"))
+        // v35.0 Viscous clear-coat lubrication, neutral dielectric Fresnel & subtle slow vestibule trickle invariants
+        assertTrue("Shader must read continuous trickle phase from uBetaV3SheenWetness.z", fs.contains("float arousalTrickleTime = uBetaV3SheenWetness.z;"))
+        assertTrue("Shader must compute dedicated viscous clear-coat specular", fs.contains("viscousClearCoat = rawCoat / (1.0 + rawCoat * 0.24);"))
+        assertTrue("Shader must compute neutral dielectric liquid Fresnel", fs.contains("viscousFresnel = pow(max(NwetRim, 0.0001), 2.35)"))
+        assertTrue("Shader must gate slow vestibule trickle to elevated wetness on vestibule patch only", fs.contains("if (arousalWet > 0.24 && uIsLabiaArchMesh < 0.5 && uIsGlansMesh < 0.5)"))
+        assertTrue("Shader must add neutral fluidCoatColor layer to lit output", fs.contains("fluidCoatColor * (viscousClearCoat + viscousFresnel + trickleBeadGlint)"))
     }
 
     @Test
@@ -6868,6 +6878,207 @@ class BlossomGeometryUnitTest {
                 assertTrue("$name must move cleanly inward on first squeeze (> 26% of knee), got ${(fracSq * 100f)}%", fracSq > 0.26f)
             }
         }
+    }
+
+    @Test
+    fun v35ButtockUndersideOffAxisSilhouetteDiagnosis() {
+        val stride = DynamicGlMesh.FLOATS_PER_VERTEX
+        fun inspectView(
+            label: String,
+            bodyMesh: DynamicGlMesh,
+            yawDeg: Float,
+            pitchDeg: Float,
+            targetY: Float = -1.10f,
+            targetZ: Float = -0.35f,
+            zoom: Float = 0.52f
+        ): Int {
+            val radius = 2.82f / zoom
+            val yawRad = Math.toRadians(yawDeg.toDouble()).toFloat()
+            val pitchRad = Math.toRadians(pitchDeg.toDouble()).toFloat()
+            val eyeX = radius * kotlin.math.cos(pitchRad) * kotlin.math.sin(yawRad)
+            val eyeY = targetY + radius * kotlin.math.sin(pitchRad)
+            val eyeZ = targetZ + radius * kotlin.math.cos(pitchRad) * kotlin.math.cos(yawRad)
+
+            // Build orthonormal lookAt basis (matches GL setLookAtM with up=(0,1,0))
+            var fx = 0f - eyeX
+            var fy = targetY - eyeY
+            var fz = targetZ - eyeZ
+            val fLen = kotlin.math.sqrt(fx * fx + fy * fy + fz * fz)
+            fx /= fLen; fy /= fLen; fz /= fLen
+            // right = normalize(f x up)
+            var rx = -fz
+            var ry = 0f
+            var rz = fx
+            val rLen = kotlin.math.sqrt(rx * rx + ry * ry + rz * rz).coerceAtLeast(1e-5f)
+            rx /= rLen; ry /= rLen; rz /= rLen
+            // camUp = right x f
+            val ux = ry * fz - rz * fy
+            val uy = rz * fx - rx * fz
+            val uz = rx * fy - ry * fx
+
+            // Software Z-buffer rasterizer (160x120) over the buttock/upper-thigh window
+            val w = 160
+            val h = 120
+            val fovY = Math.toRadians(40.0).toFloat()
+            val tanHalf = kotlin.math.tan(fovY * 0.5f)
+            val aspect = w.toFloat() / h.toFloat()
+
+            val depth = FloatArray(w * h) { Float.POSITIVE_INFINITY }
+            val sideBuf = IntArray(w * h) { 0 } // +1 near (+X), -1 far (-X)
+            val wyBuf = FloatArray(w * h)
+            val wzBuf = FloatArray(w * h)
+            val wxBuf = FloatArray(w * h)
+            val nzBuf = FloatArray(w * h)
+            val aoBuf = FloatArray(w * h)
+
+            val data = bodyMesh.vertexData
+            val idxBuf = bodyMesh.indexBuffer
+            idxBuf.position(0)
+            var t = 0
+            while (t + 2 < bodyMesh.indexCount) {
+                val i0 = idxBuf.get(t).toInt() and 0xFFFF
+                val i1 = idxBuf.get(t + 1).toInt() and 0xFFFF
+                val i2 = idxBuf.get(t + 2).toInt() and 0xFFFF
+                t += 3
+
+                val b0 = i0 * stride; val b1 = i1 * stride; val b2 = i2 * stride
+                val yMinT = kotlin.math.min(data[b0 + 1], kotlin.math.min(data[b1 + 1], data[b2 + 1]))
+                val yMaxT = kotlin.math.max(data[b0 + 1], kotlin.math.max(data[b1 + 1], data[b2 + 1]))
+                if (yMaxT < -3.2f || yMinT > 1.2f) continue
+
+                val sx = FloatArray(3); val sy = FloatArray(3); val cz = FloatArray(3)
+                var ok = true
+                for (k in 0..2) {
+                    val bk = if (k == 0) b0 else if (k == 1) b1 else b2
+                    val px = data[bk] - eyeX
+                    val py = data[bk + 1] - eyeY
+                    val pz = data[bk + 2] - eyeZ
+                    val dCam = px * fx + py * fy + pz * fz
+                    if (dCam < 0.25f) { ok = false; break }
+                    val cx = px * rx + py * ry + pz * rz
+                    val cy = px * ux + py * uy + pz * uz
+                    val ndcX = cx / (dCam * tanHalf * aspect)
+                    val ndcY = cy / (dCam * tanHalf)
+                    sx[k] = (ndcX * 0.5f + 0.5f) * (w - 1)
+                    sy[k] = (0.5f - ndcY * 0.5f) * (h - 1)
+                    cz[k] = dCam
+                }
+                if (!ok) continue
+
+                val minX = kotlin.math.max(0, kotlin.math.floor(kotlin.math.min(sx[0], kotlin.math.min(sx[1], sx[2]))).toInt())
+                val maxX = kotlin.math.min(w - 1, kotlin.math.ceil(kotlin.math.max(sx[0], kotlin.math.max(sx[1], sx[2]))).toInt())
+                val minY = kotlin.math.max(0, kotlin.math.floor(kotlin.math.min(sy[0], kotlin.math.min(sy[1], sy[2]))).toInt())
+                val maxY = kotlin.math.min(h - 1, kotlin.math.ceil(kotlin.math.max(sy[0], kotlin.math.max(sy[1], sy[2]))).toInt())
+                if (minX > maxX || minY > maxY) continue
+
+                val area = (sx[1] - sx[0]) * (sy[2] - sy[0]) - (sx[2] - sx[0]) * (sy[1] - sy[0])
+                if (kotlin.math.abs(area) < 1e-4f) continue
+                val invArea = 1f / area
+
+                for (pyI in minY..maxY) {
+                    val pyF = pyI + 0.5f
+                    for (pxI in minX..maxX) {
+                        val pxF = pxI + 0.5f
+                        val w0 = ((sx[1] - pxF) * (sy[2] - pyF) - (sx[2] - pxF) * (sy[1] - pyF)) * invArea
+                        val w1 = ((sx[2] - pxF) * (sy[0] - pyF) - (sx[0] - pxF) * (sy[2] - pyF)) * invArea
+                        val w2 = 1f - w0 - w1
+                        if (w0 >= -1e-4f && w1 >= -1e-4f && w2 >= -1e-4f) {
+                            val d = w0 * cz[0] + w1 * cz[1] + w2 * cz[2]
+                            val pi = pyI * w + pxI
+                            if (d < depth[pi]) {
+                                depth[pi] = d
+                                val wx = w0 * data[b0] + w1 * data[b1] + w2 * data[b2]
+                                val wy = w0 * data[b0 + 1] + w1 * data[b1 + 1] + w2 * data[b2 + 1]
+                                val wz = w0 * data[b0 + 2] + w1 * data[b1 + 2] + w2 * data[b2 + 2]
+                                wxBuf[pi] = wx; wyBuf[pi] = wy; wzBuf[pi] = wz
+                                nzBuf[pi] = w0 * data[b0 + 5] + w1 * data[b1 + 5] + w2 * data[b2 + 5]
+                                aoBuf[pi] = w0 * data[b0 + 8] + w1 * data[b1 + 8] + w2 * data[b2 + 8]
+                                sideBuf[pi] = if (wx >= 0f) 1 else -1
+                            }
+                        }
+                    }
+                }
+            }
+
+            val sb = StringBuilder("V35_SIL[$label yaw=$yawDeg pitch=$pitchDeg eye=(${"%.2f".format(eyeX)},${"%.2f".format(eyeY)},${"%.2f".format(eyeZ)})]:\n")
+            var prevEdgeX = -1
+            var prevDiff = 0
+            var maxCorner = 0
+            var maxCornerRow = -1
+            for (pyI in 10 until h - 10 step 2) {
+                var edgeX = -1
+                if (yawDeg > 0f) {
+                    for (pxI in w - 1 downTo 0) {
+                        if (sideBuf[pyI * w + pxI] != 0) { edgeX = pxI; break }
+                    }
+                } else {
+                    for (pxI in 0 until w) {
+                        if (sideBuf[pyI * w + pxI] != 0) { edgeX = pxI; break }
+                    }
+                }
+                if (edgeX < 0) continue
+                val pi = pyI * w + edgeX
+                val wy = wyBuf[pi]
+                if (wy in -2.30f..0.20f) {
+                    val diff = if (prevEdgeX >= 0) edgeX - prevEdgeX else 0
+                    val corner = if (prevEdgeX >= 0) kotlin.math.abs(diff - prevDiff) else 0
+                    if (corner > maxCorner) { maxCorner = corner; maxCornerRow = pyI }
+                    val sideChar = if (sideBuf[pi] > 0) "R(+X)" else "L(-X)"
+                    sb.append(
+                        "  row=%3d edgeX=%3d dX=%+3d side=%s W=(%+.2f,%+.2f,%+.2f) nz=%+.2f ao=%.2f\n"
+                            .format(pyI, edgeX, diff, sideChar, wxBuf[pi], wyBuf[pi], wzBuf[pi], nzBuf[pi], aoBuf[pi])
+                    )
+                    prevDiff = diff
+                    prevEdgeX = edgeX
+                }
+            }
+            // Also print ASCII mini-map (every 2 rows x 2 cols) of the buttock-to-thigh silhouette!
+            // 'R' = near (+X), 'L' = far (-X), '.' = background/mattress
+            sb.append("  ASCII (rows 20..96, cols 40..130, R=+X near, L=-X far):\n")
+            for (pyI in 20..96 step 3) {
+                sb.append("  ")
+                for (pxI in 40..130 step 2) {
+                    val s = sideBuf[pyI * w + pxI]
+                    sb.append(if (s > 0) 'R' else if (s < 0) 'L' else '.')
+                }
+                sb.append('\n')
+            }
+            sb.append("  SUMMARY maxCorner=$maxCorner at row=$maxCornerRow")
+            println(sb.toString())
+            assertTrue(
+                "$label must have no stepped two-shelf corner beneath buttock (maxCorner=$maxCorner at row=$maxCornerRow, expected <= 2)",
+                maxCorner <= 2
+            )
+            return maxCorner
+        }
+
+        val scene = VulvaAnatomySceneMesh()
+        // 1. Spread-hand pose, betaSoftButtockTable = true (v35 default)
+        val spreadPoseOn = VulvaDeformationState(
+            leftOuter = BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET,
+            rightOuter = BlossomArmIkRig.SELF_SPREAD_OUTER_TARGET,
+            leftInner = BlossomArmIkRig.SELF_SPREAD_INNER_TARGET,
+            rightInner = BlossomArmIkRig.SELF_SPREAD_INNER_TARGET,
+            selfSpreadPose = 1.0f,
+            betaSoftButtockTable = true,
+            betaRealismHipThighSwing = true
+        )
+        scene.update(spreadPoseOn, includeLithotomyBody = true)
+        inspectView("Spread_SoftButtON_Yaw86", scene.blossomBodyMesh, yawDeg = 86f, pitchDeg = -28f)
+        val rightMaxCorner = inspectView("Spread_SoftButtON_Yaw96", scene.blossomBodyMesh, yawDeg = 96f, pitchDeg = -22f)
+        inspectView("Spread_SoftButtON_Yaw104", scene.blossomBodyMesh, yawDeg = 104f, pitchDeg = -22f)
+        val leftMaxCorner = inspectView("Spread_SoftButtON_Mirror", scene.blossomBodyMesh, yawDeg = -96f, pitchDeg = -22f)
+        assertEquals("Left and right buttock underside silhouettes must be mirror-symmetric", rightMaxCorner, leftMaxCorner)
+
+        // 2. Rest pose, betaSoftButtockTable = true
+        val restPoseOn = VulvaDeformationState(betaSoftButtockTable = true, betaRealismHipThighSwing = true)
+        scene.update(restPoseOn, includeLithotomyBody = true)
+        inspectView("Rest_SoftButtON_Yaw96", scene.blossomBodyMesh, yawDeg = 96f, pitchDeg = -22f)
+
+        // 3. Spread-hand pose, betaSoftButtockTable = false
+        val spreadPoseOff = spreadPoseOn.copy(betaSoftButtockTable = false)
+        scene.update(spreadPoseOff, includeLithotomyBody = true)
+        inspectView("Spread_SoftButtOFF_Yaw96", scene.blossomBodyMesh, yawDeg = 96f, pitchDeg = -22f)
     }
 
     /**

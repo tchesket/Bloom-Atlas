@@ -253,10 +253,29 @@ internal object BlossomSdfBodyBuilder {
         val pelvicDepthTaper = 1f - 0.30f * smoothStep(-0.30f, -1.04f, yc)
         val rzTorso = ((0.62f + lowerBellyFull + waistDepthDip + thoraxArchDepth + upperChestTaper) * pelvicDepthTaper).coerceAtLeast(0.32f)
 
-        // Rounded capsule-capped super-elliptic torso column
+        // Rounded capsule-capped super-elliptic torso column.
+        // v35.0 Smooth lower-pelvic basin rounding: keeps the entire anterior vulva/perineum/anus
+        // footprint (z > -0.52 and inner oval) 100% unchanged, while curving the lower-posterior and
+        // lateral underside smoothly upward off matPlane so dTorso's bottom cap never forms a flat
+        // squared horizontal shelf at y = -1.04..-1.20 beneath the buttock cheeks.
         val capR = 0.16f
-        val dRadTorso = sdEllipse2D(ax, z - zSpine, (rxTorso - capR).coerceAtLeast(0.14f), (rzTorso - capR).coerceAtLeast(0.14f))
-        val dyTorso = max(y - 4.98f, -1.04f - y)
+        val patchOvalR = sqrt(
+            (ax / PATCH_RX).let { it * it } +
+                ((y - PATCH_CENTER_Y) / PATCH_RY).let { it * it }
+        )
+        val outsidePatchRim = max(
+            smoothStep(1.04f, 1.24f, patchOvalR),
+            smoothStep(-0.74f, -0.94f, z)
+        )
+        val postBackFactor = smoothStep(-0.52f, -0.98f, z) * outsidePatchRim
+        val postArchGate = smoothStep(-0.46f, -0.82f, z) * outsidePatchRim
+        val postCapLift = smoothStep(-0.38f, -1.00f, y) * postBackFactor
+        val latArchLift = 0.46f * smoothStep(0.30f, 0.88f, ax) * postArchGate
+        val zSpineEff = zSpine + 0.24f * postCapLift
+        val rzTorsoEff = (rzTorso * (1f - 0.52f * postCapLift)).coerceAtLeast(0.16f)
+        val yTorsoMin = -1.04f + latArchLift + 0.30f * postBackFactor * (1f - 0.45f * (1f - smoothStep(0.08f, 0.36f, ax)))
+        val dRadTorso = sdEllipse2D(ax, z - zSpineEff, (rxTorso - capR).coerceAtLeast(0.14f), (rzTorsoEff - capR).coerceAtLeast(0.08f))
+        val dyTorso = max(y - 4.98f, yTorsoMin - y)
         var dTorso = sqrt(max(dRadTorso, 0f).let { it * it } + max(dyTorso, 0f).let { it * it }) +
             min(max(dRadTorso, dyTorso), 0f) - capR
 
@@ -304,28 +323,28 @@ internal object BlossomSdfBodyBuilder {
         // ---------------------------------------------------------------------
         val dGlute = sdEllipsoid(
             px = ax - 0.78f,
-            py = y - (-0.50f),
-            pz = z - (-0.60f),
-            rx = 0.88f,
-            ry = 0.60f,
-            rz = 0.53f
+            py = y - (-0.46f),
+            pz = z - (-0.59f),
+            rx = 0.86f,
+            ry = 0.56f,
+            rz = 0.52f
         )
         // Natural gluteal cleft cradling the lower anus (-0.86 baseline, or -0.782 with betaShortPerineum: ~20% shorter)
         val cleftShiftY = if (betaShortPerineum) 0.078f else 0f
         val cleftMask = smoothStep(-0.42f + cleftShiftY, -0.88f + cleftShiftY, y) *
             (1f - smoothStep(0.16f, 0.42f, z + 0.42f))
         val cleftIndent = 0.095f * exp(-((x / 0.105f).let { it * it })) * cleftMask
-        var dPelvis = smin(dTorso, dGlute, 0.38f) + cleftIndent
+        var dPelvis = smin(dTorso, dGlute, 0.36f) + cleftIndent
 
-        // Beta 2: Subtle anatomical infragluteal fold under each buttock cheek (posterior-inferior only;
-        // v34.0 softened slightly so the lower buttock flows smoothly into the upper hamstring without a shelf)
-        if (betaSoftButtockTable && y in -1.36f..-0.64f && ax in 0.16f..1.38f && z < -0.10f) {
-            val foldY = -1.03f + 0.11f * smoothStep(0.28f, 1.18f, ax)
-            val foldBand = exp(-((y - foldY) / 0.095f).let { it * it })
-            val foldLat = smoothBell(ax, 0.30f, 1.14f, 0.16f)
-            val foldPost = 1f - smoothStep(-0.48f, -0.12f, z)
-            val foldAboveMat = smoothStep(mattressSurfaceZ(y) + 0.03f, mattressSurfaceZ(y) + 0.15f, z)
-            dPelvis += 0.032f * foldBand * foldLat * foldPost * foldAboveMat
+        // Beta 2: Soft natural infragluteal fold under each buttock cheek that fades smoothly toward
+        // the outer thigh (posterior-inferior only; no squared shelf against the mattress)
+        if (betaSoftButtockTable && y in -1.34f..-0.62f && ax in 0.16f..1.38f && z < -0.10f) {
+            val foldY = -0.96f + 0.11f * smoothStep(0.28f, 1.12f, ax)
+            val foldBand = exp(-((y - foldY) / 0.105f).let { it * it })
+            val foldLat = smoothBell(ax, 0.26f, 1.08f, 0.22f)
+            val foldPost = 1f - smoothStep(-0.46f, -0.10f, z)
+            val foldAboveMat = smoothStep(mattressSurfaceZ(y) + 0.04f, mattressSurfaceZ(y) + 0.18f, z)
+            dPelvis += 0.028f * foldBand * foldLat * foldPost * foldAboveMat
         }
 
         // ---------------------------------------------------------------------
@@ -387,13 +406,13 @@ internal object BlossomSdfBodyBuilder {
         }
         val dFemur = fDist - rFem
 
-        // 3B. v34.0 Smooth buttock-to-upper-hamstring saddle eliminating the projecting lower-buttock shelf
-        // while keeping the transition organic into the upper third of the back of the thigh
+        // 3B. v35.0 Smooth buttock-to-upper-hamstring saddle rounding each cheek organically into the
+        // upper posterior thigh without creating a flat horizontal underside shelf
         val dGluteBridge = sdCapsule(
             ax, y, z,
-            0.98f, -0.54f, -0.54f,
-            1.38f, -1.10f, 0.04f,
-            0.53f, 0.42f
+            0.96f, -0.52f, -0.46f,
+            1.40f, -1.14f, 0.04f,
+            0.50f, 0.43f
         )
 
         // 3C. Crisp anatomical knee anchored directly to shared KNEE_BIND_* coordinates
@@ -984,14 +1003,14 @@ internal object BlossomSdfBodyBuilder {
             (1f - smoothStep(0.05f, 0.45f, z + 0.35f))
         val cleftAo = 1f - 0.44f * exp(-((x / 0.11f).let { it * it })) * cleftMask
 
-        // Beta 2: Subtle soft AO along the infragluteal fold under each buttock
-        val infraglutealAo = if (betaSoftButtockTable && y in -1.34f..-0.64f && ax in 0.16f..1.38f && z < -0.10f) {
-            val foldY = -1.03f + 0.11f * smoothStep(0.28f, 1.18f, ax)
-            val foldBand = exp(-((y - foldY) / 0.088f).let { it * it })
-            val foldLat = smoothBell(ax, 0.30f, 1.14f, 0.16f)
-            val foldPost = 1f - smoothStep(-0.48f, -0.12f, z)
-            val foldAboveMat = smoothStep(matZ + 0.03f, matZ + 0.15f, z)
-            1f - 0.17f * foldBand * foldLat * foldPost * foldAboveMat
+        // Beta 2: Subtle soft AO along the infragluteal fold under each buttock (fades smoothly outward)
+        val infraglutealAo = if (betaSoftButtockTable && y in -1.32f..-0.62f && ax in 0.16f..1.38f && z < -0.10f) {
+            val foldY = -0.96f + 0.11f * smoothStep(0.28f, 1.12f, ax)
+            val foldBand = exp(-((y - foldY) / 0.100f).let { it * it })
+            val foldLat = smoothBell(ax, 0.26f, 1.08f, 0.22f)
+            val foldPost = 1f - smoothStep(-0.46f, -0.10f, z)
+            val foldAboveMat = smoothStep(matZ + 0.04f, matZ + 0.18f, z)
+            1f - 0.13f * foldBand * foldLat * foldPost * foldAboveMat
         } else 1f
 
         // Subtle oblique inguinal crease tint & AO

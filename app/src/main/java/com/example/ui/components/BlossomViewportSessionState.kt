@@ -258,14 +258,18 @@ class BlossomViewportSessionState {
     internal val betaV3HoodMonsUpperStrengthState = mutableFloatStateOf(0.75f)
     var betaV3HoodMonsUpperStrength: Float by betaV3HoodMonsUpperStrengthState
 
-    // v33.0–v34.0 Independent Vulva Beta Sliders:
-    // - Inner tissue sheen defaults ON at 90% in v34.0
-    // - Rounder vaginal opening defaults at 0% (exact baseline oval slit; 100% circularizes opening cleanly)
+    // v33.0–v35.0 Independent Vulva Beta Sliders:
+    // - Inner tissue sheen defaults ON at 90%
+    // - Rounder vaginal opening defaults ON at 54% in v35.0
+    // - Peak wetness intensity defaults ON at 100% in v35.0 (scales automatic peak viscous coating & subtle trickle)
     internal val betaV3InnerTissueSheenStrengthState = mutableFloatStateOf(0.90f)
     var betaV3InnerTissueSheenStrength: Float by betaV3InnerTissueSheenStrengthState
 
-    internal val betaV3IntroitusRoundnessState = mutableFloatStateOf(0f)
+    internal val betaV3IntroitusRoundnessState = mutableFloatStateOf(0.54f)
     var betaV3IntroitusRoundness: Float by betaV3IntroitusRoundnessState
+
+    internal val betaV3PeakWetnessIntensityState = mutableFloatStateOf(1.0f)
+    var betaV3PeakWetnessIntensity: Float by betaV3PeakWetnessIntensityState
 
     internal val betaVulvaElasticityEnabledState = mutableStateOf(true)
     var betaVulvaElasticityEnabled: Boolean by betaVulvaElasticityEnabledState
@@ -361,8 +365,8 @@ class BlossomViewportSessionState {
 
     /**
      * Turns OFF every Beta Lab toggle across all 3 tabs and resets standalone 0–100% sliders
-     * (Inner tissue sheen, Rounder vaginal opening) back to 0%, while preserving toggle-gated
-     * strength slider values so re-enabling any toggle restores the user's prior tuning.
+     * (Inner tissue sheen, Rounder vaginal opening, Peak wetness intensity) back to 0%, while
+     * preserving toggle-gated strength slider values so re-enabling any toggle restores the user's prior tuning.
      */
     fun disableAllBetaToggles() {
         betaV3OrganicContinuity = false
@@ -376,6 +380,7 @@ class BlossomViewportSessionState {
         betaV3HoodMonsUpperBlend = false
         betaV3InnerTissueSheenStrength = 0f
         betaV3IntroitusRoundness = 0f
+        betaV3PeakWetnessIntensity = 0f
         betaVulvaElasticityEnabled = false
         betaBreastSizeBoostEnabled = false
         betaLifeEyeMicrosaccades = false
